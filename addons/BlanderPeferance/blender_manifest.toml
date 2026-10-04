@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+id = "blander_peferance"
+version = "1.0.0"
+name = "Blander Peferance"
+tagline = "Keep your own Blender interface when opening blend files"
+maintainer = "Faidlix"
+type = "add-on"
+blender_version_min = "5.1.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[build]
+paths = [
+    "__init__.py",
+    "README.md",
+]
