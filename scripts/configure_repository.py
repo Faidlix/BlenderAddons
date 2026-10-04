@@ -13,6 +13,7 @@ PACKAGE_IDS = (
     "faidlix_paint",
     "faidlix_outliner",
     "faidlix_weight",
+    "faidlix_fbx_zip_exporter",
     "faidlix_manager",
 )
 
