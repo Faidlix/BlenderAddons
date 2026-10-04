@@ -2,7 +2,7 @@
 
 Blender 5.2 Extension for selecting complete object or Collection hierarchies.
 
-## Version 0.2.14 preview
+## Version 0.2.15 preview
 
 - Object checkbox: affects the object and every descendant.
 - Collection checkbox: affects every object in the Collection and nested Collections.
@@ -33,11 +33,11 @@ The first preview draws a narrow checkbox gutter at the left edge of every Outli
 
 Blender cannot retain native selection on eye-hidden, viewport-disabled, or selection-locked objects. Faidlix_Outliner keeps those objects in its own logical selection set while preserving their visibility and lock states; when they become selectable again, the add-on promotes them to Blender's native selection automatically.
 
-Blender's public Python API does not expose the Outliner's internal visible-row tree or row coordinates. For that reason, 0.2.14 uses fixed custom toggle columns and refreshes its visible-row cache after Outliner clicks. The View Layer root is explicitly mapped to Scene Collection because Blender does not consistently expose an ID for that row. The context-menu commands remain a direct-ID fallback.
+Blender's public Python API does not expose the Outliner's internal visible-row tree or row coordinates. For that reason, 0.2.15 uses fixed custom toggle columns and refreshes its visible-row cache after Outliner clicks. The View Layer root is explicitly mapped to Scene Collection because Blender does not consistently expose an ID for that row. The context-menu commands remain a direct-ID fallback. The legacy distributed update-all panel was removed; only the optional Faidlix Manager owns that UI.
 
 ## Install
 
-Download `faidlix_outliner-0.2.14.zip` from the shared repository, or configure this Blender Repository URL:
+Download `faidlix_outliner-0.2.15.zip` from the shared repository, or configure this Blender Repository URL:
 
 `https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json`
 

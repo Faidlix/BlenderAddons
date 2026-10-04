@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "faidlix_outliner"
-version = "0.2.14"
+version = "0.2.15"
 name = "Faidlix_Outliner"
 tagline = "Select object and collection hierarchies from the Outliner"
 maintainer = "Faidlix"
@@ -11,7 +11,6 @@ license = ["SPDX:GPL-3.0-or-later"]
 [build]
 paths = [
     "__init__.py",
-    "_faidlix_update_all.py",
     "core.py",
     "README.md",
 ]

@@ -4,7 +4,7 @@ from __future__ import annotations
 bl_info = {
     "name": "Faidlix_Outliner",
     "author": "Faidlix",
-    "version": (0, 2, 14),
+    "version": (0, 2, 15),
     "blender": (5, 2, 0),
     "location": "Outliner > left overlay gutter and context menu",
     "description": "Three-state hierarchy selection for objects and collections",
@@ -23,15 +23,11 @@ from bpy.types import AddonPreferences, Operator
 from gpu_extras.batch import batch_for_shader
 
 # Blender reloads the package module after an in-process extension update, but
-# keeps already imported sibling modules in sys.modules. Reload them explicitly
+# keeps already imported sibling modules in sys.modules. Reload core explicitly
 # so __init__.py and core.py can never run with mismatched function signatures.
-from . import _faidlix_update_all as _update_all_module
 from . import core as _core_module
 
-importlib.reload(_update_all_module)
 importlib.reload(_core_module)
-
-make_classes = _update_all_module.make_classes
 
 from .core import (
     STATE_ALL,
@@ -46,8 +42,7 @@ from .core import (
 
 
 ADDON_ID = __package__
-UPDATE_ALL_CLASSES = make_classes("outliner", "Outliner")
-ADDON_VERSION = (0, 2, 14)
+ADDON_VERSION = (0, 2, 15)
 PACKAGE_ID = "faidlix_outliner"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -1284,7 +1279,7 @@ CLASSES = (
     FAIDLIXOUTLINER_OT_row_toggle,
     FAIDLIXOUTLINER_OT_toggle_target,
     FAIDLIXOUTLINER_OT_toggle_restriction,
-) + UPDATE_ALL_CLASSES
+)
 
 
 def register():

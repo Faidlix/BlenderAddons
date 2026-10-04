@@ -43,16 +43,16 @@
       "id": "faidlix_outliner",
       "name": "Faidlix_Outliner",
       "tagline": "Select object and collection hierarchies from the Outliner",
-      "version": "0.2.14",
+      "version": "0.2.15",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:GPL-3.0-or-later"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_outliner-0.2.14.zip",
-      "archive_size": 17826,
-      "archive_hash": "sha256:ed7234fe745189c4859e1dd1448dbbebbe2c5bbc8525987f4338a68a71cb3e26"
+      "archive_url": "./faidlix_outliner-0.2.15.zip",
+      "archive_size": 15790,
+      "archive_hash": "sha256:4d2383582ebf3573ee17f6b161de328f02334d547c1e2363e0c08dda3e029755"
     },
     {
       "schema_version": "1.0.0",

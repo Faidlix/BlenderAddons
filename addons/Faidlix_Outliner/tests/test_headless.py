@@ -80,16 +80,16 @@ assert all(obj.hide_render for obj in collection_result)
 
 import Faidlix_Outliner  # noqa: E402
 
-assert Faidlix_Outliner.ADDON_VERSION == (0, 2, 14)
+assert Faidlix_Outliner.ADDON_VERSION == (0, 2, 15)
 assert Faidlix_Outliner._latest_version_from_index(
     {
         "data": [
             {"id": "unrelated", "version": "9.0.0"},
             {"id": "faidlix_outliner", "version": "0.1.0"},
-            {"id": "faidlix_outliner", "version": "0.2.14"},
+            {"id": "faidlix_outliner", "version": "0.2.15"},
         ]
     }
-) == (0, 2, 14)
+) == (0, 2, 15)
 
 original_header_draw = bpy.types.OUTLINER_HT_header.draw
 Faidlix_Outliner.register()
