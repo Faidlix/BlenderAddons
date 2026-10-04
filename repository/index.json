@@ -40,6 +40,27 @@
     },
     {
       "schema_version": "1.0.0",
+      "id": "faidlix_bone_remap",
+      "name": "Faidlix Bone Remap",
+      "tagline": "Batch import and retarget armature actions",
+      "version": "0.6.0",
+      "type": "add-on",
+      "maintainer": "Faidlix",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "blender_version_min": "4.5.0",
+      "website": "https://github.com/Faidlix/BlenderAddons",
+      "permissions": {
+        "files": "Import FBX, GLB, GLTF and BLEND animation files",
+        "network": "Check and install updates from the GitHub extension repository"
+      },
+      "archive_url": "./faidlix_bone_remap-0.6.0.zip",
+      "archive_size": 33942,
+      "archive_hash": "sha256:381a837c34b6b19aca3e7877081c67b10c10f457836994f5f84c826236672b1b"
+    },
+    {
+      "schema_version": "1.0.0",
       "id": "faidlix_fbx_zip_exporter",
       "name": "Faidlix_Fbx ZipExporter",
       "tagline": "Export FBX and package only connected material textures",

@@ -1,0 +1,24 @@
+schema_version = "1.0.0"
+id = "faidlix_bone_remap"
+version = "0.6.0"
+name = "Faidlix Bone Remap"
+tagline = "Batch import and retarget armature actions"
+maintainer = "Faidlix"
+type = "add-on"
+blender_version_min = "4.5.0"
+license = ["SPDX:GPL-3.0-or-later"]
+website = "https://github.com/Faidlix/BlenderAddons"
+
+[build]
+paths = [
+    "__init__.py",
+    "model.py",
+    "operators.py",
+    "retarget.py",
+    "ui.py",
+    "updater.py",
+]
+
+[permissions]
+files = "Import FBX, GLB, GLTF and BLEND animation files"
+network = "Check and install updates from the GitHub extension repository"

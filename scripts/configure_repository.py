@@ -11,6 +11,7 @@ REPOSITORY_URL = (
 )
 PACKAGE_IDS = (
     "faidlix_paint",
+    "faidlix_bone_remap",
     "faidlix_outliner",
     "faidlix_weight",
     "faidlix_fbx_zip_exporter",

@@ -9,6 +9,7 @@ Blender Repository URL：
 ## 套件
 
 - `faidlix_paint`：Faidlix Paint。
+- `faidlix_bone_remap`：Faidlix Bone Remap 批次骨架動畫重定向。
 - `faidlix_outliner`：Faidlix Outliner 階層選取與批次顯示控制。
 - `faidlix_weight`：Faidlix Weight 選取點權重鏡射與左右名稱對應。
 - `faidlix_fbx_zip_exporter`：Faidlix_Fbx ZipExporter，輸出 FBX 並封裝模型實際使用的貼圖。
