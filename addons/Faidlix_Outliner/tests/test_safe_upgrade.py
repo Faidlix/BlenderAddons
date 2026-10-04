@@ -40,7 +40,7 @@ module._PENDING_UPDATE = {
         "checkbox_x": preferences.checkbox_x,
     },
     "target_module_name": f"bl_ext.{bpy.context.preferences.extensions.repos[repo_index].module}.faidlix_outliner",
-    "version": "0.2.15",
+    "version": "0.2.16",
 }
 module._apply_pending_update()
 
@@ -50,7 +50,7 @@ updated = next(
     for module in addon_utils.modules(refresh=True)
     if getattr(module, "bl_info", {}).get("name") == "Faidlix_Outliner"
 )
-assert tuple(updated.bl_info["version"]) == (0, 2, 15), updated.bl_info["version"]
+assert tuple(updated.bl_info["version"]) == (0, 2, 16), updated.bl_info["version"]
 _default, enabled = addon_utils.check(updated.__name__)
 assert enabled
 updated_preferences = bpy.context.preferences.addons[updated.__name__].preferences

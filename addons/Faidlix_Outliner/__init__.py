@@ -4,7 +4,7 @@ from __future__ import annotations
 bl_info = {
     "name": "Faidlix_Outliner",
     "author": "Faidlix",
-    "version": (0, 2, 15),
+    "version": (0, 2, 16),
     "blender": (5, 2, 0),
     "location": "Outliner > left overlay gutter and context menu",
     "description": "Three-state hierarchy selection for objects and collections",
@@ -42,7 +42,7 @@ from .core import (
 
 
 ADDON_ID = __package__
-ADDON_VERSION = (0, 2, 15)
+ADDON_VERSION = (0, 2, 16)
 PACKAGE_ID = "faidlix_outliner"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -54,6 +54,7 @@ _SKIPPED_REGISTRATION = False
 _KEYMAPS = []
 _ROW_CACHE = {}
 _UNSUPPORTED_ROWS = set()
+_ROW_VIEW_SIGNATURES = {}
 _PENDING_UPDATE = None
 _SHIFTED_AREAS = set()
 _ROW_SCAN_PENDING = False
@@ -573,19 +574,27 @@ def _restore_selection(context, snapshot):
         context.view_layer.objects.active = active
 
 
-def _probe_row(context, y):
-    """Ask Blender's Outliner to identify a row, then restore object selection."""
-    snapshot = _snapshot_selection(context)
-    result = bpy.ops.outliner.select_box(
-        xmin=0,
-        xmax=max(1, context.region.width - 1),
-        ymin=max(0, y - 2),
-        ymax=min(context.region.height - 1, y + 2),
-        wait_for_input=False,
-        mode="SET",
-    )
-    selected_ids = list(getattr(context, "selected_ids", ()))
-    _restore_selection(context, snapshot)
+def _probe_row(context, y, restore_selection=True):
+    """Ask Blender's Outliner to identify a row.
+
+    Interactive probes restore selection immediately. A full visible-row scan
+    snapshots once outside the loop and restores once after every row, avoiding
+    an O(rows * objects) selection pass on large scenes.
+    """
+    snapshot = _snapshot_selection(context) if restore_selection else None
+    try:
+        result = bpy.ops.outliner.select_box(
+            xmin=0,
+            xmax=max(1, context.region.width - 1),
+            ymin=max(0, y - 2),
+            ymax=min(context.region.height - 1, y + 2),
+            wait_for_input=False,
+            mode="SET",
+        )
+        selected_ids = list(getattr(context, "selected_ids", ()))
+    finally:
+        if snapshot is not None:
+            _restore_selection(context, snapshot)
     if result != {"FINISHED"}:
         return None
     for item in selected_ids:
@@ -594,6 +603,25 @@ def _probe_row(context, y):
         if isinstance(item, bpy.types.ViewLayer):
             return context.scene
     return None
+
+
+def _row_view_signature(context):
+    """Values that change when scrolling, resizing, or toggling columns."""
+    view = context.region.view2d.cur
+    columns = tuple(
+        prop
+        for prop, _restriction in _restriction_columns(context)
+        if getattr(context.space_data, prop, False)
+    )
+    return (
+        context.region.width,
+        context.region.height,
+        round(view.ymin, 3),
+        round(view.ymax, 3),
+        context.space_data.display_mode,
+        round(context.preferences.system.ui_scale, 3),
+        columns,
+    )
 
 
 def _scan_visible_rows():
@@ -611,41 +639,51 @@ def _scan_visible_rows():
             if region is None:
                 continue
             area_pointer = area.as_pointer()
-            for key in [key for key in _ROW_CACHE if key[0] == area_pointer]:
-                _ROW_CACHE.pop(key, None)
-            _UNSUPPORTED_ROWS.difference_update(
-                key for key in tuple(_UNSUPPORTED_ROWS) if key[0] == area_pointer
-            )
             with bpy.context.temp_override(window=window, area=area, region=region):
                 context = bpy.context
                 row_height = max(16, int(20 * context.preferences.system.ui_scale))
                 slot = 0
                 unresolved_run = 0
                 center_y = region.height - row_height * 0.5
-                while center_y > -row_height:
-                    key = (area_pointer, slot)
-                    target = _probe_row(context, int(center_y))
-                    identity = _target_identity(target)
-                    if identity and (target_objects(target) or _target_bones(target)):
-                        _ROW_CACHE[key] = identity
-                        unresolved_run = 0
-                    else:
-                        _UNSUPPORTED_ROWS.add(key)
-                        unresolved_run += 1
-                    slot += 1
-                    center_y -= row_height
-                    # Empty space below a collapsed tree otherwise causes many
-                    # expensive Outliner selection probes. Eight unresolved
-                    # rows still leaves room for common data-detail sections.
-                    if slot > 2 and unresolved_run >= 8:
-                        break
+                area_cache = {}
+                area_unsupported = set()
+                snapshot = _snapshot_selection(context)
+                try:
+                    while center_y > -row_height:
+                        key = (area_pointer, slot)
+                        target = _probe_row(context, int(center_y), restore_selection=False)
+                        identity = _target_identity(target)
+                        if identity and (target_objects(target) or _target_bones(target)):
+                            area_cache[key] = identity
+                            unresolved_run = 0
+                        else:
+                            area_unsupported.add(key)
+                            unresolved_run += 1
+                        slot += 1
+                        center_y -= row_height
+                        # Empty space below a collapsed tree otherwise causes
+                        # unnecessary Outliner selection probes.
+                        if slot > 2 and unresolved_run >= 8:
+                            break
+                finally:
+                    _restore_selection(context, snapshot)
                 # Blender's row selection operator does not consistently
                 # return an ID for the View Layer root. It is nevertheless a
                 # stable first row and semantically represents the Scene.
                 if context.space_data.display_mode == "VIEW_LAYER":
                     root_key = (area_pointer, 0)
-                    _ROW_CACHE[root_key] = ("SCENE", context.scene.name)
-                    _UNSUPPORTED_ROWS.discard(root_key)
+                    area_cache[root_key] = ("SCENE", context.scene.name)
+                    area_unsupported.discard(root_key)
+                # Keep the previous overlay visible until the complete scan is
+                # ready, then replace this area's rows in one operation.
+                for key in [key for key in _ROW_CACHE if key[0] == area_pointer]:
+                    _ROW_CACHE.pop(key, None)
+                _UNSUPPORTED_ROWS.difference_update(
+                    key for key in tuple(_UNSUPPORTED_ROWS) if key[0] == area_pointer
+                )
+                _ROW_CACHE.update(area_cache)
+                _UNSUPPORTED_ROWS.update(area_unsupported)
+                _ROW_VIEW_SIGNATURES[area_pointer] = _row_view_signature(context)
             area.tag_redraw()
     return None
 
@@ -656,21 +694,6 @@ def _schedule_row_scan(delay=0.01):
         return
     _ROW_SCAN_PENDING = True
     bpy.app.timers.register(_scan_visible_rows, first_interval=delay)
-
-
-def _invalidate_area_rows(context):
-    """Hide stale boxes immediately while a new visible-row scan is pending."""
-    area_pointer = context.area.as_pointer()
-    for key in [key for key in _ROW_CACHE if key[0] == area_pointer]:
-        _ROW_CACHE.pop(key, None)
-    row_height = max(16, int(20 * context.preferences.system.ui_scale))
-    row_count = max(1, context.region.height // row_height + 2)
-    _UNSUPPORTED_ROWS.update((area_pointer, slot) for slot in range(row_count))
-    if context.space_data.display_mode == "VIEW_LAYER":
-        root_key = (area_pointer, 0)
-        _ROW_CACHE[root_key] = ("SCENE", context.scene.name)
-        _UNSUPPORTED_ROWS.discard(root_key)
-    context.area.tag_redraw()
 
 
 def _cache_key(context, event):
@@ -815,6 +838,10 @@ def _draw_overlay():
     if not preferences or not (preferences.show_overlay or preferences.show_batch_eye):
         return
 
+    area_pointer = context.area.as_pointer()
+    if _ROW_VIEW_SIGNATURES.get(area_pointer) != _row_view_signature(context):
+        _schedule_row_scan(0.01)
+
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
     scale = context.preferences.system.ui_scale
     row_height = max(16, int(20 * scale))
@@ -822,7 +849,6 @@ def _draw_overlay():
     if not geometries:
         return
     size = next(iter(geometries.values()))[2]
-    area_pointer = context.area.as_pointer()
     color = (0.82, 0.84, 0.88, 0.92)
     unknown = (0.45, 0.48, 0.52, 0.45)
 
@@ -988,8 +1014,6 @@ class FAIDLIXOUTLINER_OT_row_toggle(Operator):
         geometries = _custom_column_geometries(context)
         if not geometries:
             return {"PASS_THROUGH"}
-        _invalidate_area_rows(context)
-        _schedule_row_scan()
         checkbox_geometry = geometries.get("CHECKBOX")
         eye_geometry = geometries.get("EYE")
         checkbox_click = bool(
@@ -1000,6 +1024,10 @@ class FAIDLIXOUTLINER_OT_row_toggle(Operator):
             eye_geometry and eye_geometry[0] <= event.mouse_region_x <= eye_geometry[1]
         )
         if not checkbox_click and not eye_click:
+            # Let Blender handle names/disclosure arrows first, then refresh
+            # without blanking the currently drawn toggle columns.
+            _ROW_VIEW_SIGNATURES.pop(context.area.as_pointer(), None)
+            _schedule_row_scan(0.06)
             return {"PASS_THROUGH"}
 
         target, key = self._target_at_event(context, event)
@@ -1303,7 +1331,7 @@ def register():
         _KEYMAPS.append((keymap, item))
     if not bpy.app.timers.is_registered(_ensure_tree_content_offset):
         bpy.app.timers.register(_ensure_tree_content_offset, first_interval=0.2)
-    _schedule_row_scan(0.35)
+    _schedule_row_scan(0.1)
     _tag_outliners()
 
 
@@ -1331,6 +1359,7 @@ def unregister():
         bpy.utils.unregister_class(cls)
     _ROW_CACHE.clear()
     _UNSUPPORTED_ROWS.clear()
+    _ROW_VIEW_SIGNATURES.clear()
 
 
 if __name__ == "__main__":

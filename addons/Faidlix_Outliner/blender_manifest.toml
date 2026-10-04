@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "faidlix_outliner"
-version = "0.2.15"
+version = "0.2.16"
 name = "Faidlix_Outliner"
 tagline = "Select object and collection hierarchies from the Outliner"
 maintainer = "Faidlix"
