@@ -15,3 +15,5 @@
 13. 共通功能的程式、Panel、Operator、狀態與流程只實作在 `addons/Faidlix_Manager/`；其他外掛只保留自己的功能。
 14. 其他外掛新增、改名或變更共通能力時，必須同步 `addons/Faidlix_Manager/addon_registry.json` 的套件 ID、顯示名稱、能力與排序；未登錄套件不得由 Manager 執行共通功能。
 15. `addon_registry.json` 只存宣告式資訊，不可放 Python callback、類別或對其他外掛的 import；個別外掛仍不得依賴 Manager。
+16. 每次新增或更新外掛 ZIP，根目錄 `README.md` 必須同步更新該外掛名稱、版本與直接 ZIP 連結；連結文字固定為「外掛名稱 版本」，點擊後直接下載 `repository/<套件 ID>-<版本>.zip`。
+17. 發布前必須執行 `tests/test_readme_download_links.py`，確認 README 的每個下載連結與 `repository/index.json` 完全一致且檔案存在。
