@@ -2,6 +2,12 @@
   "schema_version": 1,
   "addons": [
     {
+      "package_id": "blander_peferance",
+      "display_name": "Blander Peferance",
+      "common_features": ["update_all"],
+      "update_order": 5
+    },
+    {
       "package_id": "blander_texture_marge",
       "display_name": "Faidlix Texture Marge",
       "common_features": ["update_all"],

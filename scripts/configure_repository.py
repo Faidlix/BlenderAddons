@@ -10,13 +10,13 @@ REPOSITORY_URL = (
     "Faidlix/BlenderAddons/main/repository/index.json"
 )
 PACKAGE_IDS = (
+    "blander_peferance",
     "faidlix_paint",
     "faidlix_bone_remap",
     "faidlix_outliner",
     "faidlix_weight",
     "faidlix_fbx_zip_exporter",
     "blander_texture_marge",
-    "faidlix_weight",
     "faidlix_manager",
 )
 

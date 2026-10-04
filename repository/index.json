@@ -4,6 +4,22 @@
   "data": [
     {
       "schema_version": "1.0.0",
+      "id": "blander_peferance",
+      "name": "Blander Peferance",
+      "tagline": "Keep UI defaults and toggle Traditional Chinese",
+      "version": "1.1.0",
+      "type": "add-on",
+      "maintainer": "Faidlix",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "blender_version_min": "5.1.0",
+      "archive_url": "./blander_peferance-1.1.0.zip",
+      "archive_size": 5099,
+      "archive_hash": "sha256:a729a0f2c00369e408907bf19a4e6bda6e328227c07c2d63b2ecbb583ff25dfc"
+    },
+    {
+      "schema_version": "1.0.0",
       "id": "blander_texture_marge",
       "name": "Faidlix Texture Marge",
       "tagline": "Merge image channels and build a copied material",
@@ -80,16 +96,16 @@
       "id": "faidlix_manager",
       "name": "Faidlix Manager",
       "tagline": "Update installed Faidlix Blender extensions together",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:GPL-3.0-or-later"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_manager-1.1.0.zip",
-      "archive_size": 4365,
-      "archive_hash": "sha256:dd4df2eddd307f9fe07f338d541bab03cca44878fdd4f5885bc9d5436d25004b"
+      "archive_url": "./faidlix_manager-1.1.1.zip",
+      "archive_size": 4386,
+      "archive_hash": "sha256:ac6644808b63284089fdedb9c1743f74402aabfa694297cbef87dae0a0ffd7de"
     },
     {
       "schema_version": "1.0.0",
