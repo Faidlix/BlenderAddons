@@ -5,7 +5,7 @@ from .model import flip_bone_name, reuse_mapping_items
 from .operators import _mapping_axes_match
 
 
-ADDON_VERSION = (0, 6, 2)
+ADDON_VERSION = (0, 6, 3)
 
 
 def _source_file_index(settings, source_file):
@@ -392,7 +392,7 @@ class FBR_PT_main(Panel):
     bl_region_type = "UI"
     bl_category = "Faidlix"
 
-    def draw_header(self, _context):
+    def draw_header_preset(self, _context):
         row = self.layout.row(align=True)
         row.alignment = "RIGHT"
         row.label(text=f"v{'.'.join(map(str, ADDON_VERSION))}")

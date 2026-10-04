@@ -122,7 +122,7 @@ def main():
     addon.register()
     version_text = ".".join(str(part) for part in addon.bl_info["version"])
     assert bpy.types.FBR_PT_main.bl_label == "Faidlix_Retarget Motion"
-    assert hasattr(bpy.types.FBR_PT_main, "draw_header")
+    assert hasattr(bpy.types.FBR_PT_main, "draw_header_preset")
     timing_scene = SimpleNamespace(render=SimpleNamespace(fps=30, fps_base=1.0))
     assert _clip_timing_labels(
         timing_scene,

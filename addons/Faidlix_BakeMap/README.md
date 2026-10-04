@@ -1,4 +1,4 @@
-# Faidlix_BakeMap 2.3.10
+# Faidlix_BakeMap 2.3.11
 
 Canonical source and updates: https://github.com/Faidlix/BlenderAddons
 

@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix Manager",
     "author": "Faidlix",
-    "version": (1, 1, 1),
+    "version": (1, 1, 2),
     "blender": (5, 2, 0),
     "location": "3D View > Sidebar > Faidlix",
     "description": "Update installed Faidlix extensions together",
@@ -17,7 +17,7 @@ import bpy
 from bpy.types import Operator, Panel
 
 
-ADDON_VERSION = (1, 1, 1)
+ADDON_VERSION = (1, 1, 2)
 PACKAGE_ID = "faidlix_manager"
 REGISTRY_FILENAME = "addon_registry.json"
 REPOSITORY_URL = (
@@ -250,13 +250,17 @@ class FAIDLIXMANAGER_OT_update_all(Operator):
 
 
 class FAIDLIXMANAGER_PT_update_all(Panel):
-    bl_label = "Faidlix 全部更新"
+    bl_label = "Faidlix Manager"
     bl_idname = "FAIDLIXMANAGER_PT_update_all"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "Faidlix"
     bl_order = -100
-    bl_options = {'HIDE_HEADER'}
+
+    def draw_header_preset(self, _context):
+        row = self.layout.row(align=True)
+        row.alignment = 'RIGHT'
+        row.label(text=f"v{'.'.join(map(str, ADDON_VERSION))}")
 
     @classmethod
     def poll(cls, context):

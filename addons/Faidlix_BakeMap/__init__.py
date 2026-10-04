@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 10),
+    "version": (2, 3, 11),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -39,7 +39,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 10)
+ADDON_VERSION = (2, 3, 11)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -2749,7 +2749,7 @@ class FAIDLIX_PT_bakemap(Panel):
     bl_category = "Faidlix"
     bl_options = {'DEFAULT_CLOSED'}
 
-    def draw_header(self, _context):
+    def draw_header_preset(self, _context):
         row = self.layout.row(align=True)
         row.alignment = 'RIGHT'
         row.label(text=f"v{'.'.join(map(str, ADDON_VERSION))}")

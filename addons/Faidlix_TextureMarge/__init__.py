@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix Texture Marge",
     "author": "Faidlix",
-    "version": (1, 5, 7),
+    "version": (1, 5, 8),
     "blender": (5, 2, 0),
     "location": "3D Viewport > N-panel > Faidlix",
     "description": "Merge image channels and build a copied material without changing source data",
@@ -29,7 +29,7 @@ from bpy.props import (
 from bpy.types import Operator, Panel, PropertyGroup
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
-ADDON_VERSION = (1, 5, 7)
+ADDON_VERSION = (1, 5, 8)
 PACKAGE_ID = "blander_texture_marge"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -1225,7 +1225,7 @@ class FTM_PT_panel(Panel):
     bl_category = 'Faidlix'
     bl_options = {'DEFAULT_CLOSED'}
 
-    def draw_header(self, _context):
+    def draw_header_preset(self, _context):
         row = self.layout.row(align=True)
         row.alignment = 'RIGHT'
         row.label(text=f"v{'.'.join(map(str, ADDON_VERSION))}")

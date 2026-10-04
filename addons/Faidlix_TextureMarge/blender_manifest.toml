@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "blander_texture_marge"
-version = "1.5.7"
+version = "1.5.8"
 name = "Faidlix Texture Marge"
 tagline = "Merge image channels and build a copied material"
 maintainer = "Faidlix"

@@ -34,18 +34,18 @@ texture_marge = __import__(texture_marge_name, fromlist=['*'])
 assert paint.ADDON_VERSION == (0, 4, 8)
 assert preference.ADDON_VERSION == (1, 1, 0)
 assert paint.GITHUB_REPOSITORY_URL == URL
-assert bone_remap.bl_info["version"] == (0, 6, 2)
+assert bone_remap.bl_info["version"] == (0, 6, 3)
 assert bone_remap.updater.GITHUB_REPOSITORY_URL == URL
 assert outliner.ADDON_VERSION == (0, 2, 15)
 assert outliner.GITHUB_REPOSITORY_URL == URL
 assert weight.ADDON_VERSION == (1, 3, 0)
 assert weight.GITHUB_REPOSITORY_URL == URL
-assert manager.ADDON_VERSION == (1, 1, 1)
+assert manager.ADDON_VERSION == (1, 1, 2)
 assert manager.REPOSITORY_URL == URL
-assert fbx_zip.ADDON_VERSION == (1, 7, 1)
+assert fbx_zip.ADDON_VERSION == (1, 7, 2)
 assert fbx_zip.PACKAGE_ID == "faidlix_fbx_zip_exporter"
 assert fbx_zip.REPOSITORY_URL == URL
-assert texture_marge.ADDON_VERSION == (1, 5, 7)
+assert texture_marge.ADDON_VERSION == (1, 5, 8)
 assert texture_marge.GITHUB_REPOSITORY_URL == URL
 assert hasattr(bpy.ops.faidlix_paint, "online_update")
 assert hasattr(bpy.ops.fbr, "online_update")

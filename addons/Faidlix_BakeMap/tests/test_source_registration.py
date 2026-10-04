@@ -9,8 +9,8 @@ spec = importlib.util.spec_from_file_location("faidlix_bakemap_source_test", sou
 addon = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(addon)
 
-assert addon.ADDON_VERSION == (2, 3, 10)
-assert hasattr(addon.FAIDLIX_PT_bakemap, "draw_header")
+assert addon.ADDON_VERSION == (2, 3, 11)
+assert hasattr(addon.FAIDLIX_PT_bakemap, "draw_header_preset")
 assert addon._version_tuple("2.3") == (2, 3, 0)
 assert addon._version_tuple("bad") == ()
 assert [label for _value, label, _description in addon.SIZE_ITEMS] == [

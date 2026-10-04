@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {
+      "date": "2026-10-05",
+      "versions": {
+        "blander_texture_marge": "1.5.8",
+        "faidlix_bakemap": "2.3.11",
+        "faidlix_bone_remap": "0.6.3",
+        "faidlix_fbx_zip_exporter": "1.7.2",
+        "faidlix_manager": "1.1.2"
+      },
+      "ui_impact": true,
+      "problem": "側邊欄外掛的名稱與版本位置不一致，部分版本緊接名稱，部分只在展開內容顯示。",
+      "decision": "所有頂層側邊欄面板都以 bl_label 在左側顯示外掛名稱，並以 draw_header_preset 在右側固定顯示目前版本。",
+      "before": "各外掛自行使用 draw_header 或內容標籤顯示版本，無法在標題列右側整齊對齊。",
+      "after": "Texture Marge、BakeMap、Retarget Motion、FBX ZipExporter 與 Manager 統一為左側名稱、右側版本。",
+      "summary": "統一 Faidlix 側邊欄外掛標題列的名稱與版本配置。"
+    }
+  ]
+}

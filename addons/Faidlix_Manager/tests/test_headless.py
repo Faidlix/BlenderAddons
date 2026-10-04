@@ -11,7 +11,7 @@ addon = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = addon
 spec.loader.exec_module(addon)
 
-assert addon.ADDON_VERSION == (1, 1, 1)
+assert addon.ADDON_VERSION == (1, 1, 2)
 assert addon.PACKAGE_ID == "faidlix_manager"
 assert addon.REPOSITORY_URL.endswith("Faidlix/BlenderAddons/main/repository/index.json")
 registry = addon._addon_registry()

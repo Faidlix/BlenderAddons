@@ -10,7 +10,7 @@ repo = next(
 module_name = f"bl_ext.{repo.module}.blander_texture_marge"
 assert addon_utils.check(module_name)[1]
 addon = __import__(module_name, fromlist=['*'])
-assert addon.ADDON_VERSION == (1, 5, 7)
+assert addon.ADDON_VERSION == (1, 5, 8)
 assert addon.PACKAGE_ID == "blander_texture_marge"
 assert addon.GITHUB_REPOSITORY_URL == URL
 assert hasattr(bpy.ops.ftm, "online_update")
