@@ -51,3 +51,17 @@ def test_sidebar_panel_names_do_not_embed_versions():
         text = ast.literal_eval(label.value)
         assert " v" not in text.lower(), relative_path
         assert "·" not in text, relative_path
+
+
+def test_manager_panel_keeps_its_header_visible():
+    panel = _class_node(
+        "addons/Faidlix_Manager/__init__.py",
+        "FAIDLIXMANAGER_PT_update_all",
+    )
+    options = next(
+        node
+        for node in panel.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "bl_options" for target in node.targets)
+    )
+    assert ast.literal_eval(options.value) == {"DEFAULT_CLOSED"}

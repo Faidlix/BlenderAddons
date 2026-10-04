@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix Manager",
     "author": "Faidlix",
-    "version": (1, 1, 2),
+    "version": (1, 1, 3),
     "blender": (5, 2, 0),
     "location": "3D View > Sidebar > Faidlix",
     "description": "Update installed Faidlix extensions together",
@@ -17,7 +17,7 @@ import bpy
 from bpy.types import Operator, Panel
 
 
-ADDON_VERSION = (1, 1, 2)
+ADDON_VERSION = (1, 1, 3)
 PACKAGE_ID = "faidlix_manager"
 REGISTRY_FILENAME = "addon_registry.json"
 REPOSITORY_URL = (
@@ -256,6 +256,7 @@ class FAIDLIXMANAGER_PT_update_all(Panel):
     bl_region_type = 'UI'
     bl_category = "Faidlix"
     bl_order = -100
+    bl_options = {'DEFAULT_CLOSED'}
 
     def draw_header_preset(self, _context):
         row = self.layout.row(align=True)

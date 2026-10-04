@@ -40,7 +40,7 @@ assert outliner.ADDON_VERSION == (0, 2, 15)
 assert outliner.GITHUB_REPOSITORY_URL == URL
 assert weight.ADDON_VERSION == (1, 3, 0)
 assert weight.GITHUB_REPOSITORY_URL == URL
-assert manager.ADDON_VERSION == (1, 1, 2)
+assert manager.ADDON_VERSION == (1, 1, 3)
 assert manager.REPOSITORY_URL == URL
 assert fbx_zip.ADDON_VERSION == (1, 7, 2)
 assert fbx_zip.PACKAGE_ID == "faidlix_fbx_zip_exporter"

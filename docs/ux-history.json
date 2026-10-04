@@ -7,7 +7,7 @@
         "faidlix_bakemap": "2.3.11",
         "faidlix_bone_remap": "0.6.3",
         "faidlix_fbx_zip_exporter": "1.7.2",
-        "faidlix_manager": "1.1.2"
+        "faidlix_manager": "1.1.3"
       },
       "ui_impact": true,
       "problem": "側邊欄外掛的名稱與版本位置不一致，部分版本緊接名稱，部分只在展開內容顯示。",
