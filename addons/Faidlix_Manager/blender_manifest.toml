@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+id = "faidlix_manager"
+version = "1.0.0"
+name = "Faidlix Manager"
+tagline = "Update installed Faidlix Blender extensions together"
+maintainer = "Faidlix"
+type = "add-on"
+blender_version_min = "5.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[build]
+paths = [
+    "__init__.py",
+    "README.md",
+]

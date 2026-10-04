@@ -1,0 +1,17 @@
+---
+description: Enforce independent Blender add-on packaging and the shared Faidlix repository workflow
+alwaysApply: true
+---
+
+# Faidlix Blender Add-on Distribution
+
+- Keep every add-on under `addons/<AddonName>/` on `main`; never use branches as add-on categories.
+- Each add-on must have its own manifest, package ID, version, README, tests, and buildable ZIP.
+- Add-ons must remain independently installable, updateable, disableable, and removable.
+- Never import another Faidlix add-on or require `faidlix_manager` at runtime.
+- Use `https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json` for online updates.
+- Put release ZIP files in `repository/` and keep only the latest ZIP for each package ID.
+- `faidlix_manager` may update installed packages only; it must never install unselected add-ons.
+- Preserve the package ID and bump the version when migrating an existing add-on.
+- Publish one migration release through the old repository before retiring its update path.
+- Test source in Blender, validate packages/index, push GitHub, then install from GitHub and test the installed package.

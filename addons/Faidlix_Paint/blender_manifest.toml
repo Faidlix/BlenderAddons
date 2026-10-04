@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+id = "faidlix_paint"
+version = "0.4.8"
+name = "Faidlix Paint"
+tagline = "Fill an entire paint layer, mask, or selected UV island"
+maintainer = "Faidlix"
+type = "add-on"
+blender_version_min = "5.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[build]
+paths = [
+    "__init__.py",
+    "README.md",
+]
