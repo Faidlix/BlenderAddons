@@ -6,7 +6,12 @@ import tomllib
 import bpy
 
 
-MODULE = "bl_ext.FaidlixBlenderAddons.faidlix_bakemap"
+REPOSITORY_URL = "https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json"
+repo = next(
+    repo for repo in bpy.context.preferences.extensions.repos
+    if repo.remote_url.split('?', 1)[0].rstrip('/') == REPOSITORY_URL
+)
+MODULE = f"bl_ext.{repo.module}.faidlix_bakemap"
 EXPECTED_VERSION = (2, 3, 9)
 started_at = time.monotonic()
 version_before = None
