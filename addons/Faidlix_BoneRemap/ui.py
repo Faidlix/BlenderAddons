@@ -1,11 +1,16 @@
 import bpy
 from bpy.types import Menu, Panel, UIList
 
-from .model import flip_bone_name, reuse_mapping_items
+from .model import (
+    animation_rows_are_current,
+    flip_bone_name,
+    rebuild_animation_rows,
+    reuse_mapping_items,
+)
 from .operators import _mapping_axes_match
 
 
-ADDON_VERSION = (0, 6, 3)
+ADDON_VERSION = (0, 6, 4)
 
 
 def _source_file_index(settings, source_file):
@@ -57,8 +62,10 @@ def _reused_mapping_sources(settings, source):
 
 
 def _animation_row_columns(row):
-    leading = row.row(align=True)
-    leading.ui_units_x = 3.0
+    remove = row.row(align=True)
+    remove.ui_units_x = 1.25
+    enabled = row.row(align=True)
+    enabled.ui_units_x = 1.35
     content = row.split(factor=0.64)
     information = content.row(align=True)
     filename_and_action = information.split(factor=0.48)
@@ -67,15 +74,32 @@ def _animation_row_columns(row):
     action = action_and_timing.row(align=True)
     timing = action_and_timing.row(align=True)
     controls = content.row(align=True)
-    return leading, filename, action, timing, controls
+    return remove, enabled, filename, action, timing, controls
+
+
+def _remove_file_button(layout, file_index):
+    button = layout.operator("fbr.remove_file", text="━", emboss=False)
+    button.file_index = file_index
+
+
+def _draw_animation_header(layout):
+    row = layout.row(align=True)
+    remove, enabled, filename, action, timing, controls = _animation_row_columns(row)
+    remove.label(text="")
+    enabled.label(text="啟用")
+    filename.label(text="檔案名稱")
+    action.label(text="動畫名稱")
+    timing.label(text="時間")
+    options = controls.row(align=True)
+    options.label(text="設為原地動畫")
+    options.label(text="複製對稱動畫")
 
 
 def _draw_multi_clip_header(layout, source, file_index):
     row = layout.row(align=True)
-    leading, filename, action, _timing, _controls = _animation_row_columns(row)
-    remove = leading.operator("fbr.remove_file", text="", icon="REMOVE")
-    remove.file_index = file_index
-    leading.prop(
+    remove, enabled, filename, action, _timing, _controls = _animation_row_columns(row)
+    _remove_file_button(remove, file_index)
+    filename.prop(
         source,
         "expanded",
         text="",
@@ -89,26 +113,26 @@ def _draw_multi_clip_header(layout, source, file_index):
         if all_enabled
         else ("REMOVE" if any_enabled else "CHECKBOX_DEHLT")
     )
-    toggle = leading.operator("fbr.toggle_file", text="", icon=icon)
+    toggle = enabled.operator("fbr.toggle_file", text="", icon=icon, emboss=False)
     toggle.index = file_index
-    filename.label(text=f"名稱：{source.display_name}")
+    filename.label(text=source.display_name)
     action.label(text=f"{len(source.clips)} 個動畫")
 
 
 def _draw_clip_row(context, layout, source, file_index, clip, clip_index, show_file_name):
     row = layout.row(align=True)
-    leading, filename, action, timing, controls = _animation_row_columns(row)
+    remove, enabled, filename, action, timing, controls = _animation_row_columns(row)
     frame_text, seconds_text = _clip_timing_labels(context.scene, clip)
     if show_file_name:
-        remove = leading.operator("fbr.remove_file", text="", icon="REMOVE")
-        remove.file_index = file_index
-        leading.label(text="")
-        leading.prop(clip, "enabled", text="")
-        filename.label(text=f"名稱：{source.display_name}")
+        _remove_file_button(remove, file_index)
+        enabled.prop(clip, "enabled", text="")
+        filename.label(text=source.display_name)
         action.label(text=clip.action_name)
     else:
-        filename.prop(clip, "enabled", text="")
-        filename.label(text=clip.action_name)
+        remove.label(text="")
+        enabled.prop(clip, "enabled", text="")
+        filename.label(text="")
+        action.label(text=clip.action_name)
     timing.alignment = "LEFT"
     frames = timing.row(align=True)
     frames.ui_units_x = 4.2
@@ -121,7 +145,7 @@ def _draw_clip_row(context, layout, source, file_index, clip, clip_index, show_f
 
     inplace = controls.operator(
         "fbr.toggle_clip_option",
-        text="設為原地動畫",
+        text="O" if clip.in_place else "X",
         depress=clip.in_place,
     )
     inplace.file_index = file_index
@@ -130,12 +154,62 @@ def _draw_clip_row(context, layout, source, file_index, clip, clip_index, show_f
     controls.separator(factor=0.15)
     copy = controls.operator(
         "fbr.toggle_clip_option",
-        text="複製對稱動畫",
+        text="O" if clip.mirror_mode == "COPY" else "X",
         depress=clip.mirror_mode == "COPY",
     )
     copy.file_index = file_index
     copy.clip_index = clip_index
     copy.option = "COPY"
+
+
+class FBR_UL_animation_rows(UIList):
+    bl_idname = "FBR_UL_animation_rows"
+
+    def filter_items(self, context, data, property_name):
+        rows = getattr(data, property_name)
+        flags = [self.bitflag_filter_item] * len(rows)
+        sources = {source.uid: source for source in data.files}
+        for index, item in enumerate(rows):
+            source = sources.get(item.file_uid)
+            if not source or (
+                item.clip_index >= 0
+                and len(source.clips) > 1
+                and not source.expanded
+            ):
+                flags[index] &= ~self.bitflag_filter_item
+        return flags, []
+
+    def draw_item(
+        self,
+        context,
+        layout,
+        data,
+        item,
+        icon,
+        active_data,
+        active_property,
+        index,
+    ):
+        file_index = next(
+            (i for i, source in enumerate(data.files) if source.uid == item.file_uid),
+            -1,
+        )
+        if file_index < 0:
+            layout.label(text="")
+            return
+        source = data.files[file_index]
+        if item.clip_index < 0:
+            _draw_multi_clip_header(layout, source, file_index)
+        elif item.clip_index < len(source.clips):
+            _draw_clip_row(
+                context,
+                layout,
+                source,
+                file_index,
+                source.clips[item.clip_index],
+                item.clip_index,
+                show_file_name=len(source.clips) <= 1,
+            )
 
 
 def _mapping_group_info(source_file, mapping):
@@ -196,8 +270,7 @@ def _draw_mapping_row(context, layout, source_file, item, index):
     select_button.ui_units_x = 10.0
     select = select_button.operator(
         "fbr.select_target_bone",
-        text=("  " if is_group_child else "")
-        + (_paired_mapping_label(source_file, item, "target_bone") or "未指定"),
+        text=_paired_mapping_label(source_file, item, "target_bone") or "未指定",
     )
     select.file_index = file_index
     select.mapping_index = index
@@ -335,8 +408,6 @@ class FBR_UL_mappings(UIList):
                 flags[index] &= ~self.bitflag_filter_item
             if is_child and group_kind == "FOOT" and not data.feet_expanded:
                 flags[index] &= ~self.bitflag_filter_item
-            if (data.axis_editing or data.ik_editing) and index < data.active_mapping_index:
-                flags[index] &= ~self.bitflag_filter_item
         return flags, []
 
     def draw_item(
@@ -451,24 +522,29 @@ class FBR_PT_main(Panel):
             return
 
         if settings.files_expanded:
-            file_list = source_box.column(align=True)
-            for file_index, source in enumerate(settings.files):
-                file_layout = file_list.column(align=True)
-                has_multiple_clips = len(source.clips) > 1
-                if has_multiple_clips:
-                    _draw_multi_clip_header(file_layout, source, file_index)
-
-                if not has_multiple_clips or source.expanded:
-                    for clip_index, clip in enumerate(source.clips):
-                        _draw_clip_row(
-                            context,
-                            file_layout,
-                            source,
-                            file_index,
-                            clip,
-                            clip_index,
-                            show_file_name=not has_multiple_clips,
-                        )
+            if not animation_rows_are_current(settings):
+                rebuild_animation_rows(settings)
+            _draw_animation_header(source_box)
+            visible_rows = sum(
+                1
+                for item in settings.animation_rows
+                for source in settings.files
+                if source.uid == item.file_uid
+                and not (
+                    item.clip_index >= 0
+                    and len(source.clips) > 1
+                    and not source.expanded
+                )
+            )
+            source_box.template_list(
+                "FBR_UL_animation_rows",
+                "main",
+                settings,
+                "animation_rows",
+                settings,
+                "active_animation_row_index",
+                rows=max(2, min(10, visible_rows)),
+            )
 
         mapping_box = layout.box()
         mapping_box.label(text="骨骼對應", icon="CONSTRAINT_BONE")
@@ -515,17 +591,31 @@ class FBR_PT_main(Panel):
             )
             if len(source.clips) > 1:
                 preview_controls.prop(source, "preview_clip", text="")
+            tpose_active = (
+                preview_active and settings.preview_mode == "TPOSE"
+            )
+            tpose = preview_controls.operator(
+                "fbr.preview_tpose",
+                text="T-Pose",
+                icon="POSE_HLT",
+                depress=tpose_active,
+            )
+            tpose.file_index = file_index
+            tpose.action = "HIDE" if tpose_active else "SHOW"
+            animation_preview_active = (
+                preview_active and settings.preview_mode == "ANIMATION"
+            )
             preview = preview_controls.operator(
                 "fbr.preview_animation",
                 text="預覽",
                 icon="ARMATURE_DATA",
-                depress=preview_active,
+                depress=animation_preview_active,
             )
             preview.file_index = file_index
-            preview.action = "HIDE" if preview_active else "SHOW"
+            preview.action = "HIDE" if animation_preview_active else "SHOW"
             screen = getattr(context, "screen", None)
             animation_playing = bool(
-                preview_active and screen and screen.is_animation_playing
+                animation_preview_active and screen and screen.is_animation_playing
             )
             play = preview_controls.operator(
                 "fbr.preview_animation",
@@ -568,11 +658,10 @@ class FBR_PT_main(Panel):
             tools.enabled = not locked
             auto = tools.operator("fbr.auto_map", text="自動配骨架")
             auto.file_index = file_index
-            align = tools.operator("fbr.align_source_rig", text="骨架縮放對位")
-            align.file_index = file_index
             axes = tools.operator("fbr.auto_align_axes", text="自動對軸向")
             axes.file_index = file_index
             tools.prop(settings, "auto_scale", text="Root 位移縮放", toggle=True)
+            tools.label(text="")
 
             list_area = group.column(align=True)
             list_header = list_area.row(align=True)
@@ -599,7 +688,7 @@ class FBR_PT_main(Panel):
                 "mappings",
                 source,
                 "active_mapping_index",
-                rows=2 if (source.axis_editing or source.ik_editing) else 6,
+                rows=6,
             )
             if reused_sources:
                 reused_box = group.box()
@@ -685,4 +774,9 @@ class FBR_PT_main(Panel):
             run.operator("fbr.retarget", text="開始批次重定向", icon="PLAY")
 
 
-CLASSES = (FBR_UL_mappings, FBR_MT_reuse_mapping, FBR_PT_main)
+CLASSES = (
+    FBR_UL_animation_rows,
+    FBR_UL_mappings,
+    FBR_MT_reuse_mapping,
+    FBR_PT_main,
+)

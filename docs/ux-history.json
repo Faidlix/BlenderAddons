@@ -15,6 +15,18 @@
       "before": "各外掛自行使用 draw_header 或內容標籤顯示版本，無法在標題列右側整齊對齊。",
       "after": "Texture Marge、BakeMap、Retarget Motion、FBX ZipExporter 與 Manager 統一為左側名稱、右側版本。",
       "summary": "統一 Faidlix 側邊欄外掛標題列的名稱與版本配置。"
+    },
+    {
+      "date": "2026-10-05",
+      "versions": {
+        "faidlix_bone_remap": "0.6.4"
+      },
+      "ui_impact": true,
+      "problem": "動畫清單欄位與縮排不一致，預覽及 IK 編輯會破壞原狀態，且多來源共用 Target IK 時可能缺少控制骨並在批次重定向累積位移。",
+      "decision": "動畫檔案改為固定標題 UIList，加入獨立 T-Pose，將縮放對位併入自動配骨架，固定映射清單高度，並以 Target 骨頭共用 IK 控制骨；每個 Bake 影格由 Rest basis 重新求解。",
+      "before": "長清單捲動後失去欄位意義，IK 設定會改變清單高度或捲動位置；第二組來源映射相同腳骨時 IK 控制骨可能為空，控制位移也可能逐幀累加。",
+      "after": "欄位標題固定、O/X 狀態一致、T-Pose 與動畫預覽分離；IK Shape 可預覽但不渲染，刪除時清理未使用資源，批次輸出維持 Root 垂直基準。",
+      "summary": "完成 Bone Remap 動畫清單、預覽、IK 資源與批次重定向穩定性更新。"
     }
   ]
 }

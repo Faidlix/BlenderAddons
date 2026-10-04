@@ -194,7 +194,6 @@ def iter_bake_clip(
     root_target_names = {
         mapping.target_bone for mapping in mappings if mapping.is_root
     }
-    _clear_target_pose(target_obj)
     try:
         for frame_index, source_frame in enumerate(frames):
             context.scene.frame_set(source_frame)
@@ -210,10 +209,27 @@ def iter_bake_clip(
                 constraint = _fbr_ik_constraint(owner) if owner else None
                 if not owner or not control or not constraint:
                     continue
+                constraint.target = target_obj
+                constraint.subtarget = mapping.ik_control_bone
+                constraint.chain_count = mapping.ik_chain_count
+                constraint.iterations = mapping.ik_iterations
+                constraint.influence = mapping.ik_influence
+                constraint.use_tail = mapping.ik_use_tail
+                constraint.use_rotation = mapping.ik_use_rotation
+                constraint.use_stretch = mapping.ik_use_stretch
                 ik_mappings.append((mapping, owner, control, constraint))
                 ik_chain_names.update(_ik_chain_names(target_obj, mapping))
                 muted_constraints.append((constraint, constraint.mute))
                 constraint.mute = True
+
+            # The output action is evaluated as the scene advances.  Without
+            # resetting every pose channel here, an IK control starts from the
+            # previous frame's solved offset and the iterative correction adds
+            # that offset again.  This produces the visible per-frame downward
+            # drift, especially across several batch jobs.  Each sampled frame
+            # must start from the same rest basis before FK mapping and IK solve.
+            _clear_target_pose(target_obj)
+            context.view_layer.update()
 
             # Foot/hand IK may walk all the way up the hierarchy when its
             # chain count is zero or large.  Root motion must never become an

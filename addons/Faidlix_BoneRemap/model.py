@@ -355,6 +355,11 @@ class FBR_Clip(PropertyGroup):
     custom_start: IntProperty(name="起始影格", default=-1, min=-1)
 
 
+class FBR_AnimationRow(PropertyGroup):
+    file_uid: StringProperty(options={"HIDDEN"})
+    clip_index: IntProperty(default=-1, options={"HIDDEN"})
+
+
 class FBR_SourceFile(PropertyGroup):
     uid: StringProperty()
     display_name: StringProperty(name="檔案")
@@ -402,6 +407,8 @@ class FBR_Settings(PropertyGroup):
     )
     files: CollectionProperty(type=FBR_SourceFile)
     active_file_index: IntProperty(default=0)
+    animation_rows: CollectionProperty(type=FBR_AnimationRow)
+    active_animation_row_index: IntProperty(default=0)
     files_expanded: BoolProperty(default=True)
     reused_expanded: BoolProperty(default=False)
     output_mode: EnumProperty(
@@ -452,11 +459,41 @@ class FBR_Settings(PropertyGroup):
     retarget_status: StringProperty(default="", options={"SKIP_SAVE"})
     preview_running: BoolProperty(default=False, options={"SKIP_SAVE"})
     preview_source_uid: StringProperty(default="", options={"SKIP_SAVE"})
+    preview_mode: StringProperty(default="", options={"SKIP_SAVE"})
+
+
+def rebuild_animation_rows(settings):
+    """Rebuild the flat UI list without changing per-file expansion state."""
+    settings.animation_rows.clear()
+    for source in settings.files:
+        if len(source.clips) > 1:
+            row = settings.animation_rows.add()
+            row.file_uid = source.uid
+            row.clip_index = -1
+        for clip_index, _clip in enumerate(source.clips):
+            row = settings.animation_rows.add()
+            row.file_uid = source.uid
+            row.clip_index = clip_index
+    settings.active_animation_row_index = min(
+        settings.active_animation_row_index,
+        max(0, len(settings.animation_rows) - 1),
+    )
+
+
+def animation_rows_are_current(settings):
+    expected = []
+    for source in settings.files:
+        if len(source.clips) > 1:
+            expected.append((source.uid, -1))
+        expected.extend((source.uid, index) for index in range(len(source.clips)))
+    actual = [(row.file_uid, row.clip_index) for row in settings.animation_rows]
+    return actual == expected
 
 
 CLASSES = (
     FBR_BoneMap,
     FBR_Clip,
+    FBR_AnimationRow,
     FBR_SourceFile,
     FBR_Settings,
 )

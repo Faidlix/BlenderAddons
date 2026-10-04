@@ -12,9 +12,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(ROOT))
 
 import Faidlix_BoneRemap as addon
-from Faidlix_BoneRemap.model import armature_signature, iter_action_fcurves
+from Faidlix_BoneRemap.model import (
+    armature_signature,
+    iter_action_fcurves,
+    rebuild_animation_rows,
+)
 from Faidlix_BoneRemap.operators import _mapping_axes_match, _selected_animation_paths
 from Faidlix_BoneRemap.ui import (
+    FBR_UL_animation_rows,
     FBR_UL_mappings,
     _clip_timing_labels,
     _paired_mapping_label,
@@ -174,6 +179,24 @@ def main():
     clip = entry.clips.add()
     clip.action_name = action.name
     clip.frame_start, clip.frame_end = action.frame_range
+    rebuild_animation_rows(settings)
+    assert [(item.file_uid, item.clip_index) for item in settings.animation_rows] == [
+        (entry.uid, 0)
+    ]
+    second_ui_clip = entry.clips.add()
+    second_ui_clip.action_name = "Second"
+    second_ui_clip.frame_start, second_ui_clip.frame_end = (1.0, 20.0)
+    rebuild_animation_rows(settings)
+    assert [item.clip_index for item in settings.animation_rows] == [-1, 0, 1]
+    animation_list_stub = SimpleNamespace(bitflag_filter_item=1)
+    entry.expanded = False
+    collapsed_animation_flags, _ = FBR_UL_animation_rows.filter_items(
+        animation_list_stub, bpy.context, settings, "animation_rows"
+    )
+    assert collapsed_animation_flags == [1, 0, 0]
+    entry.expanded = True
+    entry.clips.remove(1)
+    rebuild_animation_rows(settings)
     assert bpy.ops.fbr.toggle_clip_option(
         file_index=0,
         clip_index=0,
@@ -400,6 +423,17 @@ def main():
     target_axes_before_preview = target.data.show_axes
     frame_range_before_preview = (bpy.context.scene.frame_start, bpy.context.scene.frame_end)
     entry.preview_clip = "0"
+    source_pose_position = source.data.pose_position
+    target_pose_position = target.data.pose_position
+    target_action_before_tpose = target.animation_data.action if target.animation_data else None
+    assert bpy.ops.fbr.preview_tpose(file_index=0, action="SHOW") == {"FINISHED"}
+    assert settings.preview_running and settings.preview_mode == "TPOSE"
+    assert source.data.pose_position == "REST"
+    assert target.data.pose_position == "REST"
+    assert bpy.ops.fbr.preview_tpose(file_index=0, action="HIDE") == {"FINISHED"}
+    assert source.data.pose_position == source_pose_position
+    assert target.data.pose_position == target_pose_position
+    assert (target.animation_data.action if target.animation_data else None) == target_action_before_tpose
     preview_actions = {
         item.identifier
         for item in bpy.ops.fbr.preview_animation.get_rna_type().properties["action"].enum_items
@@ -454,6 +488,11 @@ def main():
     arm_map.ik_shape_scale = 1.5
     arm_map.ik_chain_count = 1
     assert target.pose.bones[control_name].custom_shape.name == "FBR_IK_SHAPE_SPHERE"
+    shape_object = target.pose.bones[control_name].custom_shape
+    shape_collection = bpy.data.collections["__FBR_IK_Shapes__"]
+    assert not shape_collection.hide_viewport and shape_collection.hide_render
+    assert not shape_object.hide_viewport and not shape_object.hide_get()
+    assert shape_object.hide_render
     assert not target.data.bones[control_name].use_deform
     assert tuple(target.pose.bones[control_name].custom_shape_scale_xyz) == (1.5, 1.5, 1.5)
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="OK") == {"FINISHED"}
@@ -481,14 +520,20 @@ def main():
     arm_map = entry.mappings[1]
     arm_map.ik_chain_count = 0
 
+    batch_clip = entry.clips.add()
+    batch_clip.action_name = action.name
+    batch_clip.frame_start, batch_clip.frame_end = action.frame_range
+
     result = bpy.ops.fbr.retarget()
     assert result == {"FINISHED"}, result
     output = bpy.data.actions.get("walk_Walk")
+    batch_output = bpy.data.actions.get("walk_Walk.001")
     assert output is not None
+    assert batch_output is not None
     assert output.use_fake_user
-    assert target.animation_data.action == output
+    assert target.animation_data.action == batch_output
     assert target.animation_data.action_slot is not None
-    assert any(slot == target.animation_data.action_slot for slot in output.slots)
+    assert any(slot == target.animation_data.action_slot for slot in batch_output.slots)
     assert bpy.data.objects.get("Source") == source
     assert bpy.data.objects.get("Target") == target
     assert len(settings.files) == 1
@@ -498,6 +543,31 @@ def main():
     assert not any("Arm.L" in curve.data_path and "rotation_quaternion" in curve.data_path for curve in curves)
     assert any(control_name in curve.data_path and "location" in curve.data_path for curve in curves)
     assert max(len(curve.keyframe_points) for curve in curves) <= 10
+    for baked_action in (output, batch_output):
+        root_z_curves = [
+            curve
+            for curve in iter_action_fcurves(baked_action)
+            if 'pose.bones["Hips"].location' in curve.data_path and curve.array_index == 2
+        ]
+        assert root_z_curves
+        assert all(
+            abs(point.co.y) < 1.0e-5
+            for curve in root_z_curves
+            for point in curve.keyframe_points
+        )
+        control_values = [
+            abs(point.co.y)
+            for curve in iter_action_fcurves(baked_action)
+            if control_name in curve.data_path and "location" in curve.data_path
+            for point in curve.keyframe_points
+        ]
+        assert control_values and max(control_values) < 20.0
+    assert bpy.ops.fbr.delete_ik(file_index=0, mapping_index=1) == {"FINISHED"}
+    assert control_name not in target.data.bones
+    assert not any(
+        obj.get("_fbr_ik_shape", False)
+        for obj in bpy.data.objects
+    )
     target.pose.bones["Hips"].location = (3.0, -2.0, 1.0)
     target.pose.bones["Arm.L"].rotation_mode = "XYZ"
     target.pose.bones["Arm.L"].rotation_euler = (0.2, 0.3, 0.4)
@@ -508,6 +578,23 @@ def main():
         pose_bone.matrix_basis == identity
         for pose_bone in target.pose.bones
     )
+    leader = settings.files.add()
+    leader.uid = "leader"
+    leader.display_name = "leader.blend"
+    leader.source_object = source_same_axes.name
+    leader.signature = armature_signature(source_same_axes)
+    leader.reuse_mapping = "SELF"
+    follower = settings.files.add()
+    follower.uid = "follower"
+    follower.display_name = "follower.blend"
+    follower.source_object = source_different_axes.name
+    follower.signature = armature_signature(source_different_axes)
+    follower.reuse_mapping = leader.uid
+    assert not follower.mapping_is_independent
+    assert bpy.ops.fbr.remove_file(file_index=1) == {"FINISHED"}
+    assert settings.files[1].uid == "follower"
+    assert settings.files[1].reuse_mapping == entry.uid
+    assert not settings.files[1].mapping_is_independent
     assert bpy.ops.fbr.clear_files() == {"FINISHED"}
     assert bpy.data.objects.get("Source") is None
     assert len(settings.files) == 0

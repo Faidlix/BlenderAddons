@@ -8,7 +8,12 @@ from bpy.types import Operator, OperatorFileListElement
 from bpy_extras.io_utils import ImportHelper
 from mathutils import Euler, Matrix
 
-from .model import action_bone_names, armature_signature, flip_bone_name
+from .model import (
+    action_bone_names,
+    armature_signature,
+    flip_bone_name,
+    rebuild_animation_rows,
+)
 from .retarget import (
     assign_action_and_slot,
     build_automatic_mapping,
@@ -301,13 +306,25 @@ def _ik_shape_geometry(shape):
 
 def _ik_shape_object(shape):
     name = f"FBR_IK_SHAPE_{shape}"
-    existing = bpy.data.objects.get(name)
-    if existing:
-        return existing
     collection = bpy.data.collections.get(IK_SHAPE_COLLECTION)
     if collection is None:
         collection = bpy.data.collections.new(IK_SHAPE_COLLECTION)
         bpy.context.scene.collection.children.link(collection)
+    elif collection.name not in bpy.context.scene.collection.children:
+        bpy.context.scene.collection.children.link(collection)
+    collection.hide_render = True
+    collection.hide_viewport = False
+    existing = bpy.data.objects.get(name)
+    if existing:
+        if existing.name not in collection.objects:
+            for owner in list(existing.users_collection):
+                owner.objects.unlink(existing)
+            collection.objects.link(existing)
+        existing.hide_render = True
+        existing.hide_viewport = False
+        existing.hide_set(False)
+        existing["_fbr_ik_shape"] = True
+        return existing
     mesh = bpy.data.meshes.new(name + "_Mesh")
     vertices, edges = _ik_shape_geometry(shape)
     mesh.from_pydata(vertices, edges, [])
@@ -315,9 +332,30 @@ def _ik_shape_object(shape):
     obj = bpy.data.objects.new(name, mesh)
     collection.objects.link(obj)
     obj.hide_render = True
-    obj.hide_set(True)
+    obj.hide_viewport = False
+    obj.hide_set(False)
     obj["_fbr_ik_shape"] = True
     return obj
+
+
+def _cleanup_unused_ik_shapes():
+    used = {
+        bone.custom_shape.as_pointer()
+        for obj in bpy.data.objects
+        if obj.type == "ARMATURE"
+        for bone in obj.pose.bones
+        if bone.custom_shape
+    }
+    for obj in list(bpy.data.objects):
+        if not obj.get("_fbr_ik_shape", False) or obj.as_pointer() in used:
+            continue
+        mesh = obj.data if obj.type == "MESH" else None
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+    collection = bpy.data.collections.get(IK_SHAPE_COLLECTION)
+    if collection and not collection.objects:
+        bpy.data.collections.remove(collection)
 
 
 def _set_active_object_mode(context, obj, mode):
@@ -383,16 +421,30 @@ def _sync_ik_mapping(context, mapping):
     if not owner:
         return
     constraint = _ik_constraint(owner)
-    if mapping.ik_enabled and constraint is None:
+    if (
+        mapping.ik_enabled
+        and constraint
+        and constraint.target == owner_obj
+        and constraint.subtarget in owner_obj.data.bones
+    ):
+        existing_control = owner_obj.data.bones[constraint.subtarget]
+        if existing_control.get("_fbr_ik_control", False):
+            mapping.ik_control_bone = existing_control.name
+    if mapping.ik_enabled and (
+        constraint is None
+        or not mapping.ik_control_bone
+        or mapping.ik_control_bone not in owner_obj.data.bones
+    ):
         control_name = _add_ik_control_bone(
             context, owner_obj, owner_bone_name, mapping
         )
         if not control_name:
             return
-        constraint = owner.constraints.new("IK")
-        constraint.name = IK_CONSTRAINT_NAME
-        constraint.target = owner_obj
-        constraint.subtarget = control_name
+        if constraint is None:
+            constraint = owner.constraints.new("IK")
+            constraint.name = IK_CONSTRAINT_NAME
+            constraint.target = owner_obj
+            constraint.subtarget = control_name
     if not mapping.ik_enabled or constraint is None:
         return
     constraint.target = owner_obj
@@ -422,8 +474,26 @@ def _delete_ik_mapping(context, mapping):
     if not owner_obj:
         mapping.ik_enabled = False
         mapping.ik_control_bone = ""
+        _cleanup_unused_ik_shapes()
         return
     owner = owner_obj.pose.bones.get(owner_bone_name)
+    mapping_pointer = mapping.as_pointer()
+    shared_mapping = mapping.ik_control_bone and next(
+        (
+            item
+            for source_file in context.scene.fbr_settings.files
+            for item in source_file.mappings
+            if item.as_pointer() != mapping_pointer
+            and item.ik_enabled
+            and item.ik_control_bone == mapping.ik_control_bone
+        ),
+        None,
+    )
+    if shared_mapping:
+        mapping.ik_enabled = False
+        mapping.ik_control_bone = ""
+        context.view_layer.update()
+        return
     if owner:
         constraint = _ik_constraint(owner)
         if constraint:
@@ -439,6 +509,7 @@ def _delete_ik_mapping(context, mapping):
             bpy.ops.object.mode_set(mode="OBJECT")
     mapping.ik_enabled = False
     mapping.ik_control_bone = ""
+    _cleanup_unused_ik_shapes()
     context.view_layer.update()
 
 
@@ -527,6 +598,7 @@ def _cleanup_imported_sources(settings):
     if collection is not None and not collection.objects:
         bpy.data.collections.remove(collection)
     settings.files.clear()
+    settings.animation_rows.clear()
 
 
 def _target_object(settings):
@@ -618,7 +690,9 @@ def _armature_world_extent(obj, matrix_world=None, bone_names=None):
     return (maximum - minimum).length
 
 
-def _set_animation_preview_display(settings, source_file, source_obj, target_obj, state):
+def _set_animation_preview_display(
+    settings, source_file, source_obj, target_obj, state, pose_position="POSE"
+):
     state["source_display"] = {
         "hidden": source_obj.hide_get(),
         "hide_viewport": source_obj.hide_viewport,
@@ -638,6 +712,7 @@ def _set_animation_preview_display(settings, source_file, source_obj, target_obj
         "show_axes": target_obj.data.show_axes,
         "show_names": target_obj.data.show_names,
         "show_in_front": target_obj.show_in_front,
+        "pose_position": target_obj.data.pose_position,
     }
     source_obj.hide_viewport = False
     source_obj.hide_set(False)
@@ -652,13 +727,14 @@ def _set_animation_preview_display(settings, source_file, source_obj, target_obj
         state["source_display"]["matrix_world"],
     )
     source_obj.data.display_type = "OCTAHEDRAL"
-    source_obj.data.pose_position = "POSE"
+    source_obj.data.pose_position = pose_position
     source_obj.data.show_axes = True
     source_obj.data.show_names = False
     source_obj.data.show_bone_colors = True
     _set_preview_bone_colors(source_obj.data.bones)
     _set_preview_bone_colors(source_obj.pose.bones)
     target_obj.show_in_front = True
+    target_obj.data.pose_position = pose_position
     target_obj.data.show_axes = True
     target_obj.data.show_names = False
 
@@ -682,6 +758,7 @@ def _restore_animation_preview_display(source_obj, target_obj, state):
     target_obj.data.show_axes = target["show_axes"]
     target_obj.data.show_names = target["show_names"]
     target_obj.show_in_front = target["show_in_front"]
+    target_obj.data.pose_position = target["pose_position"]
 
 
 def stop_animation_preview(context):
@@ -690,6 +767,7 @@ def stop_animation_preview(context):
     if settings:
         settings.preview_running = False
         settings.preview_source_uid = ""
+        settings.preview_mode = ""
     if not state:
         return
     screen = getattr(context, "screen", None)
@@ -711,7 +789,7 @@ def stop_animation_preview(context):
         scene.frame_start = state["frame_start"]
         scene.frame_end = state["frame_end"]
         scene.frame_set(state["frame_current"])
-    action = bpy.data.actions.get(state["preview_action"])
+    action = bpy.data.actions.get(state.get("preview_action", ""))
     if action:
         bpy.data.actions.remove(action)
     if context:
@@ -775,6 +853,7 @@ def _start_animation_preview(context, source_file, play_animation=False):
         _ANIMATION_PREVIEW_STATE["active"] = state
         settings.preview_running = True
         settings.preview_source_uid = source_file.uid
+        settings.preview_mode = "ANIMATION"
         context.view_layer.update()
         _tag_view3d_redraw(context)
         screen = getattr(context, "screen", None)
@@ -794,6 +873,45 @@ def _start_animation_preview(context, source_file, play_animation=False):
         context.scene.frame_start = state["frame_start"]
         context.scene.frame_end = state["frame_end"]
         context.scene.frame_set(state["frame_current"])
+        raise
+
+
+def _start_tpose_preview(context, source_file):
+    settings = context.scene.fbr_settings
+    target_obj = _target_object(settings)
+    source_obj = bpy.data.objects.get(source_file.source_object)
+    if not source_obj or not target_obj:
+        return False, "找不到可預覽的來源或 Target 骨架"
+    stop_animation_preview(context)
+    state = {
+        "source_name": source_obj.name,
+        "target_name": target_obj.name,
+        "source_uid": source_file.uid,
+        "source_action": _animation_action_state(source_obj),
+        "target_action": _animation_action_state(target_obj),
+        "frame_start": context.scene.frame_start,
+        "frame_end": context.scene.frame_end,
+        "frame_current": context.scene.frame_current,
+    }
+    try:
+        _set_animation_preview_display(
+            settings,
+            source_file,
+            source_obj,
+            target_obj,
+            state,
+            pose_position="REST",
+        )
+        _ANIMATION_PREVIEW_STATE["active"] = state
+        settings.preview_running = True
+        settings.preview_source_uid = source_file.uid
+        settings.preview_mode = "TPOSE"
+        context.view_layer.update()
+        _tag_view3d_redraw(context)
+        return True, ""
+    except Exception:
+        if "source_display" in state:
+            _restore_animation_preview_display(source_obj, target_obj, state)
         raise
 
 
@@ -1116,6 +1234,7 @@ class FBR_OT_import_files(Operator, ImportHelper):
             return {"CANCELLED"}
         if target_name and target_name in bpy.data.objects:
             settings.target_armature = target_name
+        rebuild_animation_rows(settings)
         self.report({"INFO"}, f"已加入 {imported_count} 組骨架、{clip_count} 個 Action")
         return {"FINISHED"}
 
@@ -1175,6 +1294,11 @@ class FBR_OT_remove_file(Operator):
         stop_animation_preview(context)
         source = settings.files[self.file_index]
         removed_uid = source.uid
+        affected_uids = {
+            candidate.uid
+            for candidate in settings.files
+            if candidate.reuse_mapping == removed_uid
+        }
         _end_axis_preview(context, source)
         object_name = source.source_object
         action_names = {clip.action_name for clip in source.clips if clip.action_name}
@@ -1184,11 +1308,22 @@ class FBR_OT_remove_file(Operator):
             if index != self.file_index
             for clip in candidate.clips
         }
-        for candidate in settings.files:
-            if candidate.reuse_mapping == removed_uid:
-                candidate.reuse_mapping = "SELF"
-                candidate.mapping_is_independent = True
         settings.files.remove(self.file_index)
+        for candidate in settings.files:
+            if candidate.uid not in affected_uids:
+                continue
+            replacement = next(
+                (
+                    possible
+                    for possible in settings.files
+                    if possible.uid != candidate.uid
+                    and possible.mapping_is_independent
+                    and possible.signature
+                    and possible.signature == candidate.signature
+                ),
+                None,
+            )
+            candidate.reuse_mapping = replacement.uid if replacement else "SELF"
         obj = bpy.data.objects.get(object_name)
         if obj:
             armature = obj.data if obj.type == "ARMATURE" else None
@@ -1205,6 +1340,7 @@ class FBR_OT_remove_file(Operator):
         settings.active_file_index = min(
             settings.active_file_index, max(0, len(settings.files) - 1)
         )
+        rebuild_animation_rows(settings)
         return {"FINISHED"}
 
 
@@ -1494,6 +1630,41 @@ class FBR_OT_auto_align_axes(Operator):
         _tag_view3d_redraw(context)
         self.report({"INFO"}, f"已自動對齊 {aligned} 根骨頭軸向")
         return {"FINISHED"} if aligned else {"CANCELLED"}
+
+
+class FBR_OT_preview_tpose(Operator):
+    bl_idname = "fbr.preview_tpose"
+    bl_label = "T-Pose"
+    bl_description = "以 Rest Position 顯示來源與 Target 骨架，方便檢查映射"
+    bl_options = {"INTERNAL"}
+
+    file_index: IntProperty()
+    action: EnumProperty(
+        items=(
+            ("SHOW", "T-Pose", "顯示 Rest Position 骨架"),
+            ("HIDE", "關閉 T-Pose", "還原進入前的顯示與 Action"),
+        ),
+        default="SHOW",
+    )
+
+    def execute(self, context):
+        if self.action == "HIDE":
+            stop_animation_preview(context)
+            return {"FINISHED"}
+        settings = context.scene.fbr_settings
+        if not 0 <= self.file_index < len(settings.files):
+            return {"CANCELLED"}
+        try:
+            success, message = _start_tpose_preview(
+                context, settings.files[self.file_index]
+            )
+        except Exception as exc:
+            self.report({"ERROR"}, f"T-Pose 預覽失敗：{exc}")
+            return {"CANCELLED"}
+        if not success:
+            self.report({"WARNING"}, message)
+            return {"CANCELLED"}
+        return {"FINISHED"}
 
 
 class FBR_OT_preview_animation(Operator):
@@ -1881,7 +2052,11 @@ class FBR_OT_auto_map(Operator):
         mapped = build_automatic_mapping(source, target, source_file.mappings)
         source_file.reuse_mapping = "SELF"
         source_file.mapping_expanded = True
-        self.report({"INFO"}, f"已對應 {mapped} 根骨骼")
+        bpy.ops.fbr.align_source_rig(file_index=self.file_index)
+        self.report(
+            {"INFO"},
+            f"已對應 {mapped} 根骨骼並完成骨架縮放對位",
+        )
         return {"FINISHED"}
 
 
@@ -2177,6 +2352,7 @@ CLASSES = (
     FBR_OT_set_root,
     FBR_OT_align_source_rig,
     FBR_OT_auto_align_axes,
+    FBR_OT_preview_tpose,
     FBR_OT_preview_animation,
     FBR_OT_clear_target_animation,
     FBR_OT_ik_settings,
