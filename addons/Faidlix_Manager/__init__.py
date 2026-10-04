@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix Manager",
     "author": "Faidlix",
-    "version": (1, 0, 1),
+    "version": (1, 1, 0),
     "blender": (5, 2, 0),
     "location": "3D View > Sidebar > Faidlix",
     "description": "Update installed Faidlix extensions together",
@@ -17,8 +17,9 @@ import bpy
 from bpy.types import Operator, Panel
 
 
-ADDON_VERSION = (1, 0, 1)
+ADDON_VERSION = (1, 1, 0)
 PACKAGE_ID = "faidlix_manager"
+REGISTRY_FILENAME = "addon_registry.json"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
     "Faidlix/BlenderAddons/main/repository/index.json"
@@ -73,22 +74,46 @@ def _installed_version(package_dir):
         return ()
 
 
+def _addon_registry():
+    path = os.path.join(os.path.dirname(__file__), REGISTRY_FILENAME)
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if data.get("schema_version") != 1:
+        return {}
+    return {
+        item["package_id"]: item
+        for item in data.get("addons", [])
+        if isinstance(item, dict) and item.get("package_id")
+    }
+
+
+def _supports_common_feature(item, feature):
+    return feature in item.get("common_features", [])
+
+
 def _outdated_packages(repo):
     result = []
+    registry = _addon_registry()
     for item in _repository_index(repo).get("data", []):
         package_id = item.get("id", "")
         latest = _version(item.get("version"))
         package_dir = os.path.join(repo.directory, package_id)
-        # The shared repository contains only Faidlix packages. Do not require
-        # a naming prefix so migrated legacy package IDs remain updateable.
-        if not package_id or not os.path.isdir(package_dir):
+        registration = registry.get(package_id, {})
+        if (
+            not package_id
+            or not _supports_common_feature(registration, "update_all")
+            or not os.path.isdir(package_dir)
+        ):
             continue
         current = _installed_version(package_dir)
         if current and latest > current:
             module_name = f"bl_ext.{repo.module}.{package_id}"
             enabled = addon_utils.check(module_name)[1]
-            result.append((package_id, latest, enabled))
-    result.sort(key=lambda item: item[0] == PACKAGE_ID)
+            result.append((package_id, latest, enabled, registration.get("update_order", 100)))
+    result.sort(key=lambda item: (item[0] == PACKAGE_ID, item[3], item[0]))
     return result
 
 
@@ -100,10 +125,15 @@ def _state():
 
 
 def _installed_package_count(repo):
+    registry = _addon_registry()
     return sum(
         1
         for item in _repository_index(repo).get("data", [])
-        if item.get("id") and os.path.isdir(os.path.join(repo.directory, item["id"]))
+        if (
+            item.get("id")
+            and _supports_common_feature(registry.get(item["id"], {}), "update_all")
+            and os.path.isdir(os.path.join(repo.directory, item["id"]))
+        )
     )
 
 
@@ -180,7 +210,7 @@ class FAIDLIXMANAGER_OT_update_all(Operator):
             if not items:
                 _finish_update(state)
                 return None
-            package_id, latest, enabled = items.pop(0)
+            package_id, latest, enabled, _update_order = items.pop(0)
             if package_id == PACKAGE_ID:
                 # The manager is intentionally last. Finish every UI/state
                 # write before replacing this package, then return without

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "addons": [
+    {
+      "package_id": "blander_texture_marge",
+      "display_name": "Faidlix Texture Marge",
+      "common_features": ["update_all"],
+      "update_order": 10
+    },
+    {
+      "package_id": "faidlix_bakemap",
+      "display_name": "Faidlix BakeMap",
+      "common_features": ["update_all"],
+      "update_order": 20
+    },
+    {
+      "package_id": "faidlix_bone_remap",
+      "display_name": "Faidlix Bone Remap",
+      "common_features": ["update_all"],
+      "update_order": 30
+    },
+    {
+      "package_id": "faidlix_fbx_zip_exporter",
+      "display_name": "Faidlix FBX ZipExporter",
+      "common_features": ["update_all"],
+      "update_order": 40
+    },
+    {
+      "package_id": "faidlix_outliner",
+      "display_name": "Faidlix Outliner",
+      "common_features": ["update_all"],
+      "update_order": 50
+    },
+    {
+      "package_id": "faidlix_paint",
+      "display_name": "Faidlix Paint",
+      "common_features": ["update_all"],
+      "update_order": 60
+    },
+    {
+      "package_id": "faidlix_weight",
+      "display_name": "Faidlix Weight",
+      "common_features": ["update_all"],
+      "update_order": 70
+    },
+    {
+      "package_id": "faidlix_manager",
+      "display_name": "Faidlix Manager",
+      "common_features": ["update_all"],
+      "update_order": 1000
+    }
+  ]
+}

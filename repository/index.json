@@ -80,16 +80,16 @@
       "id": "faidlix_manager",
       "name": "Faidlix Manager",
       "tagline": "Update installed Faidlix Blender extensions together",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:GPL-3.0-or-later"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_manager-1.0.1.zip",
-      "archive_size": 3559,
-      "archive_hash": "sha256:88a6610ed2f2183f400c3850d786571fa33558c2bc6bb78fd17b1f829dc2cf40"
+      "archive_url": "./faidlix_manager-1.1.0.zip",
+      "archive_size": 4365,
+      "archive_hash": "sha256:dd4df2eddd307f9fe07f338d541bab03cca44878fdd4f5885bc9d5436d25004b"
     },
     {
       "schema_version": "1.0.0",
