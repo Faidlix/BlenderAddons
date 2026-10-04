@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+id = "faidlix_outliner"
+version = "0.2.14"
+name = "Faidlix_Outliner"
+tagline = "Select object and collection hierarchies from the Outliner"
+maintainer = "Faidlix"
+type = "add-on"
+blender_version_min = "5.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[build]
+paths = [
+    "__init__.py",
+    "_faidlix_update_all.py",
+    "core.py",
+    "README.md",
+]
+

@@ -20,6 +20,22 @@
     },
     {
       "schema_version": "1.0.0",
+      "id": "faidlix_outliner",
+      "name": "Faidlix_Outliner",
+      "tagline": "Select object and collection hierarchies from the Outliner",
+      "version": "0.2.14",
+      "type": "add-on",
+      "maintainer": "Faidlix",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "blender_version_min": "5.2.0",
+      "archive_url": "./faidlix_outliner-0.2.14.zip",
+      "archive_size": 17826,
+      "archive_hash": "sha256:ed7234fe745189c4859e1dd1448dbbebbe2c5bbc8525987f4338a68a71cb3e26"
+    },
+    {
+      "schema_version": "1.0.0",
       "id": "faidlix_paint",
       "name": "Faidlix Paint",
       "tagline": "Fill an entire paint layer, mask, or selected UV island",
