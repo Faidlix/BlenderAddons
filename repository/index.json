@@ -10,7 +10,9 @@
       "version": "2.3.9",
       "type": "add-on",
       "maintainer": "Faidlix",
-      "license": ["SPDX:GPL-3.0-or-later"],
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
       "blender_version_min": "5.2.0",
       "website": "https://github.com/Faidlix/BlenderAddons",
       "permissions": {
@@ -67,6 +69,22 @@
       "archive_url": "./faidlix_paint-0.4.8.zip",
       "archive_size": 20527,
       "archive_hash": "sha256:d2c7ce911314134c7b396e084529dd67ec65c8fabcff1948609d923a953dd436"
+    },
+    {
+      "schema_version": "1.0.0",
+      "id": "faidlix_weight",
+      "name": "Faidlix_Weight",
+      "tagline": "Mirror selected vertex weights with left and right name matching",
+      "version": "1.3.0",
+      "type": "add-on",
+      "maintainer": "Faidlix",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "blender_version_min": "5.2.0",
+      "archive_url": "./faidlix_weight-1.3.0.zip",
+      "archive_size": 13280,
+      "archive_hash": "sha256:c92a50f286a1c2d18145dea8d08cb99fa535aa2d2d34bca0d518ea9b3c14a560"
     }
   ]
 }
