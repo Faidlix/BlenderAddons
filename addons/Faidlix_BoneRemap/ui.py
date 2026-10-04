@@ -383,7 +383,7 @@ class FBR_MT_reuse_mapping(Menu):
 
 class FBR_PT_main(Panel):
     bl_idname = "FBR_PT_main"
-    bl_label = "Faidlix_Retarget Motion · v0.6.0"
+    bl_label = "Faidlix_Retarget Motion · v0.6.1"
     bl_options = {"DEFAULT_CLOSED"}
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"

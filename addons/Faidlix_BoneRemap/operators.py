@@ -1809,9 +1809,18 @@ class FBR_OT_axis_correction(Operator):
                 source_rotation, target_rotation = _mapping_rest_rotations(
                     source_obj, target_obj, source_bone, target_bone
                 )
-                candidate.rotation_offset = (
-                    source_rotation.inverted() @ target_rotation
-                ).to_euler("XYZ")
+                total_offset = source_rotation.inverted() @ target_rotation
+                if pair:
+                    relative_offset = (
+                        Euler(candidate.rotation_offset, "XYZ")
+                        .to_quaternion()
+                        .inverted()
+                        @ total_offset
+                    ).to_euler("XYZ")
+                    mapping.pair_rotation_offset = relative_offset
+                    pair.pair_rotation_offset = tuple(relative_offset)
+                    break
+                candidate.rotation_offset = total_offset.to_euler("XYZ")
             _update_axis_preview(context)
         elif self.action == "CANCEL":
             mapping.rotation_offset = tuple(source.axis_backup_rotation)

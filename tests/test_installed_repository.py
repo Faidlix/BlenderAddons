@@ -30,7 +30,7 @@ fbx_zip = __import__(fbx_zip_name, fromlist=['*'])
 texture_marge = __import__(texture_marge_name, fromlist=['*'])
 assert paint.ADDON_VERSION == (0, 4, 8)
 assert paint.GITHUB_REPOSITORY_URL == URL
-assert bone_remap.bl_info["version"] == (0, 6, 0)
+assert bone_remap.bl_info["version"] == (0, 6, 1)
 assert bone_remap.updater.GITHUB_REPOSITORY_URL == URL
 assert outliner.ADDON_VERSION == (0, 2, 15)
 assert outliner.GITHUB_REPOSITORY_URL == URL
