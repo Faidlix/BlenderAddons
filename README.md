@@ -9,6 +9,7 @@ Blender Repository URL：
 ## 套件
 
 - `faidlix_paint`：Faidlix Paint。
+- `faidlix_outliner`：Faidlix Outliner 階層選取與批次顯示控制。
 - `faidlix_weight`：Faidlix Weight 選取點權重鏡射與左右名稱對應。
 - `faidlix_manager`：選配的「全部更新」管理器。
 
