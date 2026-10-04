@@ -9,23 +9,31 @@ repo = next(repo for repo in bpy.context.preferences.extensions.repos
 paint_name = f"bl_ext.{repo.module}.faidlix_paint"
 outliner_name = f"bl_ext.{repo.module}.faidlix_outliner"
 manager_name = f"bl_ext.{repo.module}.faidlix_manager"
+fbx_zip_name = f"bl_ext.{repo.module}.faidlix_fbx_zip_exporter"
 assert addon_utils.check(paint_name)[1]
 assert addon_utils.check(outliner_name)[1]
 assert addon_utils.check(manager_name)[1]
+assert addon_utils.check(fbx_zip_name)[1]
 
 paint = __import__(paint_name, fromlist=['*'])
 outliner = __import__(outliner_name, fromlist=['*'])
 manager = __import__(manager_name, fromlist=['*'])
+fbx_zip = __import__(fbx_zip_name, fromlist=['*'])
 assert paint.ADDON_VERSION == (0, 4, 8)
 assert paint.GITHUB_REPOSITORY_URL == URL
 assert outliner.ADDON_VERSION == (0, 2, 14)
 assert outliner.GITHUB_REPOSITORY_URL == URL
 assert manager.ADDON_VERSION == (1, 0, 1)
 assert manager.REPOSITORY_URL == URL
+assert fbx_zip.ADDON_VERSION == (1, 7, 0)
+assert fbx_zip.PACKAGE_ID == "faidlix_fbx_zip_exporter"
+assert fbx_zip.REPOSITORY_URL == URL
 assert hasattr(bpy.ops.faidlix_paint, "online_update")
 assert hasattr(bpy.ops.faidlix_outliner, "online_update")
 assert hasattr(bpy.ops.faidlix_manager, "update_all")
+assert hasattr(bpy.ops.export_scene, "fbx_zip_online_update")
 assert bpy.ops.faidlix_paint.online_update() == {'FINISHED'}
 assert bpy.ops.faidlix_outliner.online_update() == {'FINISHED'}
+assert bpy.ops.export_scene.fbx_zip_online_update() == {'FINISHED'}
 assert bpy.ops.faidlix_manager.update_all() == {'FINISHED'}
 print("FAIDLIX_CENTRAL_INSTALLED_TEST=PASS")

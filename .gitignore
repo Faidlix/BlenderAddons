@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 驗證/
 dist/
+validation-output/

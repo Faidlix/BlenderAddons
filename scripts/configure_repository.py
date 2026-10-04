@@ -9,7 +9,12 @@ REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
     "Faidlix/BlenderAddons/main/repository/index.json"
 )
-PACKAGE_IDS = ("faidlix_paint", "faidlix_outliner", "faidlix_manager")
+PACKAGE_IDS = (
+    "faidlix_paint",
+    "faidlix_outliner",
+    "faidlix_fbx_zip_exporter",
+    "faidlix_manager",
+)
 
 
 def find_repo():
