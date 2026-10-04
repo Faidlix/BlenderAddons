@@ -1,0 +1,10 @@
+schema_version = "1.0.0"
+id = "blander_texture_marge"
+version = "1.5.5"
+name = "Faidlix Texture Marge"
+tagline = "Merge image channels and build a copied material"
+maintainer = "Faidlix"
+type = "add-on"
+blender_version_min = "5.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
