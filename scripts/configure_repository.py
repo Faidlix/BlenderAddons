@@ -14,6 +14,7 @@ PACKAGE_IDS = (
     "faidlix_outliner",
     "faidlix_fbx_zip_exporter",
     "blander_texture_marge",
+    "faidlix_weight",
     "faidlix_manager",
 )
 
