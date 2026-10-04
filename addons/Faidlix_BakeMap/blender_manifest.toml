@@ -1,0 +1,27 @@
+schema_version = "1.0.0"
+id = "faidlix_bakemap"
+version = "2.3.9"
+name = "Faidlix BakeMap"
+tagline = "Bake material information from a reference mesh to a target mesh"
+maintainer = "Faidlix"
+website = "https://github.com/Faidlix/BlenderAddons"
+type = "add-on"
+blender_version_min = "5.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+network = "Check and install Faidlix BakeMap updates from GitHub"
+
+[build]
+paths_exclude_pattern = [
+    "__pycache__/",
+    "*.pyc",
+    "/.git/",
+    "/.gitignore",
+    "/repository/",
+    "/scripts/",
+    "/tests/",
+    "/發布版本/",
+    "/*.zip",
+]
+
