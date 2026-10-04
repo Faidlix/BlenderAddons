@@ -9,14 +9,7 @@ REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
     "Faidlix/BlenderAddons/main/repository/index.json"
 )
-PACKAGE_IDS = (
-    "faidlix_paint",
-    "faidlix_outliner",
-    "faidlix_weight",
-    "faidlix_fbx_zip_exporter",
-    "blander_texture_marge",
-    "faidlix_manager",
-)
+PACKAGE_ID = "blander_texture_marge"
 
 
 def find_repo():
@@ -43,17 +36,17 @@ else:
 assert repo is not None
 assert bpy.ops.extensions.repo_sync(repo_index=index) == {'FINISHED'}
 
-for package_id in PACKAGE_IDS:
-    module_name = f"bl_ext.{repo.module}.{package_id}"
-    package_dir = os.path.join(repo.directory, package_id)
-    if addon_utils.check(module_name)[1]:
-        bpy.ops.preferences.addon_disable(module=module_name)
-    if os.path.isdir(package_dir):
-        assert bpy.ops.extensions.package_uninstall(
-            repo_index=index, pkg_id=package_id) == {'FINISHED'}
-    assert bpy.ops.extensions.package_install(
-        repo_index=index, pkg_id=package_id, enable_on_install=True) == {'FINISHED'}
-
+module_name = f"bl_ext.{repo.module}.{PACKAGE_ID}"
+package_dir = os.path.join(repo.directory, PACKAGE_ID)
+if addon_utils.check(module_name)[1]:
+    bpy.ops.preferences.addon_disable(module=module_name)
+if os.path.isdir(package_dir):
+    assert bpy.ops.extensions.package_uninstall(
+        repo_index=index, pkg_id=PACKAGE_ID) == {'FINISHED'}
+assert bpy.ops.extensions.package_install(
+    repo_index=index, pkg_id=PACKAGE_ID, enable_on_install=True) == {'FINISHED'}
 bpy.ops.wm.save_userpref()
-print(f"FAIDLIX_REPOSITORY={repo.remote_url}")
-print("FAIDLIX_CENTRAL_INSTALL=PASS")
+assert addon_utils.check(module_name)[1]
+print(f"FAIDLIX_TEXTURE_MARGE_REPOSITORY={repo.remote_url}")
+print(f"FAIDLIX_TEXTURE_MARGE_MODULE={module_name}")
+print("FAIDLIX_TEXTURE_MARGE_GITHUB_INSTALL=PASS")
