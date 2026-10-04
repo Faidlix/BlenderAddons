@@ -1,7 +1,7 @@
 # Faidlix Bone Remap UX 待辦
 
 - 記錄日期：2026-10-05
-- 狀態：**0.6.4 已實作，正式安裝驗證中**
+- 狀態：**0.6.4 已實作並發布；專案驗證未通過，詳見 `bone-remap-0.6.4-validation.md`**
 - 適用套件：`faidlix_bone_remap`
 - 參考：本次對話提供的圖 1～圖 7
 
