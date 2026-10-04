@@ -17,6 +17,7 @@ Blender 5.2 extension for merging arbitrary source image channels into one RGBA 
 - Generated images remain inside the `.blend` until exported.
 - Separate Merge, Build Material and Export operations.
 - Online update through the shared Faidlix Blender Extension repository.
+- The optional Faidlix Manager is the only provider of the global Update All panel.
 - Source mode uses tab-style buttons, and changing an image type refreshes its channel purpose automatically.
 - Adding content to output A defaults the format to TGA; choosing PNG shows an alpha-channel warning.
 - Collapsible image rows, compact channel mapping, button-style output settings, editable final output names, and non-destructive material-slot assignment.

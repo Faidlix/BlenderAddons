@@ -17,14 +17,14 @@ try:
     settings = scene.ftm_settings
     bpy.ops.ftm.reset_all()
     assert ADDON.FTM_OT_online_update.bl_idname == "ftm.online_update"
-    assert ADDON.bl_info['version'] == (1, 5, 5)
-    assert ADDON.ADDON_VERSION == (1, 5, 5)
+    assert ADDON.bl_info['version'] == (1, 5, 6)
+    assert ADDON.ADDON_VERSION == (1, 5, 6)
     assert ADDON.PACKAGE_ID == "blander_texture_marge"
     assert ADDON.GITHUB_REPOSITORY_URL.endswith("Faidlix/BlenderAddons/main/repository/index.json")
     assert ADDON._latest_version_from_index({"data": [
-        {"id": "blander_texture_marge", "version": "1.5.5"},
+        {"id": "blander_texture_marge", "version": "1.5.6"},
         {"id": "faidlix_paint", "version": "0.4.8"},
-    ]}) == (1, 5, 5)
+    ]}) == (1, 5, 6)
     assert ADDON.FTM_PT_panel.bl_options == {'DEFAULT_CLOSED'}
     assert not hasattr(ADDON, "_reload_updated_addon")
     assert settings.update_status == ""

@@ -7,16 +7,16 @@
       "id": "blander_texture_marge",
       "name": "Faidlix Texture Marge",
       "tagline": "Merge image channels and build a copied material",
-      "version": "1.5.5",
+      "version": "1.5.6",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:GPL-3.0-or-later"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./blander_texture_marge-1.5.5.zip",
-      "archive_size": 22636,
-      "archive_hash": "sha256:0fed1619eeb45672e66c821873c8d32ef406297fe5afc967d95af553d64bb0ee"
+      "archive_url": "./blander_texture_marge-1.5.6.zip",
+      "archive_size": 20567,
+      "archive_hash": "sha256:35b37741ca161894915d0cfbb0e866d6c97d7f7a7737734ad70ba3b3634650a1"
     },
     {
       "schema_version": "1.0.0",

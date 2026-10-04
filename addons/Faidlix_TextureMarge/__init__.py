@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix Texture Marge",
     "author": "Faidlix",
-    "version": (1, 5, 5),
+    "version": (1, 5, 6),
     "blender": (5, 2, 0),
     "location": "3D Viewport > N-panel > Faidlix",
     "description": "Merge image channels and build a copied material without changing source data",
@@ -28,20 +28,8 @@ from bpy.props import (
 )
 from bpy.types import Operator, Panel, PropertyGroup
 from bpy_extras.io_utils import ExportHelper, ImportHelper
-try:
-    from ._faidlix_update_all import make_classes
-except ImportError:  # Source-validation loaders may not create a package.
-    import importlib.util as _importlib_util
-    _helper_spec = _importlib_util.spec_from_file_location(
-        "faidlix_texture_merge_update_all", os.path.join(os.path.dirname(__file__), "_faidlix_update_all.py")
-    )
-    _helper_module = _importlib_util.module_from_spec(_helper_spec)
-    _helper_spec.loader.exec_module(_helper_module)
-    make_classes = _helper_module.make_classes
 
-UPDATE_ALL_CLASSES = make_classes("texture_merge", "TextureMerge")
-
-ADDON_VERSION = (1, 5, 5)
+ADDON_VERSION = (1, 5, 6)
 PACKAGE_ID = "blander_texture_marge"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -1393,7 +1381,7 @@ OPERATOR_CLASSES = (
     FTM_OT_connect_material, FTM_OT_apply_material, FTM_OT_export_texture, FTM_OT_open_export_location,
     FTM_OT_online_update,
 )
-UI_CLASSES = (FTM_PT_panel,) + UPDATE_ALL_CLASSES
+UI_CLASSES = (FTM_PT_panel,)
 CLASSES = PROPERTY_CLASSES + OPERATOR_CLASSES + UI_CLASSES
 
 
