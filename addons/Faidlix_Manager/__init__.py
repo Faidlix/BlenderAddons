@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix Manager",
     "author": "Faidlix",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (5, 2, 0),
     "location": "3D View > Sidebar > Faidlix",
     "description": "Update installed Faidlix extensions together",
@@ -17,7 +17,7 @@ import bpy
 from bpy.types import Operator, Panel
 
 
-ADDON_VERSION = (1, 0, 0)
+ADDON_VERSION = (1, 0, 1)
 PACKAGE_ID = "faidlix_manager"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -99,6 +99,35 @@ def _state():
     )
 
 
+def _installed_package_count(repo):
+    return sum(
+        1
+        for item in _repository_index(repo).get("data", [])
+        if item.get("id") and os.path.isdir(os.path.join(repo.directory, item["id"]))
+    )
+
+
+def _reset_completion_state():
+    state = _state()
+    if state["running"]:
+        return None
+    state.update(done=0, total=0, errors=0, message="")
+    _redraw()
+    return None
+
+
+def _finish_update(state):
+    state["running"] = False
+    state["message"] = (
+        "全部更新完成"
+        if not state["errors"]
+        else f"更新完成（{state['errors']} 個失敗）"
+    )
+    bpy.ops.wm.save_userpref()
+    _redraw()
+    bpy.app.timers.register(_reset_completion_state, first_interval=1.0)
+
+
 def _redraw():
     for window in bpy.context.window_manager.windows:
         for area in window.screen.areas:
@@ -131,6 +160,16 @@ class FAIDLIXMANAGER_OT_update_all(Operator):
         items = _outdated_packages(repo)
         if not items:
             bpy.ops.wm.save_userpref()
+            state = _state()
+            state.update(
+                running=False,
+                done=0,
+                total=0,
+                errors=0,
+                message="全部更新完成",
+            )
+            _redraw()
+            bpy.app.timers.register(_reset_completion_state, first_interval=1.0)
             self.report({'INFO'}, "已安裝的 Faidlix 外掛都是最新版")
             return {'FINISHED'}
 
@@ -139,12 +178,25 @@ class FAIDLIXMANAGER_OT_update_all(Operator):
 
         def update_next():
             if not items:
-                state["running"] = False
-                state["message"] = "更新完成"
-                bpy.ops.wm.save_userpref()
-                _redraw()
+                _finish_update(state)
                 return None
             package_id, latest, enabled = items.pop(0)
+            if package_id == PACKAGE_ID:
+                # The manager is intentionally last. Finish every UI/state
+                # write before replacing this package, then return without
+                # touching any class or RNA owned by the old module.
+                state["done"] += 1
+                state["message"] = "全部更新完成"
+                state["running"] = False
+                bpy.ops.wm.save_userpref()
+                _redraw()
+                bpy.app.timers.register(_reset_completion_state, first_interval=1.0)
+                bpy.ops.extensions.package_install(
+                    repo_index=repo_index,
+                    pkg_id=package_id,
+                    enable_on_install=enabled,
+                )
+                return None
             try:
                 result = bpy.ops.extensions.package_install(
                     repo_index=repo_index,
@@ -168,25 +220,31 @@ class FAIDLIXMANAGER_OT_update_all(Operator):
 
 
 class FAIDLIXMANAGER_PT_update_all(Panel):
-    bl_label = "Faidlix 外掛"
+    bl_label = "Faidlix 全部更新"
     bl_idname = "FAIDLIXMANAGER_PT_update_all"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "Faidlix"
     bl_order = -100
+    bl_options = {'HIDE_HEADER'}
+
+    @classmethod
+    def poll(cls, context):
+        _index, repo = _repository(context)
+        return repo is not None and _installed_package_count(repo) >= 2
 
     def draw(self, _context):
         state = _state()
         layout = self.layout
         row = layout.row()
         row.enabled = not state["running"]
-        text = (f"全部更新（{state['done']}/{state['total']}）"
-                if state["running"] else "全部更新")
+        if state["running"]:
+            text = f"全部更新（{state['done']}/{state['total']}）"
+        elif state["message"]:
+            text = state["message"]
+        else:
+            text = "全部更新"
         row.operator(FAIDLIXMANAGER_OT_update_all.bl_idname, text=text, icon='FILE_REFRESH')
-        if state["message"]:
-            layout.label(text=state["message"], icon='INFO')
-        if state["errors"]:
-            layout.label(text=f"{state['errors']} 個更新失敗", icon='ERROR')
 
 
 CLASSES = (FAIDLIXMANAGER_OT_update_all, FAIDLIXMANAGER_PT_update_all)
