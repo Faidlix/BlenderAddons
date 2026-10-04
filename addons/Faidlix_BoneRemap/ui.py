@@ -5,6 +5,9 @@ from .model import flip_bone_name, reuse_mapping_items
 from .operators import _mapping_axes_match
 
 
+ADDON_VERSION = (0, 6, 2)
+
+
 def _source_file_index(settings, source_file):
     pointer = source_file.as_pointer()
     return next(
@@ -383,11 +386,16 @@ class FBR_MT_reuse_mapping(Menu):
 
 class FBR_PT_main(Panel):
     bl_idname = "FBR_PT_main"
-    bl_label = "Faidlix_Retarget Motion · v0.6.1"
+    bl_label = "Faidlix_Retarget Motion"
     bl_options = {"DEFAULT_CLOSED"}
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "Faidlix"
+
+    def draw_header(self, _context):
+        row = self.layout.row(align=True)
+        row.alignment = "RIGHT"
+        row.label(text=f"v{'.'.join(map(str, ADDON_VERSION))}")
 
     def draw(self, context):
         layout = self.layout

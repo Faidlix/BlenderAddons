@@ -23,23 +23,23 @@
       "id": "blander_texture_marge",
       "name": "Faidlix Texture Marge",
       "tagline": "Merge image channels and build a copied material",
-      "version": "1.5.6",
+      "version": "1.5.7",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:GPL-3.0-or-later"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./blander_texture_marge-1.5.6.zip",
-      "archive_size": 20567,
-      "archive_hash": "sha256:35b37741ca161894915d0cfbb0e866d6c97d7f7a7737734ad70ba3b3634650a1"
+      "archive_url": "./blander_texture_marge-1.5.7.zip",
+      "archive_size": 20629,
+      "archive_hash": "sha256:6d38e20181cf6ebce07a8282c141b18799da3937a20a2ff482431863792dff6c"
     },
     {
       "schema_version": "1.0.0",
       "id": "faidlix_bakemap",
       "name": "Faidlix BakeMap",
       "tagline": "Bake material information from a reference mesh to a target mesh",
-      "version": "2.3.9",
+      "version": "2.3.10",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
@@ -50,16 +50,16 @@
       "permissions": {
         "network": "Check and install Faidlix BakeMap updates from GitHub"
       },
-      "archive_url": "./faidlix_bakemap-2.3.9.zip",
-      "archive_size": 33647,
-      "archive_hash": "sha256:1fd94bf59bbab16e84b4f818adccbc39f7473b5440534f2bf3ad9d84df8cef9b"
+      "archive_url": "./faidlix_bakemap-2.3.10.zip",
+      "archive_size": 33714,
+      "archive_hash": "sha256:f53dc26397baaba53afd32e72270cde88af95b8260d438337dc4262e3420cb01"
     },
     {
       "schema_version": "1.0.0",
       "id": "faidlix_bone_remap",
       "name": "Faidlix Bone Remap",
       "tagline": "Batch import and retarget armature actions",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
@@ -71,25 +71,25 @@
         "files": "Import FBX, GLB, GLTF and BLEND animation files",
         "network": "Check and install updates from the GitHub extension repository"
       },
-      "archive_url": "./faidlix_bone_remap-0.6.1.zip",
-      "archive_size": 34306,
-      "archive_hash": "sha256:1c6d4e7e1f6eb9e7534d537cbda7e9e0b5a11628603655b1d0e0bae55cf294ab"
+      "archive_url": "./faidlix_bone_remap-0.6.2.zip",
+      "archive_size": 34376,
+      "archive_hash": "sha256:b44c59e1b5aea106c4078dbeb728965c8e247b49d161e8161b4c246f8a2584d6"
     },
     {
       "schema_version": "1.0.0",
       "id": "faidlix_fbx_zip_exporter",
       "name": "Faidlix_Fbx ZipExporter",
       "tagline": "Export FBX and package only connected material textures",
-      "version": "1.7.0",
+      "version": "1.7.1",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:MIT"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_fbx_zip_exporter-1.7.0.zip",
-      "archive_size": 10648,
-      "archive_hash": "sha256:636bb5e1136a24a5051665ab5527dab5757ab3a00c4cb7869133a4a7c500a47c"
+      "archive_url": "./faidlix_fbx_zip_exporter-1.7.1.zip",
+      "archive_size": 10750,
+      "archive_hash": "sha256:10458866a1ac427d36adb81e61af1999c8f67d61d9232b6fb6da13c8f2182743"
     },
     {
       "schema_version": "1.0.0",

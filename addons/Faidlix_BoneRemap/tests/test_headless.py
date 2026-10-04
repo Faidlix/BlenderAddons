@@ -121,7 +121,8 @@ def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     addon.register()
     version_text = ".".join(str(part) for part in addon.bl_info["version"])
-    assert bpy.types.FBR_PT_main.bl_label == f"Faidlix_Retarget Motion · v{version_text}"
+    assert bpy.types.FBR_PT_main.bl_label == "Faidlix_Retarget Motion"
+    assert hasattr(bpy.types.FBR_PT_main, "draw_header")
     timing_scene = SimpleNamespace(render=SimpleNamespace(fps=30, fps_base=1.0))
     assert _clip_timing_labels(
         timing_scene,

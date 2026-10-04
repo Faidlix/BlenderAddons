@@ -22,7 +22,7 @@ _default, enabled = addon_utils.check(addon_module)
 assert enabled, addon_module
 
 addon = importlib.import_module(addon_module)
-assert addon.ADDON_VERSION == (2, 3, 9)
+assert addon.ADDON_VERSION == (2, 3, 10)
 assert addon.GITHUB_REPOSITORY_URL == REPOSITORY_URL
 assert hasattr(bpy.types.Scene, "faidlix_bakemap")
 assert hasattr(bpy.types, "FAIDLIX_OT_online_update")

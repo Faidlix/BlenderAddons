@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "faidlix_bakemap"
-version = "2.3.9"
+version = "2.3.10"
 name = "Faidlix BakeMap"
 tagline = "Bake material information from a reference mesh to a target mesh"
 maintainer = "Faidlix"

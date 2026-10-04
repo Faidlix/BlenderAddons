@@ -15,11 +15,12 @@ root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root.parent))
 addon = importlib.import_module('Faidlix_FBXZip')
 addon.register()
-assert addon.bl_info['version'] == (1, 7, 0)
-assert addon.ADDON_VERSION == (1, 7, 0)
+assert addon.bl_info['version'] == (1, 7, 1)
+assert addon.ADDON_VERSION == (1, 7, 1)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
+assert hasattr(addon.FBXZIP_PT_panel, 'draw_header')
 assert addon.FBXZIP_PT_panel.bl_category == 'Faidlix'
 assert addon.FBXZIP_PT_panel.bl_order == 20
 assert 'DEFAULT_CLOSED' in addon.FBXZIP_PT_panel.bl_options
