@@ -13,6 +13,7 @@ Blender Repository URL：
 - `faidlix_weight`：Faidlix Weight 選取點權重鏡射與左右名稱對應。
 - `faidlix_fbx_zip_exporter`：Faidlix_Fbx ZipExporter，輸出 FBX 並封裝模型實際使用的貼圖。
 - `blander_texture_marge`：Faidlix Texture Marge 貼圖通道合併與材質串接。
+- `faidlix_weight`：Faidlix Weight 選取點權重鏡射與左右名稱對應。
 - `faidlix_manager`：選配的「全部更新」管理器。
 
 安裝 Manager 不是使用其他外掛的前提。Manager 只會更新已安裝的 Faidlix 套件，不會自動安裝其他外掛。

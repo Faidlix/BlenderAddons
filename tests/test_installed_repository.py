@@ -49,5 +49,6 @@ assert bpy.ops.faidlix_outliner.online_update() == {'FINISHED'}
 assert bpy.ops.faidlix_weight.online_update() == {'FINISHED'}
 assert bpy.ops.export_scene.fbx_zip_online_update() == {'FINISHED'}
 assert bpy.ops.ftm.online_update() == {'FINISHED'}
+assert bpy.ops.faidlix_weight.online_update() == {'FINISHED'}
 assert bpy.ops.faidlix_manager.update_all() == {'FINISHED'}
 print("FAIDLIX_CENTRAL_INSTALLED_TEST=PASS")
