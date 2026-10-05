@@ -35,8 +35,10 @@
   - `Run_Run`：0.44751
 - 全部結果低於角色高度的 12%，沒有先前漂浮在角色旁邊或遠離腳部的極端座標。
 
-## MCP 與正式使用者安裝狀態
+## MCP 與正式使用者安裝結果
 
 - 優先嘗試 Blender 5.2 MCP 背景驗證，但 MCP Server 未設定 `BLENDER_PATH`，回報找不到 `blender` 可執行檔。
 - 因此依需求的後備方式，使用同一台電腦上的 Blender 5.2.2 LTS 命令列直接執行與隔離安裝驗證。
-- 驗證期間偵測到既有 Blender 5.2 程序仍在執行，未覆寫其正式使用者擴充套件；需在該程序安全關閉後再安裝 0.6.6 並移除 0.6.5。
+- 使用者儲存並關閉原本有未儲存變更的 Blender 後，已將正式安裝的 0.6.5 備份至 `backups/faidlix_bone_remap-before-0.6.6-20261005-232414`。
+- Blender 擴充命令回報 `STATUS Reinstalled "faidlix_bone_remap"`；正式 Repository 目錄只剩一份套件，manifest 版本為 0.6.6，未再找到 0.6.5。
+- Blender 5.2.2 LTS 以 `--factory-startup` 從正式安裝路徑匯入、註冊及解除註冊成功，輸出 `FORMAL_INSTALLED_VERSION=0.6.6`。
