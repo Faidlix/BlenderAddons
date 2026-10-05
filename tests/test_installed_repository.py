@@ -34,7 +34,7 @@ texture_marge = __import__(texture_marge_name, fromlist=['*'])
 assert paint.ADDON_VERSION == (0, 4, 8)
 assert preference.ADDON_VERSION == (1, 1, 0)
 assert paint.GITHUB_REPOSITORY_URL == URL
-assert bone_remap.bl_info["version"] == (0, 6, 5)
+assert bone_remap.bl_info["version"] == (0, 6, 6)
 assert bone_remap.updater.GITHUB_REPOSITORY_URL == URL
 assert outliner.ADDON_VERSION == (0, 2, 17)
 assert outliner.GITHUB_REPOSITORY_URL == URL

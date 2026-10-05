@@ -10,7 +10,7 @@ from .model import (
 from .operators import _mapping_axes_match
 
 
-ADDON_VERSION = (0, 6, 5)
+ADDON_VERSION = (0, 6, 6)
 
 
 def _source_file_index(settings, source_file):
@@ -61,16 +61,26 @@ def _reused_mapping_sources(settings, source):
     ]
 
 
-def _animation_row_columns(row):
+def _animation_row_columns(row, settings, child=False):
     remove = row.row(align=True)
     remove.ui_units_x = 1.25
     enabled = row.row(align=True)
     enabled.ui_units_x = 1.35
-    content = row.split(factor=0.64)
+    content = row.split(factor=settings.animation_info_factor)
     information = content.row(align=True)
-    filename_and_action = information.split(factor=0.48)
+    if child:
+        action_and_timing = information.split(
+            factor=settings.animation_child_name_factor
+        )
+        action = action_and_timing.row(align=True)
+        timing = action_and_timing.row(align=True)
+        controls = content.row(align=True)
+        return remove, enabled, None, action, timing, controls
+    filename_and_action = information.split(factor=settings.animation_file_factor)
     filename = filename_and_action.row(align=True)
-    action_and_timing = filename_and_action.split(factor=0.52)
+    action_and_timing = filename_and_action.split(
+        factor=settings.animation_action_factor
+    )
     action = action_and_timing.row(align=True)
     timing = action_and_timing.row(align=True)
     controls = content.row(align=True)
@@ -82,9 +92,11 @@ def _remove_file_button(layout, file_index):
     button.file_index = file_index
 
 
-def _draw_animation_header(layout):
+def _draw_animation_header(layout, settings):
     row = layout.row(align=True)
-    remove, enabled, filename, action, timing, controls = _animation_row_columns(row)
+    remove, enabled, filename, action, timing, controls = _animation_row_columns(
+        row, settings
+    )
     remove.label(text="")
     enabled.label(text="啟用")
     filename.label(text="檔案名稱")
@@ -93,11 +105,19 @@ def _draw_animation_header(layout):
     options = controls.row(align=True)
     options.label(text="設為原地動畫")
     options.label(text="複製對稱動畫")
+    widths = layout.row(align=True)
+    widths.label(text="欄寬")
+    widths.prop(settings, "animation_file_factor", text="檔案", slider=True)
+    widths.prop(settings, "animation_action_factor", text="動畫", slider=True)
+    widths.prop(settings, "animation_child_name_factor", text="子動畫", slider=True)
+    widths.prop(settings, "animation_info_factor", text="操作", slider=True)
 
 
-def _draw_multi_clip_header(layout, source, file_index):
+def _draw_multi_clip_header(layout, source, file_index, settings):
     row = layout.row(align=True)
-    remove, enabled, filename, action, _timing, _controls = _animation_row_columns(row)
+    remove, enabled, filename, action, _timing, _controls = _animation_row_columns(
+        row, settings
+    )
     _remove_file_button(remove, file_index)
     filename.prop(
         source,
@@ -121,7 +141,11 @@ def _draw_multi_clip_header(layout, source, file_index):
 
 def _draw_clip_row(context, layout, source, file_index, clip, clip_index, show_file_name):
     row = layout.row(align=True)
-    remove, enabled, filename, action, timing, controls = _animation_row_columns(row)
+    remove, enabled, filename, action, timing, controls = _animation_row_columns(
+        row,
+        context.scene.fbr_settings,
+        child=not show_file_name,
+    )
     frame_text, seconds_text = _clip_timing_labels(context.scene, clip)
     if show_file_name:
         _remove_file_button(remove, file_index)
@@ -131,7 +155,6 @@ def _draw_clip_row(context, layout, source, file_index, clip, clip_index, show_f
     else:
         remove.label(text="")
         enabled.prop(clip, "enabled", text="")
-        filename.label(text="")
         action.label(text=clip.action_name)
     timing.alignment = "LEFT"
     frames = timing.row(align=True)
@@ -199,7 +222,7 @@ class FBR_UL_animation_rows(UIList):
             return
         source = data.files[file_index]
         if item.clip_index < 0:
-            _draw_multi_clip_header(layout, source, file_index)
+            _draw_multi_clip_header(layout, source, file_index, data)
         elif item.clip_index < len(source.clips):
             _draw_clip_row(
                 context,
@@ -242,7 +265,7 @@ def _draw_mapping_row(context, layout, source_file, item, index):
     file_index = _source_file_index(settings, source_file)
 
     row = layout.row(align=True)
-    columns = row.split(factor=0.20)
+    columns = row.split(factor=settings.mapping_source_factor)
     group_kind, is_group_parent, is_group_child = _mapping_group_info(source_file, item)
     source_cell = columns.row(align=True)
     if is_group_parent:
@@ -258,7 +281,7 @@ def _draw_mapping_row(context, layout, source_file, item, index):
     elif is_group_child:
         source_cell.label(text="")
     source_cell.label(text=_paired_mapping_label(source_file, item, "source_bone"))
-    target_and_tools = columns.split(factor=0.55)
+    target_and_tools = columns.split(factor=settings.mapping_target_factor)
 
     target_row = target_and_tools.row(align=True)
     target_row.alignment = "LEFT"
@@ -361,8 +384,8 @@ def _draw_ik_settings(layout, file_index, source_file):
         shape = editor.row(align=True)
         shape.prop(active, "ik_shape", text="")
         shape.prop(active, "ik_shape_scale", text="大小")
+        shape.prop(active, "ik_shape_wire_width", text="Width")
         appearance = editor.row(align=True)
-        appearance.prop(active, "ik_shape_wire_width", text="線框粗細")
         appearance.prop(active, "ik_shape_color", text="顏色")
         solver = editor.row(align=True)
         solver.prop(active, "ik_chain_count")
@@ -527,7 +550,7 @@ class FBR_PT_main(Panel):
         if settings.files_expanded:
             if not animation_rows_are_current(settings):
                 rebuild_animation_rows(settings)
-            _draw_animation_header(source_box)
+            _draw_animation_header(source_box, settings)
             visible_rows = sum(
                 1
                 for item in settings.animation_rows
@@ -671,10 +694,24 @@ class FBR_PT_main(Panel):
             forward.prop(source, "target_forward_axis", text="Target 前方")
 
             list_area = group.column(align=True)
+            widths = list_area.row(align=True)
+            widths.label(text="欄寬")
+            widths.prop(
+                settings,
+                "mapping_source_factor",
+                text="來源",
+                slider=True,
+            )
+            widths.prop(
+                settings,
+                "mapping_target_factor",
+                text="Target／IK",
+                slider=True,
+            )
             list_header = list_area.row(align=True)
-            columns = list_header.split(factor=0.20)
+            columns = list_header.split(factor=settings.mapping_source_factor)
             columns.label(text="來源骨骼")
-            target_and_tools = columns.split(factor=0.55)
+            target_and_tools = columns.split(factor=settings.mapping_target_factor)
             target_header = target_and_tools.row(align=True)
             target_header.alignment = "LEFT"
             target_header.label(text="Target 骨骼")

@@ -330,7 +330,7 @@ class FBR_BoneMap(PropertyGroup):
     ik_shape_scale: FloatProperty(
         name="控制器大小",
         default=1.0,
-        min=0.05,
+        min=0.01,
         soft_max=5.0,
         update=update_ik_settings,
     )
@@ -401,6 +401,29 @@ class FBR_SourceFile(PropertyGroup):
     axis_backup_is_root: BoolProperty(options={"SKIP_SAVE"})
     axis_backup_pair_rotation: FloatVectorProperty(size=3, options={"SKIP_SAVE"})
     preview_scale: FloatProperty(default=1.0, min=0.0001, options={"HIDDEN"})
+    alignment_original_valid: BoolProperty(default=False, options={"HIDDEN"})
+    alignment_original_matrix: FloatVectorProperty(
+        size=16,
+        default=(
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ),
+        options={"HIDDEN"},
+    )
+    alignment_valid: BoolProperty(default=False, options={"HIDDEN"})
+    alignment_matrix: FloatVectorProperty(
+        size=16,
+        default=(
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ),
+        options={"HIDDEN"},
+    )
+    alignment_scale: FloatProperty(default=1.0, min=1.0e-8, options={"HIDDEN"})
     preview_clip: EnumProperty(items=preview_clip_items, update=update_preview_clip)
     ik_editing: BoolProperty(default=False, options={"SKIP_SAVE"})
     ik_backup_enabled: BoolProperty(options={"SKIP_SAVE"})
@@ -461,6 +484,42 @@ class FBR_Settings(PropertyGroup):
     active_animation_row_index: IntProperty(default=0)
     files_expanded: BoolProperty(default=True)
     reused_expanded: BoolProperty(default=False)
+    animation_info_factor: FloatProperty(
+        name="名稱／時間寬度",
+        default=0.68,
+        min=0.45,
+        max=0.82,
+    )
+    animation_file_factor: FloatProperty(
+        name="檔案名稱寬度",
+        default=0.38,
+        min=0.15,
+        max=0.65,
+    )
+    animation_action_factor: FloatProperty(
+        name="動畫名稱寬度",
+        default=0.58,
+        min=0.30,
+        max=0.80,
+    )
+    animation_child_name_factor: FloatProperty(
+        name="子動畫名稱寬度",
+        default=0.62,
+        min=0.35,
+        max=0.82,
+    )
+    mapping_source_factor: FloatProperty(
+        name="來源骨骼寬度",
+        default=0.22,
+        min=0.12,
+        max=0.42,
+    )
+    mapping_target_factor: FloatProperty(
+        name="Target／IK 寬度",
+        default=0.58,
+        min=0.38,
+        max=0.76,
+    )
     output_mode: EnumProperty(
         name="輸出",
         items=(

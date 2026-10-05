@@ -397,14 +397,15 @@ def iter_bake_clip(
                 if constraint.mute:
                     continue
                 desired = desired_ik_positions[mapping.as_pointer()]
-                for _iteration in range(12):
-                    context.view_layer.update()
-                    error = desired - owner.matrix.translation
-                    if error.length <= 1.0e-5:
-                        break
-                    control_matrix = control.matrix.copy()
-                    control_matrix.translation += error
-                    control.matrix = control_matrix
+                # PoseBone.matrix and owner.matrix are both in Target armature
+                # object space.  Assign the control directly in that same
+                # space; the previous iterative owner-error correction mixed
+                # the solved IK result back into the control and could send it
+                # far away after scale/axis conversion.
+                control_matrix = control.bone.matrix_local.copy()
+                control_matrix.translation = desired
+                control.matrix = control_matrix
+                context.view_layer.update()
                 control.keyframe_insert(
                     data_path="location",
                     frame=target_frame,

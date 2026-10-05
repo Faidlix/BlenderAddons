@@ -314,7 +314,7 @@ def _ik_shape_object(shape):
     elif collection.name not in bpy.context.scene.collection.children:
         bpy.context.scene.collection.children.link(collection)
     collection.hide_render = True
-    collection.hide_viewport = False
+    collection.hide_viewport = True
     existing = bpy.data.objects.get(name)
     if existing:
         if existing.name not in collection.objects:
@@ -322,8 +322,8 @@ def _ik_shape_object(shape):
                 owner.objects.unlink(existing)
             collection.objects.link(existing)
         existing.hide_render = True
-        existing.hide_viewport = False
-        existing.hide_set(False)
+        existing.hide_viewport = True
+        existing.hide_set(True)
         existing["_fbr_ik_shape"] = True
         return existing
     mesh = bpy.data.meshes.new(name + "_Mesh")
@@ -333,8 +333,8 @@ def _ik_shape_object(shape):
     obj = bpy.data.objects.new(name, mesh)
     collection.objects.link(obj)
     obj.hide_render = True
-    obj.hide_viewport = False
-    obj.hide_set(False)
+    obj.hide_viewport = True
+    obj.hide_set(True)
     obj["_fbr_ik_shape"] = True
     return obj
 
@@ -462,6 +462,7 @@ def _sync_ik_mapping(context, mapping):
         scale = mapping.ik_shape_scale
         control.custom_shape_scale_xyz = (scale, scale, scale)
         control.use_custom_shape_bone_size = False
+        owner_obj.data.bones[mapping.ik_control_bone].show_wire = True
         control.custom_shape_wire_width = mapping.ik_shape_wire_width
         color = tuple(mapping.ik_shape_color)
         selected = tuple(min(1.0, value * 1.15 + 0.08) for value in color)
@@ -526,6 +527,34 @@ def _delete_ik_mapping(context, mapping):
             bpy.ops.object.mode_set(mode="OBJECT")
     mapping.ik_enabled = False
     mapping.ik_control_bone = ""
+    _cleanup_unused_ik_shapes()
+    context.view_layer.update()
+
+
+def _delete_all_fbr_ik(context, settings):
+    for source_file in settings.files:
+        for mapping in list(source_file.mappings):
+            if mapping.ik_enabled or mapping.ik_control_bone:
+                _delete_ik_mapping(context, mapping)
+    for obj in list(bpy.data.objects):
+        if obj.type != "ARMATURE":
+            continue
+        for pose_bone in obj.pose.bones:
+            for constraint in list(pose_bone.constraints):
+                if constraint.type == "IK" and constraint.name.startswith(IK_CONSTRAINT_NAME):
+                    pose_bone.constraints.remove(constraint)
+        control_names = [
+            bone.name
+            for bone in obj.data.bones
+            if bone.get("_fbr_ik_control", False)
+        ]
+        if control_names:
+            _set_active_object_mode(context, obj, "EDIT")
+            for name in control_names:
+                edit_bone = obj.data.edit_bones.get(name)
+                if edit_bone:
+                    obj.data.edit_bones.remove(edit_bone)
+            bpy.ops.object.mode_set(mode="OBJECT")
     _cleanup_unused_ik_shapes()
     context.view_layer.update()
 
@@ -682,6 +711,25 @@ def _root_aligned_preview_matrix(settings, source_file, source_obj, target_obj, 
     return preview
 
 
+def _matrix_to_property(matrix):
+    return tuple(value for row in matrix for value in row)
+
+
+def _matrix_from_property(values):
+    return Matrix(tuple(tuple(values[row * 4 + column] for column in range(4)) for row in range(4)))
+
+
+def _stored_alignment_matrix(source_file, fallback):
+    if source_file.alignment_valid:
+        return _matrix_from_property(source_file.alignment_matrix)
+    return fallback.copy()
+
+
+def _normalize_source_to_alignment(source_file, source_obj):
+    if source_file.alignment_valid:
+        source_obj.matrix_world = _matrix_from_property(source_file.alignment_matrix)
+
+
 def _armature_world_extent(obj, matrix_world=None, bone_names=None):
     matrix_world = matrix_world or obj.matrix_world
     bones = (
@@ -737,11 +785,8 @@ def _set_animation_preview_display(
     source_obj.show_in_front = True
     source_obj.display_type = "WIRE"
     source_obj.color = (1.0, 0.70, 0.05, 0.35)
-    source_obj.matrix_world = _root_aligned_preview_matrix(
-        settings,
+    source_obj.matrix_world = _stored_alignment_matrix(
         source_file,
-        source_obj,
-        target_obj,
         state["source_display"]["matrix_world"],
     )
     source_obj.data.display_type = "OCTAHEDRAL"
@@ -830,6 +875,7 @@ def _start_animation_preview(context, source_file, play_animation=False):
     if not source_action:
         return False, f"找不到 Action：{clip.action_name}"
     stop_animation_preview(context)
+    _normalize_source_to_alignment(source_file, source_obj)
     state = {
         "source_name": source_obj.name,
         "target_name": target_obj.name,
@@ -901,6 +947,7 @@ def _start_tpose_preview(context, source_file):
     if not source_obj or not target_obj:
         return False, "找不到可預覽的來源或 Target 骨架"
     stop_animation_preview(context)
+    _normalize_source_to_alignment(source_file, source_obj)
     state = {
         "source_name": source_obj.name,
         "target_name": target_obj.name,
@@ -1458,6 +1505,8 @@ class FBR_OT_reset_all(Operator):
 
     def execute(self, context):
         settings = context.scene.fbr_settings
+        stop_animation_preview(context)
+        _delete_all_fbr_ik(context, settings)
         _cleanup_imported_sources(settings)
         for prop in settings.bl_rna.properties:
             name = prop.identifier
@@ -1661,19 +1710,18 @@ class FBR_OT_align_source_rig(Operator):
         )
         if source_file.axis_editing:
             _end_axis_preview(context, source_file)
-        preview_state = _AXIS_PREVIEW_STATE.get(source_file.uid)
-        animation_state = _ANIMATION_PREVIEW_STATE.get("active")
-        source_matrix = (
-            preview_state["source_matrix_world"]
-            if preview_state
-            else (
-                animation_state["source_display"]["matrix_world"]
-                if animation_state
-                and animation_state.get("source_uid") == source_file.uid
-                and "source_display" in animation_state
-                else source_obj.matrix_world
+        if not source_file.alignment_original_valid:
+            source_file.alignment_original_matrix = _matrix_to_property(
+                source_obj.matrix_world.copy()
             )
-        )
+            source_file.alignment_original_valid = True
+        source_matrix = _matrix_from_property(source_file.alignment_original_matrix)
+        source_basis = _character_basis(source_obj, source_file.source_forward_axis)
+        target_basis = _character_basis(target, source_file.target_forward_axis)
+        source_world_basis = source_matrix.to_quaternion() @ source_basis
+        target_world_basis = target.matrix_world.to_quaternion() @ target_basis
+        facing_correction = (target_world_basis @ source_world_basis.inverted()).normalized()
+        source_matrix = facing_correction.to_matrix().to_4x4() @ source_matrix
         mapping_file = mapping_source(settings, source_file)
         source_bone_names = {
             mapping.source_bone
@@ -1698,18 +1746,21 @@ class FBR_OT_align_source_rig(Operator):
             1.0e-8,
         )
         scale = target_length / source_length
-        source_obj.matrix_world = source_obj.matrix_world @ Matrix.Scale(scale, 4)
+        aligned_matrix = source_matrix @ Matrix.Scale(scale, 4)
         source_file.preview_scale = 1.0
-        source_obj.matrix_world = _root_aligned_preview_matrix(
+        aligned_matrix = _root_aligned_preview_matrix(
             settings,
             source_file,
             source_obj,
             target,
-            source_obj.matrix_world.copy(),
+            aligned_matrix,
         )
-        source_obj["_fbr_alignment_scale"] = float(
-            source_obj.get("_fbr_alignment_scale", 1.0)
-        ) * scale
+        source_obj.matrix_world = aligned_matrix
+        source_file.alignment_matrix = _matrix_to_property(aligned_matrix)
+        source_file.alignment_valid = True
+        source_file.alignment_scale = scale
+        source_obj["_fbr_alignment_scale"] = scale
+        source_file.global_axis_correction = (1.0, 0.0, 0.0, 0.0)
         context.view_layer.update()
         if axis_mapping_index >= 0 and axis_mapping_index < len(source_file.mappings):
             _start_axis_preview(
@@ -1750,10 +1801,10 @@ class FBR_OT_auto_align_axes(Operator):
         if not source_obj or not mapping_file:
             return {"CANCELLED"}
 
-        correction = _character_axis_correction(
-            source_obj,
-            target_obj,
-            source_file,
+        correction = (
+            Matrix.Identity(3).to_quaternion()
+            if source_file.alignment_valid
+            else _character_axis_correction(source_obj, target_obj, source_file)
         )
         source_file.global_axis_correction = tuple(correction)
         aligned = 0
@@ -2197,6 +2248,14 @@ class FBR_OT_auto_map(Operator):
         if not source:
             self.report({"ERROR"}, "來源骨架不存在")
             return {"CANCELLED"}
+        preview_mode = ""
+        preview_frame = context.scene.frame_current
+        preview_playing = False
+        if settings.preview_running and settings.preview_source_uid == source_file.uid:
+            preview_mode = settings.preview_mode
+            screen = getattr(context, "screen", None)
+            preview_playing = bool(screen and screen.is_animation_playing)
+            stop_animation_preview(context)
         mapped = build_automatic_mapping(source, target, source_file.mappings)
         source_file.reuse_mapping = "SELF"
         source_file.mapping_expanded = True
@@ -2209,6 +2268,16 @@ class FBR_OT_auto_map(Operator):
             candidate.target_forward_axis = source_file.target_forward_axis
             candidate.global_axis_correction = tuple(source_file.global_axis_correction)
             bpy.ops.fbr.align_source_rig(file_index=index)
+        if preview_mode == "TPOSE":
+            _start_tpose_preview(context, source_file)
+            context.scene.frame_set(preview_frame)
+        elif preview_mode == "ANIMATION":
+            _start_animation_preview(
+                context,
+                source_file,
+                play_animation=preview_playing,
+            )
+            context.scene.frame_set(preview_frame)
         self.report(
             {"INFO"},
             f"已對應 {mapped} 根骨骼並完成實際縮放與軸向對位",

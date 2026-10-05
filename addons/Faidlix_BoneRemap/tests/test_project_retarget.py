@@ -56,6 +56,14 @@ def _dynamic_curve_count(action):
     )
 
 
+def _matrix_distance(left, right):
+    return max(
+        abs(left[row][column] - right[row][column])
+        for row in range(4)
+        for column in range(4)
+    )
+
+
 def _sample_pose_motion(settings, source_file, action):
     obj = bpy.data.objects[source_file.source_object]
     owner = mapping_source(settings, source_file)
@@ -136,7 +144,17 @@ def main():
     for file_index, source in enumerate(settings.files):
         if not source.mapping_is_independent:
             continue
+        target_matrix = target.matrix_world.copy()
         assert bpy.ops.fbr.auto_map(file_index=file_index) == {"FINISHED"}
+        aligned_source_matrix = bpy.data.objects[source.source_object].matrix_world.copy()
+        assert bpy.ops.fbr.auto_map(file_index=file_index) == {"FINISHED"}
+        assert _matrix_distance(
+            bpy.data.objects[source.source_object].matrix_world,
+            aligned_source_matrix,
+        ) < 1.0e-6, f"{source.display_name} 第二次自動配骨架造成累乘"
+        assert _matrix_distance(target.matrix_world, target_matrix) < 1.0e-6, (
+            f"{source.display_name} 自動配骨架改動 Target 物件矩陣"
+        )
         mapping_index = _foot_mapping_index(source)
         assert bpy.ops.fbr.ik_settings(
             file_index=file_index,
@@ -233,6 +251,28 @@ def main():
         ]
         assert control_values
         assert max(abs(value) for value in control_values) < target_height * 20.0
+        assign_action_and_slot(target, action)
+        control_distances = []
+        for frame in (
+            action.frame_range[0],
+            sum(action.frame_range) * 0.5,
+            action.frame_range[1],
+        ):
+            bpy.context.scene.frame_set(round(frame))
+            bpy.context.view_layer.update()
+            for item in ik_controls:
+                control = target.pose.bones.get(item["name"])
+                foot = target.pose.bones.get(item["target"])
+                if control and foot:
+                    control_distances.append(
+                        min(
+                            (control.matrix.translation - foot.head).length,
+                            (control.matrix.translation - foot.tail).length,
+                        )
+                    )
+        assert control_distances
+        print("IK_FOOT_DISTANCE", action.name, max(control_distances), target_height)
+        assert max(control_distances) < target_height * 0.12
         root_z = [
             point.co.y
             for curve in iter_action_fcurves(action)
@@ -250,6 +290,7 @@ def main():
                 "source_dynamic_curve_count": source_dynamic.get(action.name, 0),
                 "dynamic_curve_count": dynamic_curve_count,
                 "max_control_abs": max(abs(value) for value in control_values),
+                "max_control_to_foot": max(control_distances),
                 "root_z_range": (max(root_z) - min(root_z)) if root_z else None,
             }
         )

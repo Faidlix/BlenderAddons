@@ -315,6 +315,11 @@ def main():
     assert bpy.ops.fbr.align_source_rig(file_index=0) == {"FINISHED"}
     assert abs(entry.preview_scale - 1.0) < 1.0e-6
     assert abs(source.get("_fbr_alignment_scale", 1.0) - 1.5) < 1.0e-6
+    aligned_once = source.matrix_world.copy()
+    target_matrix_before_repeat = target.matrix_world.copy()
+    assert bpy.ops.fbr.align_source_rig(file_index=0) == {"FINISHED"}
+    assert source.matrix_world == aligned_once
+    assert target.matrix_world == target_matrix_before_repeat
     bpy.ops.object.mode_set(mode="EDIT")
     target.data.edit_bones.remove(target.data.edit_bones["UnmappedDecoration"])
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -499,6 +504,8 @@ def main():
     )
     assert constraint.subtarget == control_name
     arm_map.ik_shape = "SPHERE"
+    arm_map.ik_shape_scale = 0.001
+    assert abs(arm_map.ik_shape_scale - 0.01) < 1.0e-6
     arm_map.ik_shape_scale = 1.5
     arm_map.ik_shape_wire_width = 4.0
     arm_map.ik_shape_color = (0.2, 0.6, 0.9)
@@ -506,10 +513,11 @@ def main():
     assert target.pose.bones[control_name].custom_shape.name == "FBR_IK_SHAPE_SPHERE"
     shape_object = target.pose.bones[control_name].custom_shape
     shape_collection = bpy.data.collections["__FBR_IK_Shapes__"]
-    assert not shape_collection.hide_viewport and shape_collection.hide_render
-    assert not shape_object.hide_viewport and not shape_object.hide_get()
+    assert shape_collection.hide_viewport and shape_collection.hide_render
+    assert shape_object.hide_viewport and shape_object.hide_get()
     assert shape_object.hide_render
     assert not target.data.bones[control_name].use_deform
+    assert target.data.bones[control_name].show_wire
     assert tuple(target.pose.bones[control_name].custom_shape_scale_xyz) == (1.5, 1.5, 1.5)
     assert not target.pose.bones[control_name].use_custom_shape_bone_size
     assert target.pose.bones[control_name].custom_shape_wire_width == 4.0
@@ -615,9 +623,18 @@ def main():
     assert settings.files[1].uid == "follower"
     assert settings.files[1].reuse_mapping == entry.uid
     assert not settings.files[1].mapping_is_independent
-    assert bpy.ops.fbr.clear_files() == {"FINISHED"}
+    # Reset must remove all add-on IK controls and hidden Custom Shape data,
+    # not just clear the mapping collection that referenced them.
+    entry = settings.files[0]
+    assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="START") == {"FINISHED"}
+    reset_control = entry.mappings[1].ik_control_bone
+    assert reset_control in target.data.bones
+    assert bpy.ops.fbr.reset_all() == {"FINISHED"}
     assert bpy.data.objects.get("Source") is None
     assert len(settings.files) == 0
+    assert reset_control not in target.data.bones
+    assert "__FBR_IK_Shapes__" not in bpy.data.collections
+    assert not any(obj.get("_fbr_ik_shape", False) for obj in bpy.data.objects)
     print("FBR_HEADLESS_OK")
     addon.unregister()
 
