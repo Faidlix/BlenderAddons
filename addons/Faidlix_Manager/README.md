@@ -1,6 +1,6 @@
 # Faidlix Manager
 
-Manager 是 Faidlix Blender 外掛共通功能的唯一實作位置。目前包含「全部更新」面板、更新佇列、進度與完成狀態。
+Manager 是 Faidlix Blender 外掛共通功能的唯一實作位置。目前包含固定在側邊欄頂端、無標題且不可摺疊的「全部更新」控制列，以及更新佇列、進度與完成狀態。
 
 其他外掛不得複製共通 Operator／Panel。外掛新增、改名或調整共通能力時，必須同步更新 `addon_registry.json`；Manager 只會對登錄且已安裝的套件執行共通功能。
 

@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix Manager",
     "author": "Faidlix",
-    "version": (1, 1, 3),
+    "version": (1, 1, 4),
     "blender": (5, 2, 0),
     "location": "3D View > Sidebar > Faidlix",
     "description": "Update installed Faidlix extensions together",
@@ -17,7 +17,7 @@ import bpy
 from bpy.types import Operator, Panel
 
 
-ADDON_VERSION = (1, 1, 3)
+ADDON_VERSION = (1, 1, 4)
 PACKAGE_ID = "faidlix_manager"
 REGISTRY_FILENAME = "addon_registry.json"
 REPOSITORY_URL = (
@@ -255,13 +255,10 @@ class FAIDLIXMANAGER_PT_update_all(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "Faidlix"
-    bl_order = -100
-    bl_options = {'DEFAULT_CLOSED'}
-
-    def draw_header_preset(self, _context):
-        row = self.layout.row(align=True)
-        row.alignment = 'RIGHT'
-        row.label(text=f"v{'.'.join(map(str, ADDON_VERSION))}")
+    # This is a shared command strip, not a collapsible add-on panel. Keep it
+    # ahead of every regular Faidlix panel and hide the panel header entirely.
+    bl_order = -1000
+    bl_options = {'HIDE_HEADER'}
 
     @classmethod
     def poll(cls, context):

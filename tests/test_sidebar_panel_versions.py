@@ -5,7 +5,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 PANELS = {
-    "addons/Faidlix_Manager/__init__.py": "FAIDLIXMANAGER_PT_update_all",
     "addons/Faidlix_TextureMarge/__init__.py": "FTM_PT_panel",
     "addons/Faidlix_BakeMap/__init__.py": "FAIDLIX_PT_bakemap",
     "addons/Faidlix_BoneRemap/ui.py": "FBR_PT_main",
@@ -53,15 +52,24 @@ def test_sidebar_panel_names_do_not_embed_versions():
         assert "·" not in text, relative_path
 
 
-def test_manager_panel_keeps_its_header_visible():
+def test_manager_panel_is_headerless_and_fixed_first():
     panel = _class_node(
         "addons/Faidlix_Manager/__init__.py",
         "FAIDLIXMANAGER_PT_update_all",
     )
-    options = next(
-        node
+    assignments = {
+        target.id: node.value
         for node in panel.body
         if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "bl_options" for target in node.targets)
-    )
-    assert ast.literal_eval(options.value) == {"DEFAULT_CLOSED"}
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    methods = {
+        node.name
+        for node in panel.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert ast.literal_eval(assignments["bl_options"]) == {"HIDE_HEADER"}
+    assert ast.literal_eval(assignments["bl_order"]) == -1000
+    assert "draw_header" not in methods
+    assert "draw_header_preset" not in methods
