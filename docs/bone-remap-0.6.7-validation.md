@@ -26,6 +26,10 @@
 - IK 控制器到腳部最大誤差約 0.00957，相對角色尺寸約 0.7%；Root Z 範圍為 0，未再出現批次重定向持續下墜。
 - 連續兩次自動配骨後來源對位矩陣不變，Target 物件矩陣不變。
 
-## 尚未完成
+## 正式安裝
 
-- 正式 Blender 目前開啟 `角色1005.blend` 且有未儲存變更，因此未覆寫正式安裝。待使用者儲存並關閉 Blender 後再安裝 0.6.7。
+- 使用者關閉原本有未儲存變更的 Blender 後，已備份正式 0.6.6 到 `backups/faidlix_bone_remap-before-0.6.7-20261006`。
+- Blender 擴充安裝命令回報 `STATUS Reinstalled "faidlix_bone_remap"`。
+- 正式 manifest 版本為 0.6.7；直接從正式安裝目錄匯入、註冊與解除註冊成功。
+- 正式安裝版已確認 `FBR_OT_drag_column` 與 `FBR_OT_axis_solo` 操作器存在。
+- MCP 背景啟動器因未設定 `BLENDER_PATH` 無法啟動；依備援規則改用 Blender 本身背景模式完成相同驗證，未儲存或改動角色檔。
