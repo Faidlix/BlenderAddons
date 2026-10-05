@@ -1,5 +1,6 @@
 import os
 import sys
+from types import SimpleNamespace
 
 import bpy
 
@@ -80,16 +81,42 @@ assert all(obj.hide_render for obj in collection_result)
 
 import Faidlix_Outliner  # noqa: E402
 
-assert Faidlix_Outliner.ADDON_VERSION == (0, 2, 16)
+
+class _TestView2D:
+    def region_to_view(self, x, y):
+        return x + 1.0, y + 2.0
+
+
+signature_context = SimpleNamespace(
+    region=SimpleNamespace(width=640, height=480, view2d=_TestView2D()),
+    space_data=SimpleNamespace(
+        display_mode="VIEW_LAYER",
+        filter_text="",
+        show_restrict_column_enable=False,
+        show_restrict_column_select=False,
+        show_restrict_column_hide=True,
+        show_restrict_column_viewport=False,
+        show_restrict_column_render=False,
+        show_restrict_column_holdout=False,
+        show_restrict_column_indirect_only=False,
+    ),
+    preferences=SimpleNamespace(system=SimpleNamespace(ui_scale=1.0)),
+)
+signature = Faidlix_Outliner._row_view_signature(signature_context)
+assert signature[2] == (1.0, 2.0, 641.0, 482.0)
+signature_context.region.view2d = object()
+assert Faidlix_Outliner._row_view_signature(signature_context)[2] == ()
+
+assert Faidlix_Outliner.ADDON_VERSION == (0, 2, 17)
 assert Faidlix_Outliner._latest_version_from_index(
     {
         "data": [
             {"id": "unrelated", "version": "9.0.0"},
             {"id": "faidlix_outliner", "version": "0.1.0"},
-            {"id": "faidlix_outliner", "version": "0.2.16"},
+            {"id": "faidlix_outliner", "version": "0.2.17"},
         ]
     }
-) == (0, 2, 16)
+) == (0, 2, 17)
 
 original_header_draw = bpy.types.OUTLINER_HT_header.draw
 Faidlix_Outliner.register()

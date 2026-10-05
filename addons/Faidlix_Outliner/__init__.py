@@ -4,7 +4,7 @@ from __future__ import annotations
 bl_info = {
     "name": "Faidlix_Outliner",
     "author": "Faidlix",
-    "version": (0, 2, 16),
+    "version": (0, 2, 17),
     "blender": (5, 2, 0),
     "location": "Outliner > left overlay gutter and context menu",
     "description": "Three-state hierarchy selection for objects and collections",
@@ -42,7 +42,7 @@ from .core import (
 
 
 ADDON_ID = __package__
-ADDON_VERSION = (0, 2, 16)
+ADDON_VERSION = (0, 2, 17)
 PACKAGE_ID = "faidlix_outliner"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -607,7 +607,18 @@ def _probe_row(context, y, restore_selection=True):
 
 def _row_view_signature(context):
     """Values that change when scrolling, resizing, or toggling columns."""
-    view = context.region.view2d.cur
+    try:
+        view_min = context.region.view2d.region_to_view(0, 0)
+        view_max = context.region.view2d.region_to_view(
+            context.region.width,
+            context.region.height,
+        )
+        view_bounds = tuple(round(value, 3) for value in (*view_min, *view_max))
+    except (AttributeError, RuntimeError, TypeError):
+        # Some temporary regions do not expose a usable View2D transform.
+        # Size, display mode, filter text, and explicit input refreshes still
+        # keep the cache valid; never let signature detection stop drawing.
+        view_bounds = ()
     columns = tuple(
         prop
         for prop, _restriction in _restriction_columns(context)
@@ -616,9 +627,9 @@ def _row_view_signature(context):
     return (
         context.region.width,
         context.region.height,
-        round(view.ymin, 3),
-        round(view.ymax, 3),
+        view_bounds,
         context.space_data.display_mode,
+        getattr(context.space_data, "filter_text", ""),
         round(context.preferences.system.ui_scale, 3),
         columns,
     )
