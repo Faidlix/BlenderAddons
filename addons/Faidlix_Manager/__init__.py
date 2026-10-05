@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix Manager",
     "author": "Faidlix",
-    "version": (1, 1, 4),
+    "version": (1, 1, 5),
     "blender": (5, 2, 0),
     "location": "3D View > Sidebar > Faidlix",
     "description": "Update installed Faidlix extensions together",
@@ -11,13 +11,14 @@ bl_info = {
 import json
 import os
 import tomllib
+from urllib.parse import urlsplit
 
 import addon_utils
 import bpy
 from bpy.types import Operator, Panel
 
 
-ADDON_VERSION = (1, 1, 4)
+ADDON_VERSION = (1, 1, 5)
 PACKAGE_ID = "faidlix_manager"
 REGISTRY_FILENAME = "addon_registry.json"
 REPOSITORY_URL = (
@@ -34,11 +35,40 @@ def _version(value):
         return ()
 
 
-def _repository(context):
-    for index, repo in enumerate(context.preferences.extensions.repos):
-        if repo.remote_url.rstrip("/") == REPOSITORY_URL.rstrip("/"):
+def _canonical_repository_url(value):
+    """Compare repository identity without cache-busting query parameters."""
+    parts = urlsplit(value or "")
+    return parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/")
+
+
+def _current_repository_module():
+    parts = __name__.split(".")
+    return parts[1] if len(parts) >= 3 and parts[0] == "bl_ext" else ""
+
+
+def _repository(context, preferred_module=None):
+    target = _canonical_repository_url(REPOSITORY_URL)
+    candidates = [
+        (index, repo)
+        for index, repo in enumerate(context.preferences.extensions.repos)
+        if _canonical_repository_url(repo.remote_url) == target
+    ]
+    if not candidates:
+        return None, None
+
+    preferred_module = preferred_module or _current_repository_module()
+    if preferred_module:
+        for index, repo in candidates:
+            if repo.module == preferred_module:
+                return index, repo
+
+    # A duplicate repository may have the canonical URL but no packages. The
+    # repository containing this running Manager is always the safe fallback.
+    for index, repo in candidates:
+        if os.path.isdir(os.path.join(repo.directory, PACKAGE_ID)):
             return index, repo
-    return None, None
+
+    return candidates[0]
 
 
 def _ensure_repository(context):
