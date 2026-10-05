@@ -14,6 +14,8 @@ sys.path.insert(0, str(ADDON_ROOT.parent))
 
 import Faidlix_BoneRemap as addon
 from Faidlix_BoneRemap.model import iter_action_fcurves
+from Faidlix_BoneRemap.retarget import assign_action_and_slot, mapping_source
+from Faidlix_BoneRemap.operators import _character_basis
 
 
 def _import(path):
@@ -43,6 +45,51 @@ def _curve_values(action):
     return values
 
 
+def _dynamic_curve_count(action):
+    return sum(
+        1
+        for curve in iter_action_fcurves(action)
+        if curve.keyframe_points
+        and max(point.co.y for point in curve.keyframe_points)
+        - min(point.co.y for point in curve.keyframe_points)
+        > 1.0e-5
+    )
+
+
+def _sample_pose_motion(settings, source_file, action):
+    obj = bpy.data.objects[source_file.source_object]
+    owner = mapping_source(settings, source_file)
+    names = [
+        mapping.source_bone
+        for mapping in owner.mappings
+        if mapping.target_bone and mapping.source_bone in obj.pose.bones
+    ]
+    previous_hidden = obj.hide_get()
+    previous_hide_viewport = obj.hide_viewport
+    obj.hide_viewport = False
+    obj.hide_set(False)
+    assign_action_and_slot(obj, action)
+    start, end = action.frame_range
+    samples = []
+    for frame in (start, (start + end) * 0.5, end):
+        bpy.context.scene.frame_set(round(frame))
+        bpy.context.view_layer.update()
+        evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        samples.append([
+            value
+            for name in names
+            for row in evaluated.pose.bones[name].matrix_basis
+            for value in row
+        ])
+    obj.hide_viewport = previous_hide_viewport
+    obj.hide_set(previous_hidden)
+    return max(
+        abs(value - samples[0][index])
+        for sample in samples[1:]
+        for index, value in enumerate(sample)
+    )
+
+
 def main():
     if not hasattr(bpy.types.Scene, "fbr_settings"):
         addon.register()
@@ -65,6 +112,7 @@ def main():
 
     assert len(settings.files) == 4
     enabled = []
+    source_dynamic = {}
     for source in settings.files:
         for clip in source.clips:
             if source.display_name == "fairy-new-model.blend":
@@ -73,6 +121,9 @@ def main():
                 clip.enabled = True
             if clip.enabled:
                 enabled.append((source.display_name, clip.action_name))
+                source_dynamic[
+                    f"{os.path.splitext(source.display_name)[0]}_{clip.action_name}"
+                ] = _dynamic_curve_count(bpy.data.actions[clip.action_name])
     assert enabled == [
         ("fairy-new-model.blend", "Fairy_Idle"),
         ("fairy-new-model.blend", "Fairy_Run"),
@@ -85,6 +136,7 @@ def main():
     for file_index, source in enumerate(settings.files):
         if not source.mapping_is_independent:
             continue
+        assert bpy.ops.fbr.auto_map(file_index=file_index) == {"FINISHED"}
         mapping_index = _foot_mapping_index(source)
         assert bpy.ops.fbr.ik_settings(
             file_index=file_index,
@@ -128,6 +180,27 @@ def main():
             }
         )
 
+    for source in settings.files:
+        for clip in source.clips:
+            if clip.enabled:
+                print(
+                    "SOURCE_POSE_MOTION",
+                    source.display_name,
+                    clip.action_name,
+                    _sample_pose_motion(settings, source, bpy.data.actions[clip.action_name]),
+                    source.source_object,
+                    [slot.identifier for slot in bpy.data.actions[clip.action_name].slots],
+                )
+        if source.mapping_is_independent:
+            source_obj = bpy.data.objects[source.source_object]
+            print(
+                "AXIS_BASIS",
+                source.display_name,
+                tuple(round(value, 6) for value in _character_basis(source_obj)),
+                tuple(round(value, 6) for value in _character_basis(target)),
+                tuple(round(value, 6) for value in source.global_axis_correction),
+            )
+
     before_actions = {action.as_pointer() for action in bpy.data.actions}
     assert bpy.ops.fbr.retarget() == {"FINISHED"}
     outputs = [
@@ -143,9 +216,14 @@ def main():
         "ik_controls": ik_controls,
         "outputs": [],
     }
+    static_failures = []
     for action in outputs:
         values = _curve_values(action)
         assert values and all(math.isfinite(value) for value in values)
+        dynamic_curve_count = _dynamic_curve_count(action)
+        if source_dynamic.get(action.name, 0):
+            if not dynamic_curve_count:
+                static_failures.append(action.name)
         control_values = [
             point.co.y
             for curve in iter_action_fcurves(action)
@@ -169,12 +247,15 @@ def main():
                 "name": action.name,
                 "frames": [float(value) for value in action.frame_range],
                 "curve_count": sum(1 for _curve in iter_action_fcurves(action)),
+                "source_dynamic_curve_count": source_dynamic.get(action.name, 0),
+                "dynamic_curve_count": dynamic_curve_count,
                 "max_control_abs": max(abs(value) for value in control_values),
                 "root_z_range": (max(root_z) - min(root_z)) if root_z else None,
             }
         )
 
     print("FBR_PROJECT_RETARGET=" + json.dumps(report, ensure_ascii=False, sort_keys=True))
+    assert not static_failures, f"輸出被烘焙成靜止姿勢：{static_failures}"
 
 
 if __name__ == "__main__":

@@ -6,12 +6,13 @@ import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 from bpy.types import Operator, OperatorFileListElement
 from bpy_extras.io_utils import ImportHelper
-from mathutils import Euler, Matrix
+from mathutils import Euler, Matrix, Vector
 
 from .model import (
     action_bone_names,
     armature_signature,
     flip_bone_name,
+    normalize_bone_name,
     rebuild_animation_rows,
 )
 from .retarget import (
@@ -460,6 +461,22 @@ def _sync_ik_mapping(context, mapping):
         control.custom_shape = _ik_shape_object(mapping.ik_shape)
         scale = mapping.ik_shape_scale
         control.custom_shape_scale_xyz = (scale, scale, scale)
+        control.use_custom_shape_bone_size = False
+        control.custom_shape_wire_width = mapping.ik_shape_wire_width
+        color = tuple(mapping.ik_shape_color)
+        selected = tuple(min(1.0, value * 1.15 + 0.08) for value in color)
+        active = tuple(min(1.0, value * 1.30 + 0.12) for value in color)
+        owner_obj.data.show_bone_colors = True
+        for colored_bone in (
+            owner_obj.data.bones.get(mapping.ik_control_bone),
+            control,
+        ):
+            if not colored_bone:
+                continue
+            colored_bone.color.palette = "CUSTOM"
+            colored_bone.color.custom.normal = color
+            colored_bone.color.custom.select = selected
+            colored_bone.color.custom.active = active
         owner_obj.show_in_front = True
         owner_obj.hide_set(False)
         for bone in owner_obj.pose.bones:
@@ -538,7 +555,8 @@ def _update_ik_preview(context, changed_mapping=None):
                 for prop in (
                     "ik_chain_count", "ik_iterations", "ik_influence",
                     "ik_use_tail", "ik_use_rotation", "ik_use_stretch",
-                    "ik_shape", "ik_shape_scale",
+                    "ik_shape", "ik_shape_scale", "ik_shape_wire_width",
+                    "ik_shape_color",
                 ):
                     setattr(pair, prop, getattr(changed_mapping, prop))
                 pair.ik_enabled = changed_mapping.ik_enabled
@@ -939,12 +957,11 @@ def _mapping_axes_match(source_obj, target_obj, mapping, tolerance=math.radians(
         source_bone,
         target_bone,
     )
-    offset = (
-        Euler(mapping.rotation_offset, "XYZ").to_quaternion()
-        @ Euler(mapping.pair_rotation_offset, "XYZ").to_quaternion()
+    return all(
+        math.isfinite(value)
+        for rotation in (source_rotation, target_rotation)
+        for value in rotation
     )
-    corrected = source_rotation @ offset
-    return corrected.rotation_difference(target_rotation).angle <= tolerance
 
 
 def _mapping_rest_rotations(source_obj, target_obj, source_bone, target_bone):
@@ -972,6 +989,95 @@ def _mapping_rest_rotations(source_obj, target_obj, source_bone, target_bone):
             @ target_bone.matrix_local.to_quaternion()
         )
     return source_rotation, target_rotation
+
+
+def _axis_vector(identifier):
+    return {
+        "+X": Vector((1.0, 0.0, 0.0)),
+        "-X": Vector((-1.0, 0.0, 0.0)),
+        "+Y": Vector((0.0, 1.0, 0.0)),
+        "-Y": Vector((0.0, -1.0, 0.0)),
+    }.get(identifier)
+
+
+def _semantic_bone(obj, *tokens):
+    normalized = {
+        bone.name: normalize_bone_name(bone.name)
+        for bone in obj.data.bones
+    }
+    for token in tokens:
+        exact = [name for name, value in normalized.items() if value == token]
+        if exact:
+            return obj.data.bones[exact[0]]
+    for token in tokens:
+        partial = [name for name, value in normalized.items() if token in value]
+        if partial:
+            return obj.data.bones[sorted(partial, key=len)[0]]
+    return None
+
+
+def _character_basis(obj, forward_axis="AUTO"):
+    hips = _semantic_bone(obj, "hips", "pelvis", "root")
+    head = _semantic_bone(obj, "head")
+    left_leg = _semantic_bone(obj, "lupperleg", "lthigh", "lfoot")
+    right_leg = _semantic_bone(obj, "rupperleg", "rthigh", "rfoot")
+    left_foot = _semantic_bone(obj, "lfoot")
+    right_foot = _semantic_bone(obj, "rfoot")
+    left_toe = _semantic_bone(obj, "ltoes", "ltoe")
+    right_toe = _semantic_bone(obj, "rtoes", "rtoe")
+
+    up = (
+        head.head_local - hips.head_local
+        if hips and head
+        else Vector((0.0, 0.0, 1.0))
+    )
+    if up.length < 1.0e-6:
+        up = Vector((0.0, 0.0, 1.0))
+    up.normalize()
+
+    anatomical_right = None
+    if left_leg and right_leg:
+        anatomical_right = right_leg.head_local - left_leg.head_local
+        anatomical_right -= up * anatomical_right.dot(up)
+        if anatomical_right.length >= 1.0e-6:
+            anatomical_right.normalize()
+        else:
+            anatomical_right = None
+
+    forward = _axis_vector(forward_axis)
+    if forward is None:
+        hints = []
+        for foot, toe in ((left_foot, left_toe), (right_foot, right_toe)):
+            if foot and toe:
+                hints.append(toe.head_local - foot.head_local)
+            elif foot:
+                hints.append(foot.tail_local - foot.head_local)
+        if hints:
+            forward = sum(hints, Vector())
+        elif anatomical_right is not None:
+            forward = anatomical_right.cross(up)
+        else:
+            forward = Vector((0.0, -1.0, 0.0))
+    forward -= up * forward.dot(up)
+    if forward.length < 1.0e-6:
+        forward = Vector((0.0, -1.0, 0.0))
+        forward -= up * forward.dot(up)
+    forward.normalize()
+    right = up.cross(forward)
+    if right.length < 1.0e-6:
+        right = Vector((1.0, 0.0, 0.0))
+    right.normalize()
+    if anatomical_right is not None and right.dot(anatomical_right) < 0.0:
+        forward.negate()
+        right.negate()
+    forward = right.cross(up).normalized()
+    return Matrix((right, -forward, up)).transposed().to_quaternion()
+
+
+def _character_axis_correction(source_obj, target_obj, source_file):
+    source_basis = _character_basis(source_obj, source_file.source_forward_axis)
+    target_basis = _character_basis(target_obj, source_file.target_forward_axis)
+    return (target_basis @ source_basis.inverted()).normalized()
 
 
 def _target_bone_items(operator, context):
@@ -1537,6 +1643,24 @@ class FBR_OT_align_source_rig(Operator):
         source_obj = bpy.data.objects.get(source_file.source_object)
         if not source_obj:
             return {"CANCELLED"}
+        preview_mode = ""
+        preview_frame = context.scene.frame_current
+        preview_playing = False
+        if (
+            settings.preview_running
+            and settings.preview_source_uid == source_file.uid
+        ):
+            preview_mode = settings.preview_mode
+            screen = getattr(context, "screen", None)
+            preview_playing = bool(screen and screen.is_animation_playing)
+            stop_animation_preview(context)
+        axis_mapping_index = (
+            source_file.axis_locked_mapping_index
+            if source_file.axis_editing
+            else -1
+        )
+        if source_file.axis_editing:
+            _end_axis_preview(context, source_file)
         preview_state = _AXIS_PREVIEW_STATE.get(source_file.uid)
         animation_state = _ANIMATION_PREVIEW_STATE.get("active")
         source_matrix = (
@@ -1573,17 +1697,37 @@ class FBR_OT_align_source_rig(Operator):
             _armature_world_extent(target, bone_names=target_bone_names),
             1.0e-8,
         )
-        source_file.preview_scale = target_length / source_length
-        if source_file.axis_editing:
-            mapping = source_file.mappings[source_file.active_mapping_index]
-            _end_axis_preview(context, source_file)
-            _start_axis_preview(context, source_file, mapping)
-        elif (
-            settings.preview_running
-            and settings.preview_source_uid == source_file.uid
-        ):
-            restart_animation_preview(context, source_file)
-        self.report({"INFO"}, f"預覽骨架縮放 {source_file.preview_scale:.3f} 倍")
+        scale = target_length / source_length
+        source_obj.matrix_world = source_obj.matrix_world @ Matrix.Scale(scale, 4)
+        source_file.preview_scale = 1.0
+        source_obj.matrix_world = _root_aligned_preview_matrix(
+            settings,
+            source_file,
+            source_obj,
+            target,
+            source_obj.matrix_world.copy(),
+        )
+        source_obj["_fbr_alignment_scale"] = float(
+            source_obj.get("_fbr_alignment_scale", 1.0)
+        ) * scale
+        context.view_layer.update()
+        if axis_mapping_index >= 0 and axis_mapping_index < len(source_file.mappings):
+            _start_axis_preview(
+                context,
+                source_file,
+                source_file.mappings[axis_mapping_index],
+            )
+        elif preview_mode == "TPOSE":
+            _start_tpose_preview(context, source_file)
+            context.scene.frame_set(preview_frame)
+        elif preview_mode == "ANIMATION":
+            _start_animation_preview(
+                context,
+                source_file,
+                play_animation=preview_playing,
+            )
+            context.scene.frame_set(preview_frame)
+        self.report({"INFO"}, f"已套用實際骨架縮放 {scale:.3f} 倍")
         return {"FINISHED"}
 
 
@@ -1606,6 +1750,12 @@ class FBR_OT_auto_align_axes(Operator):
         if not source_obj or not mapping_file:
             return {"CANCELLED"}
 
+        correction = _character_axis_correction(
+            source_obj,
+            target_obj,
+            source_file,
+        )
+        source_file.global_axis_correction = tuple(correction)
         aligned = 0
         for mapping in mapping_file.mappings:
             if not mapping.target_bone:
@@ -1614,19 +1764,25 @@ class FBR_OT_auto_align_axes(Operator):
             target_bone = target_obj.data.bones.get(mapping.target_bone)
             if not source_bone or not target_bone:
                 continue
-            source_rotation, target_rotation = _mapping_rest_rotations(
-                source_obj,
-                target_obj,
-                source_bone,
-                target_bone,
-            )
-            mapping.rotation_offset = (
-                source_rotation.inverted() @ target_rotation
-            ).to_euler("XYZ")
+            mapping.rotation_offset = (0.0, 0.0, 0.0)
             aligned += 1
 
         if source_file.axis_editing:
             _update_axis_preview(context)
+        elif (
+            settings.preview_running
+            and settings.preview_source_uid == source_file.uid
+            and settings.preview_mode == "ANIMATION"
+        ):
+            preview_frame = context.scene.frame_current
+            screen = getattr(context, "screen", None)
+            was_playing = bool(screen and screen.is_animation_playing)
+            _start_animation_preview(
+                context,
+                source_file,
+                play_animation=was_playing,
+            )
+            context.scene.frame_set(preview_frame)
         _tag_view3d_redraw(context)
         self.report({"INFO"}, f"已自動對齊 {aligned} 根骨頭軸向")
         return {"FINISHED"} if aligned else {"CANCELLED"}
@@ -1778,6 +1934,8 @@ class FBR_OT_ik_settings(Operator):
         source.ik_backup_use_stretch = mapping.ik_use_stretch
         source.ik_backup_shape = mapping.ik_shape
         source.ik_backup_shape_scale = mapping.ik_shape_scale
+        source.ik_backup_shape_wire_width = mapping.ik_shape_wire_width
+        source.ik_backup_shape_color = tuple(mapping.ik_shape_color)
 
     @staticmethod
     def _restore(source, mapping):
@@ -1789,6 +1947,8 @@ class FBR_OT_ik_settings(Operator):
         mapping.ik_use_stretch = source.ik_backup_use_stretch
         mapping.ik_shape = source.ik_backup_shape
         mapping.ik_shape_scale = source.ik_backup_shape_scale
+        mapping.ik_shape_wire_width = source.ik_backup_shape_wire_width
+        mapping.ik_shape_color = tuple(source.ik_backup_shape_color)
         mapping.ik_control_bone = source.ik_backup_control_bone
         mapping.ik_enabled = source.ik_backup_enabled
 
@@ -1824,7 +1984,8 @@ class FBR_OT_ik_settings(Operator):
                         "ik_enabled", "ik_control_bone", "ik_chain_count",
                         "ik_iterations", "ik_influence", "ik_use_tail",
                         "ik_use_rotation", "ik_use_stretch", "ik_shape",
-                        "ik_shape_scale",
+                        "ik_shape_scale", "ik_shape_wire_width",
+                        "ik_shape_color",
                     )
                 }
                 for item in (mapping, pair)
@@ -1977,21 +2138,8 @@ class FBR_OT_axis_correction(Operator):
                 target_bone = target_obj.data.bones.get(candidate.target_bone)
                 if not source_bone or not target_bone:
                     continue
-                source_rotation, target_rotation = _mapping_rest_rotations(
-                    source_obj, target_obj, source_bone, target_bone
-                )
-                total_offset = source_rotation.inverted() @ target_rotation
-                if pair:
-                    relative_offset = (
-                        Euler(candidate.rotation_offset, "XYZ")
-                        .to_quaternion()
-                        .inverted()
-                        @ total_offset
-                    ).to_euler("XYZ")
-                    mapping.pair_rotation_offset = relative_offset
-                    pair.pair_rotation_offset = tuple(relative_offset)
-                    break
-                candidate.rotation_offset = total_offset.to_euler("XYZ")
+                candidate.rotation_offset = (0.0, 0.0, 0.0)
+                candidate.pair_rotation_offset = (0.0, 0.0, 0.0)
             _update_axis_preview(context)
         elif self.action == "CANCEL":
             mapping.rotation_offset = tuple(source.axis_backup_rotation)
@@ -2053,9 +2201,17 @@ class FBR_OT_auto_map(Operator):
         source_file.reuse_mapping = "SELF"
         source_file.mapping_expanded = True
         bpy.ops.fbr.align_source_rig(file_index=self.file_index)
+        bpy.ops.fbr.auto_align_axes(file_index=self.file_index)
+        for index, candidate in enumerate(settings.files):
+            if candidate.uid == source_file.uid or candidate.reuse_mapping != source_file.uid:
+                continue
+            candidate.source_forward_axis = source_file.source_forward_axis
+            candidate.target_forward_axis = source_file.target_forward_axis
+            candidate.global_axis_correction = tuple(source_file.global_axis_correction)
+            bpy.ops.fbr.align_source_rig(file_index=index)
         self.report(
             {"INFO"},
-            f"已對應 {mapped} 根骨骼並完成骨架縮放對位",
+            f"已對應 {mapped} 根骨骼並完成實際縮放與軸向對位",
         )
         return {"FINISHED"}
 

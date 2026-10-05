@@ -8,7 +8,7 @@ from . import model, operators, ui, updater
 bl_info = {
     "name": "Faidlix Bone Remap",
     "author": "Faidlix",
-    "version": (0, 6, 4),
+    "version": (0, 6, 5),
     "blender": (4, 5, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Batch import and retarget armature actions",

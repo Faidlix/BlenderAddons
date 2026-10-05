@@ -334,6 +334,22 @@ class FBR_BoneMap(PropertyGroup):
         soft_max=5.0,
         update=update_ik_settings,
     )
+    ik_shape_wire_width: FloatProperty(
+        name="線框粗細",
+        default=2.0,
+        min=1.0,
+        max=16.0,
+        update=update_ik_settings,
+    )
+    ik_shape_color: FloatVectorProperty(
+        name="顏色",
+        subtype="COLOR",
+        size=3,
+        min=0.0,
+        max=1.0,
+        default=(1.0, 0.45, 0.05),
+        update=update_ik_settings,
+    )
 
 
 class FBR_Clip(PropertyGroup):
@@ -397,6 +413,40 @@ class FBR_SourceFile(PropertyGroup):
     ik_backup_use_stretch: BoolProperty(options={"SKIP_SAVE"})
     ik_backup_shape: StringProperty(default="BOX", options={"SKIP_SAVE"})
     ik_backup_shape_scale: FloatProperty(default=1.0, options={"SKIP_SAVE"})
+    ik_backup_shape_wire_width: FloatProperty(default=2.0, options={"SKIP_SAVE"})
+    ik_backup_shape_color: FloatVectorProperty(
+        size=3,
+        default=(1.0, 0.45, 0.05),
+        options={"SKIP_SAVE"},
+    )
+    source_forward_axis: EnumProperty(
+        name="來源前方",
+        items=(
+            ("AUTO", "自動", "依腳、左右與上下骨骼自動判斷"),
+            ("+X", "+X", "來源角色面向 +X"),
+            ("-X", "-X", "來源角色面向 -X"),
+            ("+Y", "+Y", "來源角色面向 +Y"),
+            ("-Y", "-Y", "來源角色面向 -Y"),
+        ),
+        default="AUTO",
+    )
+    target_forward_axis: EnumProperty(
+        name="Target 前方",
+        items=(
+            ("AUTO", "自動", "依腳、左右與上下骨骼自動判斷"),
+            ("+X", "+X", "Target 角色面向 +X"),
+            ("-X", "-X", "Target 角色面向 -X"),
+            ("+Y", "+Y", "Target 角色面向 +Y"),
+            ("-Y", "-Y", "Target 角色面向 -Y"),
+        ),
+        default="AUTO",
+    )
+    global_axis_correction: FloatVectorProperty(
+        size=4,
+        subtype="QUATERNION",
+        default=(1.0, 0.0, 0.0, 0.0),
+        options={"HIDDEN"},
+    )
 
 
 class FBR_Settings(PropertyGroup):
@@ -440,7 +490,12 @@ class FBR_Settings(PropertyGroup):
         ),
         default="SIMPLIFY",
     )
-    rotation_tolerance: FloatProperty(name="旋轉誤差", default=0.5, min=0.0, unit="ROTATION")
+    rotation_tolerance: FloatProperty(
+        name="旋轉誤差",
+        default=math.radians(0.5),
+        min=0.0,
+        unit="ROTATION",
+    )
     location_tolerance: FloatProperty(name="位置誤差", default=0.05, min=0.0)
     fake_user: BoolProperty(name="Fake User", default=True)
     extract_root_motion: BoolProperty(

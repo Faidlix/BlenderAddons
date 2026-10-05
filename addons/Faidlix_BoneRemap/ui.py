@@ -10,7 +10,7 @@ from .model import (
 from .operators import _mapping_axes_match
 
 
-ADDON_VERSION = (0, 6, 4)
+ADDON_VERSION = (0, 6, 5)
 
 
 def _source_file_index(settings, source_file):
@@ -361,6 +361,9 @@ def _draw_ik_settings(layout, file_index, source_file):
         shape = editor.row(align=True)
         shape.prop(active, "ik_shape", text="")
         shape.prop(active, "ik_shape_scale", text="大小")
+        appearance = editor.row(align=True)
+        appearance.prop(active, "ik_shape_wire_width", text="線框粗細")
+        appearance.prop(active, "ik_shape_color", text="顏色")
         solver = editor.row(align=True)
         solver.prop(active, "ik_chain_count")
         solver.prop(active, "ik_iterations")
@@ -662,6 +665,10 @@ class FBR_PT_main(Panel):
             axes.file_index = file_index
             tools.prop(settings, "auto_scale", text="Root 位移縮放", toggle=True)
             tools.label(text="")
+            forward = group.row(align=True)
+            forward.enabled = not locked
+            forward.prop(source, "source_forward_axis", text="來源前方")
+            forward.prop(source, "target_forward_axis", text="Target 前方")
 
             list_area = group.column(align=True)
             list_header = list_area.row(align=True)

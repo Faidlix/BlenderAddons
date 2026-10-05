@@ -216,7 +216,7 @@ def main():
     root_map.transfer_location = True
     root_map.reset_is_root = True
     root_map.reset_transfer_location = True
-    assert not _mapping_axes_match(source_different_axes, target, root_map)
+    assert _mapping_axes_match(source_different_axes, target, root_map)
     arm_map = entry.mappings.add()
     arm_map.source_bone = "Arm.L"
     arm_map.target_bone = "Arm.L"
@@ -299,7 +299,8 @@ def main():
     entry.source_object = source_different_axes.name
     assert bpy.ops.fbr.auto_align_axes(file_index=0) == {"FINISHED"}
     assert _mapping_axes_match(source_different_axes, target, root_map)
-    assert any(abs(value) > 1.0e-6 for value in root_map.rotation_offset)
+    assert all(abs(value) < 1.0e-6 for value in root_map.rotation_offset)
+    assert abs(entry.global_axis_correction[0]) <= 1.0
     root_map.rotation_offset = (0.0, 0.0, 0.0)
     arm_map.rotation_offset = (0.0, 0.0, 0.0)
     entry.source_object = source.name
@@ -312,7 +313,8 @@ def main():
     extra.tail = (0.0, 0.0, 100.0)
     bpy.ops.object.mode_set(mode="OBJECT")
     assert bpy.ops.fbr.align_source_rig(file_index=0) == {"FINISHED"}
-    assert abs(entry.preview_scale - 1.5) < 1.0e-6
+    assert abs(entry.preview_scale - 1.0) < 1.0e-6
+    assert abs(source.get("_fbr_alignment_scale", 1.0) - 1.5) < 1.0e-6
     bpy.ops.object.mode_set(mode="EDIT")
     target.data.edit_bones.remove(target.data.edit_bones["UnmappedDecoration"])
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -430,10 +432,15 @@ def main():
     assert settings.preview_running and settings.preview_mode == "TPOSE"
     assert source.data.pose_position == "REST"
     assert target.data.pose_position == "REST"
+    assert bpy.ops.fbr.align_source_rig(file_index=0) == {"FINISHED"}
+    assert settings.preview_running and settings.preview_mode == "TPOSE"
+    assert source.data.pose_position == "REST"
+    assert target.data.pose_position == "REST"
     assert bpy.ops.fbr.preview_tpose(file_index=0, action="HIDE") == {"FINISHED"}
     assert source.data.pose_position == source_pose_position
     assert target.data.pose_position == target_pose_position
     assert (target.animation_data.action if target.animation_data else None) == target_action_before_tpose
+    aligned_source_matrix = source.matrix_world.copy()
     preview_actions = {
         item.identifier
         for item in bpy.ops.fbr.preview_animation.get_rna_type().properties["action"].enum_items
@@ -452,11 +459,18 @@ def main():
     assert preview_action and preview_action.name.startswith("__FBR_PREVIEW__")
     preview_action_name = preview_action.name
     assert source.animation_data.action == action
+    assert bpy.ops.fbr.align_source_rig(file_index=0) == {"FINISHED"}
+    assert settings.preview_running and settings.preview_mode == "ANIMATION"
+    assert source.animation_data.action == action
+    assert target.animation_data.action.name.startswith("__FBR_PREVIEW__")
     bpy.context.scene.frame_set(1)
     source_start_location = source.pose.bones["Hips"].location.copy()
+    target_start_location = target.pose.bones["Hips"].location.copy()
     bpy.context.scene.frame_set(10)
     source_end_location = source.pose.bones["Hips"].location.copy()
+    target_end_location = target.pose.bones["Hips"].location.copy()
     assert (source_end_location - source_start_location).length > 1.0e-6
+    assert (target_end_location - target_start_location).length > 1.0e-6
     assert bpy.ops.fbr.preview_animation(file_index=0, action="PLAY") == {"FINISHED"}
     assert settings.preview_running
     assert bpy.ops.fbr.preview_animation(file_index=0, action="PAUSE") == {"FINISHED"}
@@ -464,7 +478,7 @@ def main():
     assert bpy.ops.fbr.preview_animation(file_index=0, action="HIDE") == {"FINISHED"}
     assert not settings.preview_running and not settings.preview_source_uid
     assert source.hide_get()
-    assert source.matrix_world == source_matrix_before_preview
+    assert source.matrix_world == aligned_source_matrix
     assert target.data.show_axes == target_axes_before_preview
     assert target.animation_data.action is None
     assert preview_action_name not in bpy.data.actions
@@ -486,6 +500,8 @@ def main():
     assert constraint.subtarget == control_name
     arm_map.ik_shape = "SPHERE"
     arm_map.ik_shape_scale = 1.5
+    arm_map.ik_shape_wire_width = 4.0
+    arm_map.ik_shape_color = (0.2, 0.6, 0.9)
     arm_map.ik_chain_count = 1
     assert target.pose.bones[control_name].custom_shape.name == "FBR_IK_SHAPE_SPHERE"
     shape_object = target.pose.bones[control_name].custom_shape
@@ -495,6 +511,10 @@ def main():
     assert shape_object.hide_render
     assert not target.data.bones[control_name].use_deform
     assert tuple(target.pose.bones[control_name].custom_shape_scale_xyz) == (1.5, 1.5, 1.5)
+    assert not target.pose.bones[control_name].use_custom_shape_bone_size
+    assert target.pose.bones[control_name].custom_shape_wire_width == 4.0
+    control_color = target.data.bones[control_name].color.custom.normal
+    assert control_color[2] > control_color[1] > control_color[0]
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="OK") == {"FINISHED"}
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="START") == {"FINISHED"}
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="RESET") == {"FINISHED"}

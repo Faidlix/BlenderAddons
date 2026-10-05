@@ -2,7 +2,7 @@ import math
 import os
 
 import bpy
-from mathutils import Euler, Matrix, Vector
+from mathutils import Euler, Matrix, Quaternion, Vector
 
 from .model import action_keyframes, flip_bone_name, iter_action_fcurves, normalize_bone_name
 
@@ -103,7 +103,33 @@ def _reflect_basis(matrix):
 
 def _rest_rotation(obj, bone_name):
     bone = obj.data.bones.get(bone_name)
-    return bone.matrix_local.to_quaternion() if bone else None
+    if not bone:
+        return None
+    if bone.parent:
+        return (
+            bone.parent.matrix_local.inverted() @ bone.matrix_local
+        ).to_quaternion()
+    return obj.matrix_world.to_quaternion() @ bone.matrix_local.to_quaternion()
+
+
+def _basis_correction(
+    source_obj,
+    target_obj,
+    source_name,
+    target_name,
+    global_correction,
+):
+    source_bone = source_obj.data.bones.get(source_name)
+    target_bone = target_obj.data.bones.get(target_name)
+    if not source_bone or not target_bone:
+        return None
+    source_rest = _rest_rotation(source_obj, source_name)
+    target_rest = _rest_rotation(target_obj, target_name)
+    if not source_rest or not target_rest:
+        return None
+    if source_bone.parent and target_bone.parent:
+        return target_rest.inverted() @ source_rest
+    return target_rest.inverted() @ global_correction @ source_rest
 
 
 def _clear_target_pose(target_obj):
@@ -119,13 +145,31 @@ def assign_action_and_slot(target_obj, action):
     if not action.slots:
         slot = action.slots.new(target_obj.id_type, target_obj.name)
     else:
-        slot = None
+        slot = next(
+            (
+                candidate
+                for candidate in action.slots
+                if candidate.target_id_type == target_obj.id_type
+                and candidate.name_display == target_obj.name
+            ),
+            None,
+        )
     animation.action = action
     suitable_slots = list(animation.action_suitable_slots)
-    if suitable_slots:
+    if slot is not None:
+        pass
+    elif suitable_slots:
         slot = suitable_slots[0]
-    elif slot is None:
-        slot = action.slots[0]
+    else:
+        slot = next(
+            (
+                candidate
+                for candidate in action.slots
+                if candidate.target_id_type == target_obj.id_type
+            ),
+            action.slots[0],
+        )
+        slot.name_display = target_obj.name
     animation.action_slot = slot
     return slot
 
@@ -182,6 +226,10 @@ def iter_bake_clip(
     previous_target_slot = target_obj.animation_data.action_slot
     previous_source_use_nla = source_obj.animation_data.use_nla
     previous_target_use_nla = target_obj.animation_data.use_nla
+    previous_source_hidden = source_obj.hide_get()
+    previous_source_hide_viewport = source_obj.hide_viewport
+    source_obj.hide_viewport = False
+    source_obj.hide_set(False)
     source_obj.animation_data.use_nla = False
     target_obj.animation_data.use_nla = False
     assign_action_and_slot(source_obj, source_action)
@@ -191,12 +239,19 @@ def iter_bake_clip(
         return 0
 
     root_baselines = {}
+    root_vertical_baselines = {}
     root_target_names = {
         mapping.target_bone for mapping in mappings if mapping.is_root
     }
+    global_correction = Quaternion(source_file.global_axis_correction).normalized()
+    applied_scale = float(source_obj.get("_fbr_alignment_scale", 1.0))
     try:
         for frame_index, source_frame in enumerate(frames):
             context.scene.frame_set(source_frame)
+            context.view_layer.update()
+            evaluated_source = source_obj.evaluated_get(
+                context.evaluated_depsgraph_get()
+            )
             target_frame = out_start + (source_frame - frames[0])
             ik_mappings = []
             ik_chain_names = set()
@@ -243,7 +298,7 @@ def iter_bake_clip(
                     counterpart = flip_bone_name(source_name)
                     if counterpart in source_obj.pose.bones:
                         source_name = counterpart
-                source_pose = source_obj.pose.bones.get(source_name)
+                source_pose = evaluated_source.pose.bones.get(source_name)
                 target_pose = target_obj.pose.bones.get(mapping.target_bone)
                 if not source_pose or not target_pose:
                     continue
@@ -253,10 +308,14 @@ def iter_bake_clip(
                     basis = _reflect_basis(basis)
                 location, source_rotation, scale = basis.decompose()
 
-                source_rest = _rest_rotation(source_obj, source_name)
-                target_rest = _rest_rotation(target_obj, mapping.target_bone)
-                if source_rest and target_rest:
-                    correction = target_rest.inverted() @ source_rest
+                correction = _basis_correction(
+                    source_obj,
+                    target_obj,
+                    source_name,
+                    mapping.target_bone,
+                    global_correction,
+                )
+                if correction:
                     corrected_source = (
                         Euler(mapping.pair_rotation_offset).to_quaternion()
                         @ Euler(mapping.rotation_offset).to_quaternion()
@@ -289,13 +348,17 @@ def iter_bake_clip(
                 if mapping.is_root or mapping.transfer_location:
                     location = Vector(location) * mapping.location_multiplier
                     if settings.auto_scale:
-                        source_length = max(source_obj.dimensions.length, 1.0e-8)
-                        target_length = max(target_obj.dimensions.length, 1.0e-8)
-                        location *= target_length / source_length
+                        location *= applied_scale
                     if clip.in_place and mapping.is_root:
                         baseline = root_baselines.setdefault(mapping.target_bone, location.copy())
                         location.x -= baseline.x
                         location.y -= baseline.y
+                    if ik_mappings and mapping.is_root:
+                        vertical = root_vertical_baselines.setdefault(
+                            mapping.target_bone,
+                            location.z,
+                        )
+                        location.z = vertical
                     if settings.extract_root_motion and mapping.is_root:
                         trajectory = target_obj.pose.bones.get("c_traj")
                         if trajectory and trajectory.name != target_pose.name:
@@ -360,6 +423,8 @@ def iter_bake_clip(
                 pass
         source_obj.animation_data.use_nla = previous_source_use_nla
         target_obj.animation_data.use_nla = previous_target_use_nla
+        source_obj.hide_viewport = previous_source_hide_viewport
+        source_obj.hide_set(previous_source_hidden)
         if previous_target_action and previous_target_slot:
             try:
                 target_obj.animation_data.action_slot = previous_target_slot

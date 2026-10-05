@@ -27,6 +27,18 @@
       "before": "長清單捲動後失去欄位意義，IK 設定會改變清單高度或捲動位置；第二組來源映射相同腳骨時 IK 控制骨可能為空，控制位移也可能逐幀累加。",
       "after": "欄位標題固定、O/X 狀態一致、T-Pose 與動畫預覽分離；IK Shape 可預覽但不渲染，刪除時清理未使用資源，批次輸出維持 Root 垂直基準。",
       "summary": "完成 Bone Remap 動畫清單、預覽、IK 資源與批次重定向穩定性更新。"
+    },
+    {
+      "date": "2026-10-05",
+      "versions": {
+        "faidlix_bone_remap": "0.6.5"
+      },
+      "ui_impact": true,
+      "problem": "IK Custom Shape 無法即時反映外觀，預覽中的自動配骨會切換模式，來源骨架縮放只存在於預覽，且同骨架後續 FBX 因 Action Slot 名稱不同被烘焙成靜止姿勢。",
+      "decision": "IK 增加即時大小、線寬與顏色並停用骨長縮放；自動配骨保存 T-Pose／動畫預覽狀態，把縮放套用到來源 Armature，依角色前方與逐骨 Rest 基底換軸，並優先以物件名稱選擇 Action Slot。",
+      "before": "切換 Edit Mode 會回到原尺寸，預覽後自動配骨可能改成另一種姿勢；Idle、Run 等後續匯入骨架雖有 Key，實際輸出為靜止姿勢。",
+      "after": "來源與 Target 可同步預覽，自動配骨前後維持模式與幀；五段專案素材均產生動態曲線，含 IK 時 Root 高度固定，控制骨為非 Deform。",
+      "summary": "完成 Bone Remap 實際縮放、角色前方換軸、雙骨架預覽與 IK 外觀即時更新。"
     }
   ]
 }
