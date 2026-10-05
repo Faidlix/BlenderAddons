@@ -367,7 +367,8 @@ def main():
     source_root_world = source.matrix_world @ source.pose.bones["Hips"].head
     target_root_world = target.matrix_world @ target.pose.bones["Hips"].head
     assert (source_root_world - target_root_world).length < 1.0e-6
-    assert all(abs(a - b) < 1.0e-6 for a, b in zip(source.color, (1.0, 0.70, 0.05, 0.35)))
+    assert source.display_type == "SOLID"
+    assert all(abs(a - b) < 1.0e-6 for a, b in zip(source.color, (1.0, 0.70, 0.05, 1.0)))
     preview_color = source.data.bones["Hips"].color.custom.normal
     assert preview_color[0] > preview_color[1] > preview_color[2]
     pose_preview_color = source.pose.bones["Hips"].color.custom.normal
@@ -494,6 +495,35 @@ def main():
     assert bpy.ops.fbr.set_root(file_index=0, mapping_index=0) == {"FINISHED"}
     assert root_map.is_root and not arm_map.is_root
 
+    hand_index = next(
+        index
+        for index, item in enumerate(entry.mappings)
+        if item.source_bone == "Left_Hand"
+    )
+    hand_map = entry.mappings[hand_index]
+    assert hand_map.ik_chain_count == 2
+    assert hand_map.ik_iterations == 500
+    assert abs(hand_map.ik_shape_scale - 0.05) < 1.0e-6
+    assert bpy.ops.fbr.ik_settings(
+        file_index=0, mapping_index=hand_index, action="START"
+    ) == {"FINISHED"}
+    assert hand_map.ik_control_bone in target.data.bones
+    assert hand_map.ik_pole_bone in target.data.bones
+    assert target.data.bones[hand_map.ik_pole_bone].get("_fbr_ik_pole")
+    hand_constraint = next(
+        constraint
+        for constraint in target.pose.bones["Arm.L"].constraints
+        if constraint.type == "IK" and constraint.name.startswith("FBR IK")
+    )
+    assert hand_constraint.subtarget == hand_map.ik_control_bone
+    assert hand_constraint.pole_subtarget == hand_map.ik_pole_bone
+    assert hand_constraint.chain_count == 2
+    assert hand_constraint.iterations == 500
+    assert bpy.ops.fbr.ik_settings(
+        file_index=0, mapping_index=hand_index, action="RESET"
+    ) == {"FINISHED"}
+    assert hand_map.ik_control_bone == "" and hand_map.ik_pole_bone == ""
+
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="START") == {"FINISHED"}
     control_name = arm_map.ik_control_bone
     assert arm_map.ik_enabled and control_name in target.data.bones
@@ -568,7 +598,14 @@ def main():
     curves = list(iter_action_fcurves(output))
     assert curves
     assert any("Hips" in curve.data_path and "location" in curve.data_path for curve in curves)
-    assert not any("Arm.L" in curve.data_path and "rotation_quaternion" in curve.data_path for curve in curves)
+    assert not any(
+        'pose.bones["Arm.L"].rotation_quaternion' in curve.data_path
+        for curve in curves
+    )
+    assert any(
+        control_name in curve.data_path and "rotation_quaternion" in curve.data_path
+        for curve in curves
+    )
     assert any(control_name in curve.data_path and "location" in curve.data_path for curve in curves)
     assert max(len(curve.keyframe_points) for curve in curves) <= 10
     for baked_action in (output, batch_output):

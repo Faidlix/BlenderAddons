@@ -34,6 +34,7 @@ _ANIMATION_PREVIEW_STATE = {}
 _IK_EDIT_STATE = {}
 _IK_UPDATE_GUARD = False
 _AXIS_UPDATE_GUARD = False
+_FORWARD_UPDATE_GUARD = False
 IK_CONSTRAINT_NAME = "FBR IK"
 IK_SHAPE_COLLECTION = "__FBR_IK_Shapes__"
 
@@ -109,12 +110,20 @@ def _end_axis_preview(context, source_file):
             bone = source_obj.pose.bones.get(bone_name)
             if bone:
                 bone.select = selection
+        for bone_name, hidden in state.get("source_hidden_bones", {}).items():
+            bone = source_obj.data.bones.get(bone_name)
+            if bone:
+                bone.hide = hidden
     target_obj = bpy.data.objects.get(state.get("target_name", ""))
     if target_obj:
         for bone_name, selection in state.get("target_selection", {}).items():
             bone = target_obj.pose.bones.get(bone_name)
             if bone:
                 bone.select = selection
+        for bone_name, hidden in state.get("target_hidden_bones", {}).items():
+            bone = target_obj.data.bones.get(bone_name)
+            if bone:
+                bone.hide = hidden
     if context:
         context.view_layer.update()
         _tag_view3d_redraw(context)
@@ -166,13 +175,20 @@ def _start_axis_preview(context, source_file, mapping):
         "target_selection": {
             bone.name: bone.select for bone in target_obj.pose.bones
         },
+        "source_hidden_bones": {
+            bone.name: bone.hide for bone in source_obj.data.bones
+        },
+        "target_hidden_bones": {
+            bone.name: bone.hide for bone in target_obj.data.bones
+        },
+        "solo": False,
         "target_name": target_obj.name,
     }
     source_obj.hide_viewport = False
     source_obj.hide_set(False)
     source_obj.show_in_front = True
-    source_obj.display_type = "WIRE"
-    source_obj.color = (1.0, 0.70, 0.05, 0.35)
+    source_obj.display_type = "SOLID"
+    source_obj.color = (1.0, 0.70, 0.05, 1.0)
     source_obj.matrix_world = _root_aligned_preview_matrix(
         context.scene.fbr_settings,
         source_file,
@@ -207,6 +223,39 @@ def _start_axis_preview(context, source_file, mapping):
         if target_bone:
             target_bone.select = True
     _update_axis_preview(context, mapping)
+
+
+def _set_axis_solo(context, source_file, enabled):
+    state = _AXIS_PREVIEW_STATE.get(source_file.uid)
+    if not state:
+        return
+    source_obj = bpy.data.objects.get(state["source_name"])
+    target_obj = bpy.data.objects.get(state.get("target_name", ""))
+    if not source_obj or not target_obj:
+        return
+    if not enabled:
+        for name, hidden in state["source_hidden_bones"].items():
+            bone = source_obj.data.bones.get(name)
+            if bone:
+                bone.hide = hidden
+        for name, hidden in state["target_hidden_bones"].items():
+            bone = target_obj.data.bones.get(name)
+            if bone:
+                bone.hide = hidden
+    else:
+        index = source_file.active_mapping_index
+        if not 0 <= index < len(source_file.mappings):
+            return
+        mapping = source_file.mappings[index]
+        source_names = {mapping.source_bone}
+        target_names = {mapping.target_bone} if mapping.target_bone else set()
+        for bone in source_obj.data.bones:
+            bone.hide = bone.name not in source_names
+        for bone in target_obj.data.bones:
+            bone.hide = bone.name not in target_names
+    state["solo"] = enabled
+    context.view_layer.update()
+    _tag_view3d_redraw(context)
 
 
 def _update_axis_preview(context, changed_mapping=None):
@@ -384,23 +433,77 @@ def _ik_owner(context, mapping):
     return None, ""
 
 
-def _add_ik_control_bone(context, owner_obj, owner_bone_name, mapping):
-    if mapping.ik_control_bone and mapping.ik_control_bone in owner_obj.data.bones:
-        return mapping.ik_control_bone
-    owner_bone = owner_obj.data.bones.get(owner_bone_name)
-    if not owner_bone:
-        return ""
-    matrix = owner_bone.matrix_local.copy()
+def _ik_solver_bone_name(owner_obj, endpoint_name):
+    endpoint = owner_obj.data.bones.get(endpoint_name)
+    if endpoint and endpoint.parent and endpoint.parent.parent:
+        return endpoint.parent.name
+    return endpoint_name
+
+
+def _ik_rest_pole_position(owner_obj, endpoint_name):
+    endpoint = owner_obj.data.bones.get(endpoint_name)
+    lower = endpoint.parent if endpoint else None
+    upper = lower.parent if lower else None
+    if not endpoint or not lower or not upper:
+        return None
+    midpoint = (upper.head_local + lower.tail_local) * 0.5
+    bend = lower.head_local - midpoint
+    if bend.length_squared < 1.0e-10:
+        limb = lower.tail_local - upper.head_local
+        bend = limb.cross(Vector((0.0, 0.0, 1.0)))
+        if bend.length_squared < 1.0e-10:
+            bend = limb.cross(Vector((0.0, 1.0, 0.0)))
+    distance = max(upper.length + lower.length, lower.length * 2.0, 0.01)
+    return lower.head_local + bend.normalized() * distance
+
+
+def _add_ik_control_bones(context, owner_obj, endpoint_name, mapping):
+    endpoint = owner_obj.data.bones.get(endpoint_name)
+    if not endpoint:
+        return "", ""
+    control_valid = (
+        mapping.ik_control_bone
+        and mapping.ik_control_bone in owner_obj.data.bones
+    )
+    pole_position = _ik_rest_pole_position(owner_obj, endpoint_name)
+    pole_required = pole_position is not None
+    pole_valid = (
+        not pole_required
+        or (
+            mapping.ik_pole_bone
+            and mapping.ik_pole_bone in owner_obj.data.bones
+        )
+    )
+    if control_valid and pole_valid:
+        return mapping.ik_control_bone, mapping.ik_pole_bone
+    endpoint_matrix = endpoint.matrix_local.copy()
     _set_active_object_mode(context, owner_obj, "EDIT")
-    edit_bone = owner_obj.data.edit_bones.new(f"FBR_IK_{owner_bone_name}")
-    edit_bone.matrix = matrix
-    edit_bone.use_deform = False
-    name = edit_bone.name
+    control_name = mapping.ik_control_bone if control_valid else ""
+    if not control_valid:
+        edit_bone = owner_obj.data.edit_bones.new(f"FBR_IK_{endpoint_name}")
+        edit_bone.matrix = endpoint_matrix
+        edit_bone.use_deform = False
+        control_name = edit_bone.name
+    pole_name = mapping.ik_pole_bone if pole_valid else ""
+    if pole_required and not pole_valid:
+        pole_matrix = endpoint_matrix.copy()
+        pole_matrix.translation = pole_position
+        edit_pole = owner_obj.data.edit_bones.new(f"FBR_Pole_{endpoint_name}")
+        edit_pole.matrix = pole_matrix
+        edit_pole.length = max(endpoint.length * 0.5, 0.01)
+        edit_pole.use_deform = False
+        pole_name = edit_pole.name
     bpy.ops.object.mode_set(mode="OBJECT")
-    owner_obj.data.bones[name]["_fbr_ik_control"] = True
-    owner_obj.data.bones[name].use_deform = False
-    mapping.ik_control_bone = name
-    return name
+    for name in (control_name, pole_name):
+        if not name:
+            continue
+        owner_obj.data.bones[name]["_fbr_ik_control"] = True
+        owner_obj.data.bones[name].use_deform = False
+    if pole_name:
+        owner_obj.data.bones[pole_name]["_fbr_ik_pole"] = True
+    mapping.ik_control_bone = control_name
+    mapping.ik_pole_bone = pole_name
+    return control_name, pole_name
 
 
 def _ik_constraint(pose_bone):
@@ -415,13 +518,27 @@ def _ik_constraint(pose_bone):
 
 
 def _sync_ik_mapping(context, mapping):
-    owner_obj, owner_bone_name = _ik_owner(context, mapping)
-    if not owner_obj or not owner_bone_name:
+    owner_obj, endpoint_name = _ik_owner(context, mapping)
+    if not owner_obj or not endpoint_name:
         return
-    owner = owner_obj.pose.bones.get(owner_bone_name)
+    solver_name = _ik_solver_bone_name(owner_obj, endpoint_name)
+    owner = owner_obj.pose.bones.get(solver_name)
     if not owner:
         return
+    endpoint_owner = owner_obj.pose.bones.get(endpoint_name)
+    if endpoint_owner and endpoint_owner != owner:
+        for stale in list(endpoint_owner.constraints):
+            if (
+                stale.type == "IK"
+                and stale.name.startswith(IK_CONSTRAINT_NAME)
+                and (
+                    not mapping.ik_control_bone
+                    or stale.subtarget == mapping.ik_control_bone
+                )
+            ):
+                endpoint_owner.constraints.remove(stale)
     constraint = _ik_constraint(owner)
+    pole_required = _ik_rest_pole_position(owner_obj, endpoint_name) is not None
     if (
         mapping.ik_enabled
         and constraint
@@ -431,13 +548,22 @@ def _sync_ik_mapping(context, mapping):
         existing_control = owner_obj.data.bones[constraint.subtarget]
         if existing_control.get("_fbr_ik_control", False):
             mapping.ik_control_bone = existing_control.name
+            if constraint.pole_target == owner_obj:
+                mapping.ik_pole_bone = constraint.pole_subtarget
     if mapping.ik_enabled and (
         constraint is None
         or not mapping.ik_control_bone
         or mapping.ik_control_bone not in owner_obj.data.bones
+        or (
+            pole_required
+            and (
+                not mapping.ik_pole_bone
+                or mapping.ik_pole_bone not in owner_obj.data.bones
+            )
+        )
     ):
-        control_name = _add_ik_control_bone(
-            context, owner_obj, owner_bone_name, mapping
+        control_name, _pole_name = _add_ik_control_bones(
+            context, owner_obj, endpoint_name, mapping
         )
         if not control_name:
             return
@@ -450,34 +576,40 @@ def _sync_ik_mapping(context, mapping):
         return
     constraint.target = owner_obj
     constraint.subtarget = mapping.ik_control_bone
+    constraint.pole_target = owner_obj if mapping.ik_pole_bone else None
+    constraint.pole_subtarget = mapping.ik_pole_bone
     constraint.chain_count = mapping.ik_chain_count
     constraint.iterations = mapping.ik_iterations
     constraint.influence = mapping.ik_influence
     constraint.use_tail = mapping.ik_use_tail
     constraint.use_rotation = mapping.ik_use_rotation
     constraint.use_stretch = mapping.ik_use_stretch
-    control = owner_obj.pose.bones.get(mapping.ik_control_bone)
-    if control:
-        control.custom_shape = _ik_shape_object(mapping.ik_shape)
+    controls = [
+        owner_obj.pose.bones.get(name)
+        for name in (mapping.ik_control_bone, mapping.ik_pole_bone)
+        if name
+    ]
+    if controls:
+        shape = _ik_shape_object(mapping.ik_shape)
         scale = mapping.ik_shape_scale
-        control.custom_shape_scale_xyz = (scale, scale, scale)
-        control.use_custom_shape_bone_size = False
-        owner_obj.data.bones[mapping.ik_control_bone].show_wire = True
-        control.custom_shape_wire_width = mapping.ik_shape_wire_width
         color = tuple(mapping.ik_shape_color)
         selected = tuple(min(1.0, value * 1.15 + 0.08) for value in color)
         active = tuple(min(1.0, value * 1.30 + 0.12) for value in color)
         owner_obj.data.show_bone_colors = True
-        for colored_bone in (
-            owner_obj.data.bones.get(mapping.ik_control_bone),
-            control,
-        ):
-            if not colored_bone:
-                continue
-            colored_bone.color.palette = "CUSTOM"
-            colored_bone.color.custom.normal = color
-            colored_bone.color.custom.select = selected
-            colored_bone.color.custom.active = active
+        for control in controls:
+            control.custom_shape = shape
+            control.custom_shape_scale_xyz = (scale, scale, scale)
+            control.use_custom_shape_bone_size = False
+            control.custom_shape_wire_width = mapping.ik_shape_wire_width
+            data_bone = owner_obj.data.bones.get(control.name)
+            if data_bone:
+                data_bone.show_wire = True
+            for colored_bone in (data_bone, control):
+                if colored_bone:
+                    colored_bone.color.palette = "CUSTOM"
+                    colored_bone.color.custom.normal = color
+                    colored_bone.color.custom.select = selected
+                    colored_bone.color.custom.active = active
         owner_obj.show_in_front = True
         owner_obj.hide_set(False)
         for bone in owner_obj.pose.bones:
@@ -488,45 +620,55 @@ def _sync_ik_mapping(context, mapping):
 
 
 def _delete_ik_mapping(context, mapping):
-    owner_obj, owner_bone_name = _ik_owner(context, mapping)
+    owner_obj, endpoint_name = _ik_owner(context, mapping)
     if not owner_obj:
         mapping.ik_enabled = False
         mapping.ik_control_bone = ""
+        mapping.ik_pole_bone = ""
         _cleanup_unused_ik_shapes()
         return
-    owner = owner_obj.pose.bones.get(owner_bone_name)
     mapping_pointer = mapping.as_pointer()
-    shared_mapping = mapping.ik_control_bone and next(
+    control_names = {mapping.ik_control_bone, mapping.ik_pole_bone} - {""}
+    shared_mapping = control_names and next(
         (
             item
             for source_file in context.scene.fbr_settings.files
             for item in source_file.mappings
             if item.as_pointer() != mapping_pointer
             and item.ik_enabled
-            and item.ik_control_bone == mapping.ik_control_bone
+            and bool(control_names & {item.ik_control_bone, item.ik_pole_bone})
         ),
         None,
     )
     if shared_mapping:
         mapping.ik_enabled = False
         mapping.ik_control_bone = ""
+        mapping.ik_pole_bone = ""
         context.view_layer.update()
         return
-    if owner:
-        constraint = _ik_constraint(owner)
-        if constraint:
-            owner.constraints.remove(constraint)
-    control_name = mapping.ik_control_bone
-    if control_name and control_name in owner_obj.data.bones:
-        bone = owner_obj.data.bones[control_name]
-        if bone.get("_fbr_ik_control", False):
-            _set_active_object_mode(context, owner_obj, "EDIT")
-            edit_bone = owner_obj.data.edit_bones.get(control_name)
+    for pose_bone in owner_obj.pose.bones:
+        for constraint in list(pose_bone.constraints):
+            if (
+                constraint.type == "IK"
+                and constraint.name.startswith(IK_CONSTRAINT_NAME)
+                and constraint.subtarget in control_names
+            ):
+                pose_bone.constraints.remove(constraint)
+    removable = [
+        name for name in control_names
+        if name in owner_obj.data.bones
+        and owner_obj.data.bones[name].get("_fbr_ik_control", False)
+    ]
+    if removable:
+        _set_active_object_mode(context, owner_obj, "EDIT")
+        for name in removable:
+            edit_bone = owner_obj.data.edit_bones.get(name)
             if edit_bone:
                 owner_obj.data.edit_bones.remove(edit_bone)
-            bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.ops.object.mode_set(mode="OBJECT")
     mapping.ik_enabled = False
     mapping.ik_control_bone = ""
+    mapping.ik_pole_bone = ""
     _cleanup_unused_ik_shapes()
     context.view_layer.update()
 
@@ -534,7 +676,7 @@ def _delete_ik_mapping(context, mapping):
 def _delete_all_fbr_ik(context, settings):
     for source_file in settings.files:
         for mapping in list(source_file.mappings):
-            if mapping.ik_enabled or mapping.ik_control_bone:
+            if mapping.ik_enabled or mapping.ik_control_bone or mapping.ik_pole_bone:
                 _delete_ik_mapping(context, mapping)
     for obj in list(bpy.data.objects):
         if obj.type != "ARMATURE":
@@ -991,6 +1133,30 @@ def restart_animation_preview(context, source_file):
     return success
 
 
+def _update_forward_axis_preview(context, source_file):
+    global _FORWARD_UPDATE_GUARD
+    if _FORWARD_UPDATE_GUARD:
+        return
+    settings = getattr(context.scene, "fbr_settings", None)
+    if not settings:
+        return
+    file_index = next(
+        (
+            index
+            for index, item in enumerate(settings.files)
+            if item.as_pointer() == source_file.as_pointer()
+        ),
+        -1,
+    )
+    if file_index < 0:
+        return
+    try:
+        _FORWARD_UPDATE_GUARD = True
+        bpy.ops.fbr.align_source_rig(file_index=file_index)
+    finally:
+        _FORWARD_UPDATE_GUARD = False
+
+
 def _mapping_axes_match(source_obj, target_obj, mapping, tolerance=math.radians(0.5)):
     if not source_obj or not target_obj or not mapping.target_bone:
         return False
@@ -1254,6 +1420,8 @@ def _source_entry(settings, filepath, obj, actions, suffix=""):
         stem, extension = os.path.splitext(entry.display_name)
         entry.display_name = f"{stem} [{suffix}]{extension}"
     entry.source_object = obj.name
+    entry.alignment_original_matrix = _matrix_to_property(obj.matrix_world.copy())
+    entry.alignment_original_valid = True
     entry.signature = armature_signature(obj)
     for action in actions:
         clip = entry.clips.add()
@@ -1567,6 +1735,50 @@ class FBR_OT_toggle_clip_option(Operator):
         return {"FINISHED"}
 
 
+class FBR_OT_drag_column(Operator):
+    bl_idname = "fbr.drag_column"
+    bl_label = "拖曳調整欄寬"
+    bl_description = "按住左鍵左右拖曳，同步調整標題與內容欄寬"
+    bl_options = {"INTERNAL"}
+
+    property_name: StringProperty()
+
+    def invoke(self, context, event):
+        settings = context.scene.fbr_settings
+        if not hasattr(settings, self.property_name):
+            return {"CANCELLED"}
+        self._start_x = event.mouse_x
+        self._start_value = float(getattr(settings, self.property_name))
+        self._region_width = max(float(getattr(context.region, "width", 1)), 1.0)
+        context.window.cursor_modal_set("SCROLL_X")
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if event.type == "MOUSEMOVE":
+            delta = (event.mouse_x - self._start_x) / self._region_width
+            setattr(
+                context.scene.fbr_settings,
+                self.property_name,
+                self._start_value + delta,
+            )
+            context.area.tag_redraw()
+            return {"RUNNING_MODAL"}
+        if event.type == "LEFTMOUSE" and event.value == "RELEASE":
+            context.window.cursor_modal_restore()
+            return {"FINISHED"}
+        if event.type in {"RIGHTMOUSE", "ESC"}:
+            setattr(
+                context.scene.fbr_settings,
+                self.property_name,
+                self._start_value,
+            )
+            context.window.cursor_modal_restore()
+            context.area.tag_redraw()
+            return {"CANCELLED"}
+        return {"RUNNING_MODAL"}
+
+
 class FBR_OT_select_target_bone(Operator):
     bl_idname = "fbr.select_target_bone"
     bl_label = "選擇目標骨骼"
@@ -1758,8 +1970,10 @@ class FBR_OT_align_source_rig(Operator):
         source_obj.matrix_world = aligned_matrix
         source_file.alignment_matrix = _matrix_to_property(aligned_matrix)
         source_file.alignment_valid = True
-        source_file.alignment_scale = scale
-        source_obj["_fbr_alignment_scale"] = scale
+        aligned_scale = aligned_matrix.to_scale()
+        effective_scale = sum(abs(value) for value in aligned_scale) / 3.0
+        source_file.alignment_scale = effective_scale
+        source_obj["_fbr_alignment_scale"] = effective_scale
         source_file.global_axis_correction = (1.0, 0.0, 0.0, 0.0)
         context.view_layer.update()
         if axis_mapping_index >= 0 and axis_mapping_index < len(source_file.mappings):
@@ -1801,6 +2015,14 @@ class FBR_OT_auto_align_axes(Operator):
         if not source_obj or not mapping_file:
             return {"CANCELLED"}
 
+        preview_mode = ""
+        preview_frame = context.scene.frame_current
+        preview_playing = False
+        if settings.preview_running and settings.preview_source_uid == source_file.uid:
+            preview_mode = settings.preview_mode
+            screen = getattr(context, "screen", None)
+            preview_playing = bool(screen and screen.is_animation_playing)
+
         correction = (
             Matrix.Identity(3).to_quaternion()
             if source_file.alignment_valid
@@ -1820,18 +2042,14 @@ class FBR_OT_auto_align_axes(Operator):
 
         if source_file.axis_editing:
             _update_axis_preview(context)
-        elif (
-            settings.preview_running
-            and settings.preview_source_uid == source_file.uid
-            and settings.preview_mode == "ANIMATION"
-        ):
-            preview_frame = context.scene.frame_current
-            screen = getattr(context, "screen", None)
-            was_playing = bool(screen and screen.is_animation_playing)
+        elif preview_mode == "TPOSE":
+            _start_tpose_preview(context, source_file)
+            context.scene.frame_set(preview_frame)
+        elif preview_mode == "ANIMATION":
             _start_animation_preview(
                 context,
                 source_file,
-                play_animation=was_playing,
+                play_animation=preview_playing,
             )
             context.scene.frame_set(preview_frame)
         _tag_view3d_redraw(context)
@@ -1973,10 +2191,52 @@ class FBR_OT_ik_settings(Operator):
         )
     )
 
+    def invoke(self, context, _event):
+        if self.action != "START":
+            return self.execute(context)
+        result = self.execute(context)
+        if result != {"FINISHED"}:
+            return result
+        self.action = "OK"
+        return context.window_manager.invoke_props_dialog(self, width=620)
+
+    def draw(self, context):
+        files = context.scene.fbr_settings.files
+        if not 0 <= self.file_index < len(files):
+            return
+        source = files[self.file_index]
+        index = self.mapping_index if self.mapping_index >= 0 else source.active_mapping_index
+        if not 0 <= index < len(source.mappings):
+            return
+        active = source.mappings[index]
+        layout = self.layout
+        layout.label(text=f"{active.source_bone}  →  {active.target_bone}")
+        shape = layout.row(align=True)
+        shape.prop(active, "ik_shape", text="")
+        shape.prop(active, "ik_shape_scale", text="大小")
+        shape.prop(active, "ik_shape_wire_width", text="Width")
+        layout.prop(active, "ik_shape_color", text="顏色")
+        solver = layout.row(align=True)
+        solver.prop(active, "ik_chain_count")
+        solver.prop(active, "ik_iterations")
+        solver.prop(active, "ik_influence")
+        options = layout.row(align=True)
+        options.prop(active, "ik_use_tail", toggle=True)
+        options.prop(active, "ik_use_rotation", toggle=True)
+        options.prop(active, "ik_use_stretch", toggle=True)
+        delete = layout.operator("fbr.delete_ik", text="刪除 IK", icon="TRASH")
+        delete.file_index = self.file_index
+        delete.mapping_index = index
+
+    def cancel(self, context):
+        self.action = "CANCEL"
+        self.execute(context)
+
     @staticmethod
     def _backup(source, mapping):
         source.ik_backup_enabled = mapping.ik_enabled
         source.ik_backup_control_bone = mapping.ik_control_bone
+        source.ik_backup_pole_bone = mapping.ik_pole_bone
         source.ik_backup_chain_count = mapping.ik_chain_count
         source.ik_backup_iterations = mapping.ik_iterations
         source.ik_backup_influence = mapping.ik_influence
@@ -2001,6 +2261,7 @@ class FBR_OT_ik_settings(Operator):
         mapping.ik_shape_wire_width = source.ik_backup_shape_wire_width
         mapping.ik_shape_color = tuple(source.ik_backup_shape_color)
         mapping.ik_control_bone = source.ik_backup_control_bone
+        mapping.ik_pole_bone = source.ik_backup_pole_bone
         mapping.ik_enabled = source.ik_backup_enabled
 
     def execute(self, context):
@@ -2032,7 +2293,7 @@ class FBR_OT_ik_settings(Operator):
                 item.as_pointer(): {
                     prop: getattr(item, prop)
                     for prop in (
-                        "ik_enabled", "ik_control_bone", "ik_chain_count",
+                        "ik_enabled", "ik_control_bone", "ik_pole_bone", "ik_chain_count",
                         "ik_iterations", "ik_influence", "ik_use_tail",
                         "ik_use_rotation", "ik_use_stretch", "ik_shape",
                         "ik_shape_scale", "ik_shape_wire_width",
@@ -2132,6 +2393,68 @@ class FBR_OT_axis_correction(Operator):
         )
     )
 
+    def invoke(self, context, _event):
+        if self.action != "START":
+            return self.execute(context)
+        result = self.execute(context)
+        if result != {"FINISHED"}:
+            return result
+        self.action = "OK"
+        return context.window_manager.invoke_props_dialog(self, width=620)
+
+    def draw(self, context):
+        files = context.scene.fbr_settings.files
+        if not 0 <= self.file_index < len(files):
+            return
+        source = files[self.file_index]
+        index = self.mapping_index if self.mapping_index >= 0 else source.active_mapping_index
+        if not 0 <= index < len(source.mappings):
+            return
+        active = source.mappings[index]
+        pair_name = flip_bone_name(active.source_bone)
+        pair = next(
+            (item for item in source.mappings if item.source_bone == pair_name),
+            None,
+        ) if pair_name != active.source_bone else None
+        layout = self.layout
+        layout.label(text=f"{active.source_bone}  →  {active.target_bone}")
+        state = _AXIS_PREVIEW_STATE.get(source.uid, {})
+        solo = layout.operator(
+            "fbr.axis_solo",
+            text="Solo",
+            icon="HIDE_OFF" if state.get("solo") else "HIDE_ON",
+            depress=bool(state.get("solo")),
+        )
+        solo.file_index = self.file_index
+        rotation = layout.row(align=True)
+        auto = rotation.operator("fbr.axis_correction", text="自動對軸向")
+        auto.file_index = self.file_index
+        auto.mapping_index = index
+        auto.action = "AUTO"
+        property_name = "pair_rotation_offset" if pair else "rotation_offset"
+        rotation.prop(active, property_name, index=0, text="X")
+        rotation.prop(active, property_name, index=1, text="Y")
+        rotation.prop(active, property_name, index=2, text="Z")
+        values = layout.row(align=True)
+        root = values.operator(
+            "fbr.set_root",
+            text="Root 已設定" if active.is_root else "設定為 Root",
+            depress=active.is_root,
+        )
+        root.file_index = self.file_index
+        root.mapping_index = index
+        values.prop(active, "transfer_location", text="啟用骨頭位移倍率", toggle=True)
+        if active.transfer_location:
+            values.prop(active, "location_multiplier", text="倍率")
+        reset = layout.operator("fbr.axis_correction", text="Reset")
+        reset.file_index = self.file_index
+        reset.mapping_index = index
+        reset.action = "RESET"
+
+    def cancel(self, context):
+        self.action = "CANCEL"
+        self.execute(context)
+
     def execute(self, context):
         files = context.scene.fbr_settings.files
         if not 0 <= self.file_index < len(files):
@@ -2206,6 +2529,26 @@ class FBR_OT_axis_correction(Operator):
         return {"FINISHED"}
 
 
+class FBR_OT_axis_solo(Operator):
+    bl_idname = "fbr.axis_solo"
+    bl_label = "Solo 骨頭"
+    bl_description = "只顯示目前來源與 Target 骨頭；關閉視窗時自動還原"
+    bl_options = {"INTERNAL"}
+
+    file_index: IntProperty()
+
+    def execute(self, context):
+        files = context.scene.fbr_settings.files
+        if not 0 <= self.file_index < len(files):
+            return {"CANCELLED"}
+        source = files[self.file_index]
+        state = _AXIS_PREVIEW_STATE.get(source.uid)
+        if not state:
+            return {"CANCELLED"}
+        _set_axis_solo(context, source, not state.get("solo", False))
+        return {"FINISHED"}
+
+
 class FBR_OT_clip_name(Operator):
     bl_idname = "fbr.clip_name"
     bl_label = "片段名稱"
@@ -2236,6 +2579,7 @@ class FBR_OT_auto_map(Operator):
     file_index: IntProperty()
 
     def execute(self, context):
+        global _FORWARD_UPDATE_GUARD
         settings = context.scene.fbr_settings
         target = _target_object(settings)
         if not target:
@@ -2264,8 +2608,12 @@ class FBR_OT_auto_map(Operator):
         for index, candidate in enumerate(settings.files):
             if candidate.uid == source_file.uid or candidate.reuse_mapping != source_file.uid:
                 continue
-            candidate.source_forward_axis = source_file.source_forward_axis
-            candidate.target_forward_axis = source_file.target_forward_axis
+            try:
+                _FORWARD_UPDATE_GUARD = True
+                candidate.source_forward_axis = source_file.source_forward_axis
+                candidate.target_forward_axis = source_file.target_forward_axis
+            finally:
+                _FORWARD_UPDATE_GUARD = False
             candidate.global_axis_correction = tuple(source_file.global_axis_correction)
             bpy.ops.fbr.align_source_rig(file_index=index)
         if preview_mode == "TPOSE":
@@ -2572,6 +2920,7 @@ CLASSES = (
     FBR_OT_reset_all,
     FBR_OT_toggle_file,
     FBR_OT_toggle_clip_option,
+    FBR_OT_drag_column,
     FBR_OT_select_target_bone,
     FBR_OT_clear_target_bone,
     FBR_OT_set_root,
@@ -2583,6 +2932,7 @@ CLASSES = (
     FBR_OT_ik_settings,
     FBR_OT_delete_ik,
     FBR_OT_axis_correction,
+    FBR_OT_axis_solo,
     FBR_OT_clip_name,
     FBR_OT_auto_map,
     FBR_OT_set_reuse_mapping,

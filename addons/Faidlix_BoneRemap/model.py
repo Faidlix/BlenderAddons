@@ -247,6 +247,14 @@ def update_preview_clip(self, context):
     restart_animation_preview(context, self)
 
 
+def update_forward_axis(self, context):
+    if not context or not context.scene:
+        return
+    from .operators import _update_forward_axis_preview
+
+    _update_forward_axis_preview(context, self)
+
+
 class FBR_BoneMap(PropertyGroup):
     source_bone: StringProperty(name="來源骨骼")
     target_bone: StringProperty(name="目標骨骼")
@@ -284,16 +292,17 @@ class FBR_BoneMap(PropertyGroup):
     )
     ik_enabled: BoolProperty(default=False, options={"HIDDEN"})
     ik_control_bone: StringProperty(default="", options={"HIDDEN"})
+    ik_pole_bone: StringProperty(default="", options={"HIDDEN"})
     ik_chain_count: IntProperty(
         name="關聯骨頭數",
-        default=3,
+        default=2,
         min=0,
         max=255,
         update=update_ik_settings,
     )
     ik_iterations: IntProperty(
         name="迭代次數",
-        default=0,
+        default=500,
         min=0,
         max=10000,
         update=update_ik_settings,
@@ -329,7 +338,7 @@ class FBR_BoneMap(PropertyGroup):
     )
     ik_shape_scale: FloatProperty(
         name="控制器大小",
-        default=1.0,
+        default=0.05,
         min=0.01,
         soft_max=5.0,
         update=update_ik_settings,
@@ -428,14 +437,15 @@ class FBR_SourceFile(PropertyGroup):
     ik_editing: BoolProperty(default=False, options={"SKIP_SAVE"})
     ik_backup_enabled: BoolProperty(options={"SKIP_SAVE"})
     ik_backup_control_bone: StringProperty(options={"SKIP_SAVE"})
-    ik_backup_chain_count: IntProperty(default=3, options={"SKIP_SAVE"})
-    ik_backup_iterations: IntProperty(default=0, options={"SKIP_SAVE"})
+    ik_backup_pole_bone: StringProperty(options={"SKIP_SAVE"})
+    ik_backup_chain_count: IntProperty(default=2, options={"SKIP_SAVE"})
+    ik_backup_iterations: IntProperty(default=500, options={"SKIP_SAVE"})
     ik_backup_influence: FloatProperty(default=1.0, options={"SKIP_SAVE"})
     ik_backup_use_tail: BoolProperty(default=True, options={"SKIP_SAVE"})
     ik_backup_use_rotation: BoolProperty(options={"SKIP_SAVE"})
     ik_backup_use_stretch: BoolProperty(options={"SKIP_SAVE"})
     ik_backup_shape: StringProperty(default="BOX", options={"SKIP_SAVE"})
-    ik_backup_shape_scale: FloatProperty(default=1.0, options={"SKIP_SAVE"})
+    ik_backup_shape_scale: FloatProperty(default=0.05, options={"SKIP_SAVE"})
     ik_backup_shape_wire_width: FloatProperty(default=2.0, options={"SKIP_SAVE"})
     ik_backup_shape_color: FloatVectorProperty(
         size=3,
@@ -452,6 +462,7 @@ class FBR_SourceFile(PropertyGroup):
             ("-Y", "-Y", "來源角色面向 -Y"),
         ),
         default="AUTO",
+        update=update_forward_axis,
     )
     target_forward_axis: EnumProperty(
         name="Target 前方",
@@ -463,6 +474,7 @@ class FBR_SourceFile(PropertyGroup):
             ("-Y", "-Y", "Target 角色面向 -Y"),
         ),
         default="AUTO",
+        update=update_forward_axis,
     )
     global_axis_correction: FloatVectorProperty(
         size=4,

@@ -175,7 +175,12 @@ def assign_action_and_slot(target_obj, action):
 
 
 def _ik_chain_names(target_obj, mapping):
-    bone = target_obj.data.bones.get(mapping.target_bone)
+    endpoint = target_obj.data.bones.get(mapping.target_bone)
+    bone = (
+        endpoint.parent
+        if endpoint and endpoint.parent and endpoint.parent.parent
+        else endpoint
+    )
     if not bone:
         return set()
     result = set()
@@ -186,6 +191,28 @@ def _ik_chain_names(target_obj, mapping):
         if mapping.ik_chain_count:
             remaining -= 1
     return result
+
+
+def _ik_solver_pose_bone(target_obj, mapping):
+    endpoint = target_obj.pose.bones.get(mapping.target_bone)
+    if endpoint and endpoint.parent and endpoint.parent.parent:
+        return endpoint.parent
+    return endpoint
+
+
+def _ik_pole_position(solver):
+    upper = solver.parent if solver else None
+    if not solver or not upper:
+        return None
+    midpoint = (upper.head + solver.tail) * 0.5
+    bend = solver.head - midpoint
+    if bend.length_squared < 1.0e-10:
+        limb = solver.tail - upper.head
+        bend = limb.cross(Vector((0.0, 0.0, 1.0)))
+        if bend.length_squared < 1.0e-10:
+            bend = limb.cross(Vector((0.0, 1.0, 0.0)))
+    distance = max(upper.length + solver.length, solver.length * 2.0, 0.01)
+    return solver.head + bend.normalized() * distance
 
 
 def _fbr_ik_constraint(pose_bone):
@@ -259,20 +286,24 @@ def iter_bake_clip(
             for mapping in mappings:
                 if not mapping.ik_enabled or not mapping.ik_control_bone:
                     continue
-                owner = target_obj.pose.bones.get(mapping.target_bone)
+                endpoint = target_obj.pose.bones.get(mapping.target_bone)
+                owner = _ik_solver_pose_bone(target_obj, mapping)
                 control = target_obj.pose.bones.get(mapping.ik_control_bone)
+                pole = target_obj.pose.bones.get(mapping.ik_pole_bone)
                 constraint = _fbr_ik_constraint(owner) if owner else None
-                if not owner or not control or not constraint:
+                if not endpoint or not owner or not control or not constraint:
                     continue
                 constraint.target = target_obj
                 constraint.subtarget = mapping.ik_control_bone
+                constraint.pole_target = target_obj if pole else None
+                constraint.pole_subtarget = mapping.ik_pole_bone if pole else ""
                 constraint.chain_count = mapping.ik_chain_count
                 constraint.iterations = mapping.ik_iterations
                 constraint.influence = mapping.ik_influence
                 constraint.use_tail = mapping.ik_use_tail
                 constraint.use_rotation = mapping.ik_use_rotation
                 constraint.use_stretch = mapping.ik_use_stretch
-                ik_mappings.append((mapping, owner, control, constraint))
+                ik_mappings.append((mapping, endpoint, owner, control, pole, constraint))
                 ik_chain_names.update(_ik_chain_names(target_obj, mapping))
                 muted_constraints.append((constraint, constraint.mute))
                 constraint.mute = True
@@ -379,9 +410,12 @@ def iter_bake_clip(
                         )
 
             context.view_layer.update()
-            desired_ik_positions = {
-                mapping.as_pointer(): owner.matrix.translation.copy()
-                for mapping, owner, _control, _constraint in ik_mappings
+            desired_ik_transforms = {
+                mapping.as_pointer(): (
+                    endpoint.matrix.copy(),
+                    _ik_pole_position(owner),
+                )
+                for mapping, endpoint, owner, _control, _pole, _constraint in ik_mappings
             }
             for bone_name in ik_chain_names:
                 pose_bone = target_obj.pose.bones.get(bone_name)
@@ -393,24 +427,34 @@ def iter_bake_clip(
             for constraint, was_muted in muted_constraints:
                 constraint.mute = was_muted
             context.view_layer.update()
-            for mapping, owner, control, constraint in ik_mappings:
+            for mapping, _endpoint, _owner, control, pole, constraint in ik_mappings:
                 if constraint.mute:
                     continue
-                desired = desired_ik_positions[mapping.as_pointer()]
-                # PoseBone.matrix and owner.matrix are both in Target armature
-                # object space.  Assign the control directly in that same
-                # space; the previous iterative owner-error correction mixed
-                # the solved IK result back into the control and could send it
-                # far away after scale/axis conversion.
-                control_matrix = control.bone.matrix_local.copy()
-                control_matrix.translation = desired
-                control.matrix = control_matrix
+                desired_matrix, pole_position = desired_ik_transforms[mapping.as_pointer()]
+                # ARP-style endpoint solving: bake the complete endpoint
+                # transform to a separate control, while the IK constraint
+                # lives on the lower limb.  This keeps the hand/foot at the
+                # mapped pose without feeding the previous solved offset back
+                # into the next frame.
+                control.rotation_mode = "QUATERNION"
+                control.matrix = desired_matrix
                 context.view_layer.update()
-                control.keyframe_insert(
-                    data_path="location",
-                    frame=target_frame,
-                    group=control.name,
-                )
+                for data_path in ("location", "rotation_quaternion", "scale"):
+                    control.keyframe_insert(
+                        data_path=data_path,
+                        frame=target_frame,
+                        group=control.name,
+                    )
+                if pole and pole_position is not None:
+                    pole_matrix = pole.bone.matrix_local.copy()
+                    pole_matrix.translation = pole_position
+                    pole.matrix = pole_matrix
+                    context.view_layer.update()
+                    pole.keyframe_insert(
+                        data_path="location",
+                        frame=target_frame,
+                        group=pole.name,
+                    )
             yield frame_index + 1
         out_action.use_fake_user = settings.fake_user
         return math.ceil(frames[-1] - frames[0]) + 1

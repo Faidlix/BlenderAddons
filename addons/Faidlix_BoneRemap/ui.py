@@ -10,7 +10,7 @@ from .model import (
 from .operators import _mapping_axes_match
 
 
-ADDON_VERSION = (0, 6, 6)
+ADDON_VERSION = (0, 6, 7)
 
 
 def _source_file_index(settings, source_file):
@@ -70,7 +70,7 @@ def _animation_row_columns(row, settings, child=False):
     information = content.row(align=True)
     if child:
         action_and_timing = information.split(
-            factor=settings.animation_child_name_factor
+            factor=settings.animation_action_factor
         )
         action = action_and_timing.row(align=True)
         timing = action_and_timing.row(align=True)
@@ -92,6 +92,12 @@ def _remove_file_button(layout, file_index):
     button.file_index = file_index
 
 
+def _drag_handle(layout, property_name):
+    handle = layout.operator("fbr.drag_column", text="│", emboss=False)
+    handle.property_name = property_name
+    return handle
+
+
 def _draw_animation_header(layout, settings):
     row = layout.row(align=True)
     remove, enabled, filename, action, timing, controls = _animation_row_columns(
@@ -100,17 +106,14 @@ def _draw_animation_header(layout, settings):
     remove.label(text="")
     enabled.label(text="啟用")
     filename.label(text="檔案名稱")
+    _drag_handle(filename, "animation_file_factor")
     action.label(text="動畫名稱")
+    _drag_handle(action, "animation_action_factor")
     timing.label(text="時間")
+    _drag_handle(timing, "animation_info_factor")
     options = controls.row(align=True)
     options.label(text="設為原地動畫")
     options.label(text="複製對稱動畫")
-    widths = layout.row(align=True)
-    widths.label(text="欄寬")
-    widths.prop(settings, "animation_file_factor", text="檔案", slider=True)
-    widths.prop(settings, "animation_action_factor", text="動畫", slider=True)
-    widths.prop(settings, "animation_child_name_factor", text="子動畫", slider=True)
-    widths.prop(settings, "animation_info_factor", text="操作", slider=True)
 
 
 def _draw_multi_clip_header(layout, source, file_index, settings):
@@ -447,18 +450,7 @@ class FBR_UL_mappings(UIList):
         active_property,
         index,
     ):
-        item_layout = layout.column(align=True)
-        mapping_line = item_layout.row(align=True)
-        mapping_line.enabled = not (data.axis_editing or data.ik_editing)
-        _draw_mapping_row(context, mapping_line, data, item, index)
-        if data.axis_editing and index == data.active_mapping_index:
-            settings = context.scene.fbr_settings
-            file_index = _source_file_index(settings, data)
-            _draw_axis_correction(item_layout, file_index, data)
-        elif data.ik_editing and index == data.active_mapping_index:
-            settings = context.scene.fbr_settings
-            file_index = _source_file_index(settings, data)
-            _draw_ik_settings(item_layout, file_index, data)
+        _draw_mapping_row(context, layout, data, item, index)
 
 
 class FBR_MT_reuse_mapping(Menu):
@@ -688,29 +680,21 @@ class FBR_PT_main(Panel):
             axes.file_index = file_index
             tools.prop(settings, "auto_scale", text="Root 位移縮放", toggle=True)
             tools.label(text="")
-            forward = group.row(align=True)
+            forward = group.column(align=True)
             forward.enabled = not locked
-            forward.prop(source, "source_forward_axis", text="來源前方")
-            forward.prop(source, "target_forward_axis", text="Target 前方")
+            source_axes = forward.row(align=True)
+            source_axes.label(text="來源前方")
+            source_axes.prop(source, "source_forward_axis", text="", expand=True)
+            target_axes = forward.row(align=True)
+            target_axes.label(text="Target 前方")
+            target_axes.prop(source, "target_forward_axis", text="", expand=True)
 
             list_area = group.column(align=True)
-            widths = list_area.row(align=True)
-            widths.label(text="欄寬")
-            widths.prop(
-                settings,
-                "mapping_source_factor",
-                text="來源",
-                slider=True,
-            )
-            widths.prop(
-                settings,
-                "mapping_target_factor",
-                text="Target／IK",
-                slider=True,
-            )
             list_header = list_area.row(align=True)
             columns = list_header.split(factor=settings.mapping_source_factor)
-            columns.label(text="來源骨骼")
+            source_header = columns.row(align=True)
+            source_header.label(text="來源骨骼")
+            _drag_handle(source_header, "mapping_source_factor")
             target_and_tools = columns.split(factor=settings.mapping_target_factor)
             target_header = target_and_tools.row(align=True)
             target_header.alignment = "LEFT"
@@ -719,6 +703,7 @@ class FBR_PT_main(Panel):
             ik_header.ui_units_x = 5.0
             ik_header.alignment = "CENTER"
             ik_header.label(text="IK 設定")
+            _drag_handle(ik_header, "mapping_target_factor")
             tools_header = target_and_tools.row(align=False)
             tools_header.alignment = "RIGHT"
             axis_header = tools_header.row(align=True)

@@ -180,18 +180,35 @@ def main():
             if control_owner
             else None
         )
+        pole = (
+            control_owner.data.bones.get(mapping.ik_pole_bone)
+            if control_owner
+            else None
+        )
         print(
             "IK_SETUP",
             source.display_name,
             mapping.source_bone,
             mapping.target_bone,
             mapping.ik_control_bone,
+            mapping.ik_pole_bone,
             control_owner.name if control_owner else None,
         )
         assert control and not control.use_deform
+        assert pole and not pole.use_deform and pole.get("_fbr_ik_pole")
+        solver = target.pose.bones[mapping.target_bone].parent
+        constraint = next(
+            item
+            for item in solver.constraints
+            if item.type == "IK" and item.name.startswith("FBR IK")
+        )
+        assert constraint.subtarget == mapping.ik_control_bone
+        assert constraint.pole_subtarget == mapping.ik_pole_bone
+        assert constraint.chain_count == 2 and constraint.iterations == 500
         ik_controls.append(
             {
                 "name": mapping.ik_control_bone,
+                "pole": mapping.ik_pole_bone,
                 "owner": control_owner.name,
                 "source": mapping.source_bone,
                 "target": mapping.target_bone,
