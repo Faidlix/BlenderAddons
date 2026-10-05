@@ -1,0 +1,16 @@
+---
+description: Protect the single Faidlix Update All control and repository selection behavior
+globs: "{addons/Faidlix_Manager/**,addons/*/addon_registry.json,repository/index.json,tests/**}"
+alwaysApply: false
+---
+
+# Faidlix Manager Update All Contract
+
+- Shared Update All UI, operator, state, and dispatch logic belong only in `addons/Faidlix_Manager/`; individual add-ons only contribute declarative registry metadata.
+- Keep exactly one 3D Viewport Update All control. It must use `HIDE_HEADER`, remain non-collapsible, use `bl_order = -1000`, and contain no Manager title/version header.
+- Show the control when at least two registry-approved Faidlix packages are installed. Do not hide it merely because there are no pending updates.
+- Treat repository URLs with the same scheme, host, and path as the same source; ignore query strings and fragments such as `?cache=...`.
+- When duplicate matching repositories exist, prefer the repository module that owns the running Manager, then the repository containing the installed `faidlix_manager` package. Never select an empty duplicate just because its URL string is an exact match.
+- Temporary cache-busting URLs must not become a new source identity. Restore the canonical URL after maintenance when practical.
+- Any change to repository matching, panel `poll`, ordering, or registry behavior must include regression tests for canonical URLs, cache-query URLs, duplicate empty repositories, and the two-installed-package visibility threshold.
+- Before release: run Blender headless tests, build and validate the ZIP, update the repository index and README download link, push `main`, then install and verify the pushed package in Blender.
