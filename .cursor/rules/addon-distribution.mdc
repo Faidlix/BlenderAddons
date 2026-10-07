@@ -14,4 +14,5 @@ alwaysApply: true
 - `faidlix_manager` may update installed packages only; it must never install unselected add-ons.
 - Preserve the package ID and bump the version when migrating an existing add-on.
 - Publish one migration release through the old repository before retiring its update path.
-- Test source in Blender, validate packages/index, push GitHub, then install from GitHub and test the installed package.
+- Every completed add-on change, for **every** package under `addons/`, must be treated as a release: bump its version, test source in Blender, build and validate its ZIP/index/README, commit and push GitHub, read back the remote commit and ZIP checksum, then install that GitHub ZIP into the formal Blender environment and verify the installed version/files. Local-only packaging or an isolated test install is not completion.
+- Before replacing a formal installation, check whether Blender has unsaved work or is using that add-on, and back up the existing extension. Never force-close Blender, discard user work, hot-swap an in-use extension, or claim installation succeeded when safety checks, network, or validation block it. Report the exact remaining step and resume when safe.
