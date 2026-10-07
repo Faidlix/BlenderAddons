@@ -48,6 +48,7 @@
 - 隔離 Blender 5.2 headless `FBR_HEADLESS_OK` 與角色1003五段 `FBR_PROJECT_RETARGET` 通過；IK 選取還原、文字按鈕 operator 及播放影格範圍已有自動測試。**前景側邊欄排版尚未目視驗證，正式安裝狀態需另行查證。**
 - 0.6.10 ZIP 已建置及 metadata 驗證，47655 bytes，SHA-256 `2849aa0866e75aadfbb120a7cd1ed296d46bb509272753f81352497a6e28f582`；獨立背景 Blender MCP 已讀回 `(0, 6, 10)`、新的 IK 樣式 operator 與舊 Properties 面板已移除。這些不等於前景 UI 驗收。
 - 正式前景 Blender 仍開啟 `角色1005.blend`，MCP 讀回 `is_dirty=True`；不得在未保存使用者工作時熱替換正式擴充。正式安裝待安全條件滿足後再做。
+- 發布提交 `7074a2f61617cadd18203f2ce934217f4094daaa` 已推送並從 GitHub `main` 讀回；GitHub raw 0.6.10 ZIP 與本機 ZIP 同為 47655 bytes、SHA-256 `2849aa0866e75aadfbb120a7cd1ed296d46bb509272753f81352497a6e28f582`。全新隔離 Blender 從該 GitHub ZIP 安裝、註冊並讀回 `(0, 6, 10)` 與 `fbr.set_ik_shape`。正式使用者環境仍未更新，待儲存並關閉前景 Blender 後備份舊版、正式安裝及目視驗收。
 
 ## 原始待辦與後續驗收
 
