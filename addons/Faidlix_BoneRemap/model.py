@@ -566,6 +566,7 @@ class FBR_Settings(PropertyGroup):
     retarget_completed_count: IntProperty(default=0, min=0)
     retarget_total_count: IntProperty(default=0, min=0)
     retarget_batch_id: StringProperty(default="")
+    retarget_plan_signature: StringProperty(default="", options={"HIDDEN"})
     target_preview_action: StringProperty(default="", options={"SKIP_SAVE"})
     output_mode: EnumProperty(
         name="輸出",

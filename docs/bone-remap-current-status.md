@@ -50,6 +50,14 @@
 - 正式前景 Blender 仍開啟 `角色1005.blend`，MCP 讀回 `is_dirty=True`；不得在未保存使用者工作時熱替換正式擴充。正式安裝待安全條件滿足後再做。
 - 發布提交 `7074a2f61617cadd18203f2ce934217f4094daaa` 已推送並從 GitHub `main` 讀回；GitHub raw 0.6.10 ZIP 與本機 ZIP 同為 47655 bytes、SHA-256 `2849aa0866e75aadfbb120a7cd1ed296d46bb509272753f81352497a6e28f582`。全新隔離 Blender 從該 GitHub ZIP 安裝、註冊並讀回 `(0, 6, 10)` 與 `fbr.set_ik_shape`。正式使用者環境仍未更新，待儲存並關閉前景 Blender 後備份舊版、正式安裝及目視驗收。
 
+## 0.6.11 修正（2026-10-07）
+
+- `operators.py::_object_actions` 由 NLA 掛載順序穩定列出動畫，當前播放的 Action 只在未掛到 NLA 時補到末尾；按某列播放不得把它移到首列，原列按鈕會依播放狀態切成「暫停」。
+- 批次重定向每完成一段就附掛到目標骨架與動畫清單；正在計算的工作 Action 標記為暫存，不顯示為完成片段。Esc 或錯誤僅丟棄當前未完成的 Action，保留已完整片段與 `(完成/總數)`；再次執行以批次計畫簽章及 Action metadata 辨識已完成片段並跳過，未完成單段從頭重算。
+- 合併長 Action 使用每段完成後的附掛 checkpoint：計算下一段時用副本工作，Esc 留下上一個完整 checkpoint；重啟從該段後接續，成功時用新 checkpoint 取代舊版。手動刪除目標 Action 後完成數從實際掛載重新計算。`model.py` 新增持久化的計畫簽章；清除所有目標動畫會重設它。
+- 隔離 Blender 5.2 headless `FBR_HEADLESS_OK` 已通過，涵蓋兩種輸出模式的中途錯誤保留／續算、模擬 modal Esc、完成後重按不重複輸出、刪除後計數及播放順序；角色1003五段 `FBR_PROJECT_RETARGET` 通過。**前景滑鼠操作、正式安裝與目視仍待驗證。**
+- 隔離背景 Blender MCP 讀回安裝版 `(0, 6, 11)`，驗證播放前後清單順序均為 `FBR MCP First`、`FBR MCP Second`，且續算簽章屬性存在。發行包 `repository/faidlix_bone_remap-0.6.11.zip` 已建置，48893 bytes，SHA-256 `755e15744f3dfeba33bf832f585173c27c5976fdddb6b0442f6d2bb6651f2a15`；extension metadata validate 與 README 下載連結檢查通過。後續仍須 GitHub 推送／回讀及隔離 GitHub 安裝。
+
 ## 原始待辦與後續驗收
 
 ### 使用者新增需求（2026-10-07，原始驗收規格；目前狀態見上節）

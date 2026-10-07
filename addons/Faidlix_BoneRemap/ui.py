@@ -10,7 +10,7 @@ from .model import (
 from .operators import _mapping_axes_match, _object_actions
 
 
-ADDON_VERSION = (0, 6, 10)
+ADDON_VERSION = (0, 6, 11)
 
 
 def _source_file_index(settings, source_file):
@@ -847,6 +847,7 @@ class FBR_PT_main(Panel):
         if target and settings.target_actions_expanded:
             actions = _object_actions(target)
             action_list = layout.box()
+            action_list.enabled = not settings.retarget_running
             header = action_list.row(align=True)
             remove_header = header.row(align=True)
             remove_header.ui_units_x = 1.25

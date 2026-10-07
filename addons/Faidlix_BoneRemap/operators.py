@@ -1,3 +1,4 @@
+import hashlib
 import math
 import os
 import uuid
@@ -1495,13 +1496,79 @@ def _object_actions(obj):
     animation_data = obj.animation_data
     if not animation_data:
         return actions
-    if animation_data.action:
-        actions.append(animation_data.action)
+    # The active Action changes during preview; NLA order must anchor the list.
     for track in animation_data.nla_tracks:
         for strip in track.strips:
-            if strip.action and strip.action not in actions:
+            if strip.action and not strip.action.get("_fbr_working") and strip.action not in actions:
                 actions.append(strip.action)
+    if (animation_data.action and not animation_data.action.get("_fbr_working")
+            and animation_data.action not in actions):
+        actions.append(animation_data.action)
     return actions
+
+
+def _retarget_plan_signature(settings, target, jobs):
+    """Identify the exact batch plan eligible for resuming completed jobs."""
+    sources = []
+    for source_file in settings.files:
+        mapping_file = mapping_source(settings, source_file)
+        mappings = tuple(
+            (
+                item.source_bone, item.target_bone, item.is_root,
+                item.transfer_location, item.location_multiplier,
+                tuple(item.rotation_offset), tuple(item.pair_rotation_offset),
+                item.ik_enabled, item.ik_chain_count, item.ik_iterations,
+                item.ik_influence, item.ik_use_tail, item.ik_use_pole,
+                item.ik_pole_length, item.ik_use_rotation, item.ik_use_stretch,
+            )
+            for item in mapping_file.mappings
+        )
+        sources.append((
+            source_file.uid, source_file.filepath, source_file.source_object,
+            source_file.reuse_mapping, source_file.source_forward_axis,
+            source_file.target_forward_axis, tuple(source_file.global_axis_correction),
+            tuple(source_file.alignment_matrix), source_file.alignment_scale,
+            mappings,
+        ))
+    job_plan = tuple(
+        (
+            source_file.uid, clip.action_name, clip.in_place,
+            clip.custom_name, clip.custom_start, clip.frame_start, clip.frame_end,
+            mirrored,
+        )
+        for source_file, clip, mirrored in jobs
+    )
+    options = (
+        target.name, armature_signature(target), settings.output_mode,
+        settings.naming_mode, settings.merged_action_name,
+        settings.merged_start, settings.merged_gap, settings.key_mode,
+        settings.rotation_tolerance, settings.location_tolerance,
+        settings.extract_root_motion, settings.auto_scale,
+    )
+    return hashlib.sha256(repr((options, tuple(sources), job_plan)).encode()).hexdigest()
+
+
+def _completed_batch_state(target, batch_id, plan_signature, output_mode, job_count):
+    matches = [
+        action for action in _object_actions(target)
+        if action.get("_fbr_batch_id") == batch_id
+        and action.get("_fbr_plan_signature") == plan_signature
+    ]
+    if output_mode == "MERGED":
+        checkpoint = max(
+            matches,
+            key=lambda action: int(action.get("_fbr_completed_jobs", 0)),
+            default=None,
+        )
+        count = min(job_count, int(checkpoint.get("_fbr_completed_jobs", 0))) if checkpoint else 0
+        return set(range(count)), checkpoint
+    completed = {
+        int(action.get("_fbr_job_index"))
+        for action in matches
+        if action.get("_fbr_job_index") is not None
+        and 0 <= int(action.get("_fbr_job_index")) < job_count
+    }
+    return completed, None
 
 
 def _attach_target_outputs(target, actions, batch_id):
@@ -2354,6 +2421,7 @@ class FBR_OT_clear_target_animation(Operator):
         settings.retarget_completed_count = 0
         settings.retarget_total_count = 0
         settings.retarget_batch_id = ""
+        settings.retarget_plan_signature = ""
         settings.target_preview_action = ""
         identity = Matrix.Identity(4)
         for pose_bone in target.pose.bones:
@@ -2384,7 +2452,12 @@ class FBR_OT_remove_target_action(Operator):
                 bpy.ops.screen.animation_cancel(restore_frame=False)
             settings.target_preview_action = ""
         if action.get("_fbr_batch_id") == settings.retarget_batch_id:
-            settings.retarget_completed_count = max(0, settings.retarget_completed_count - 1)
+            jobs = FBR_OT_retarget._jobs(settings)
+            completed, _checkpoint = _completed_batch_state(
+                target, settings.retarget_batch_id,
+                settings.retarget_plan_signature, settings.output_mode, len(jobs),
+            )
+            settings.retarget_completed_count = len(completed)
         _tag_view3d_redraw(context)
         return {"FINISHED"}
 
@@ -3026,59 +3099,132 @@ class FBR_OT_retarget(Operator):
 
         context.window_manager.popup_menu(draw, title=title, icon=icon)
 
-    def _run_blocking(self, context, settings, target, jobs):
-        original_frame = context.scene.frame_current
-        created = []
+    def _prepare_run(self, context, settings, target, jobs):
+        signature = _retarget_plan_signature(settings, target, jobs)
+        if not settings.retarget_batch_id or settings.retarget_plan_signature != signature:
+            settings.retarget_batch_id = uuid.uuid4().hex
+            settings.retarget_plan_signature = signature
+        completed, checkpoint = _completed_batch_state(
+            target, settings.retarget_batch_id, signature,
+            settings.output_mode, len(jobs),
+        )
+        settings.retarget_total_count = len(jobs)
+        settings.retarget_completed_count = len(completed)
+        self._target = target
+        self._jobs_data = jobs
+        self._plan_signature = signature
+        self._completed = completed
+        self._checkpoint = checkpoint
+        self._job_index = len(completed) if settings.output_mode == "MERGED" else 0
+        self._cursor = (
+            int(checkpoint.get("_fbr_next_cursor", settings.merged_start))
+            if checkpoint else settings.merged_start
+        )
+        self._current_iterator = None
+        self._current_action = None
+        self._last_completed_action = checkpoint
+        self._original_frame = context.scene.frame_current
+        self._job_steps = [
+            max(1, math.ceil(clip.frame_end - clip.frame_start) + 1)
+            for _source, clip, _mirrored in jobs
+        ]
+        self._done_steps = sum(self._job_steps[index] for index in completed)
+        self._total_steps = sum(self._job_steps)
+
+    def _remove_working_action(self):
+        action = self._current_action
+        self._current_action = None
+        if action is None or bpy.data.actions.get(action.name) != action:
+            return
+        animation_data = self._target.animation_data
+        if animation_data and animation_data.action == action:
+            animation_data.action = None
+        if action in _object_actions(self._target):
+            _detach_target_action(self._target, action)
+        bpy.data.actions.remove(action)
+
+    def _complete_job(self, context, length):
+        settings = context.scene.fbr_settings
+        action = self._current_action
+        if settings.output_mode == "MERGED":
+            next_cursor = self._current_start + length + settings.merged_gap
+            if self._job_index == len(self._jobs_data) - 1 and settings.key_mode == "SIMPLIFY":
+                simplify_action(action, settings.rotation_tolerance, settings.location_tolerance)
+            action["_fbr_completed_jobs"] = self._job_index + 1
+            action["_fbr_next_cursor"] = next_cursor
+        elif settings.key_mode == "SIMPLIFY":
+            simplify_action(action, settings.rotation_tolerance, settings.location_tolerance)
+        action["_fbr_plan_signature"] = self._plan_signature
+        action["_fbr_job_index"] = self._job_index
+        if "_fbr_working" in action:
+            del action["_fbr_working"]
+        _attach_target_outputs(self._target, [action], settings.retarget_batch_id)
+        assign_action_and_slot(self._target, action)
+        if settings.output_mode == "MERGED":
+            old_checkpoint = self._checkpoint
+            self._checkpoint = action
+            self._cursor = next_cursor
+            if old_checkpoint:
+                _detach_target_action(self._target, old_checkpoint)
+                if old_checkpoint.users <= int(old_checkpoint.use_fake_user):
+                    bpy.data.actions.remove(old_checkpoint)
+            action.name = settings.merged_action_name or "Combined_Animation"
+            for track in self._target.animation_data.nla_tracks:
+                for strip in track.strips:
+                    if strip.action == action:
+                        strip.name = action.name
+        self._last_completed_action = action
+        self._completed.add(self._job_index)
+        settings.retarget_completed_count = len(self._completed)
+        settings.target_actions_expanded = True
+        self._job_index += 1
+        self._current_action = None
+        self._current_iterator = None
+
+    def _run_blocking(self, context):
+        settings = context.scene.fbr_settings
         try:
-            if settings.output_mode == "MERGED":
-                action = bpy.data.actions.new(settings.merged_action_name or "Combined_Animation")
-                action.use_fake_user = settings.fake_user
-                created.append(action)
-                cursor = settings.merged_start
-                for source_file, clip, mirrored in jobs:
-                    start = clip.custom_start if clip.custom_start >= 0 else cursor
-                    length = bake_clip(
-                        context, settings, source_file, clip, target, action, start, mirrored
-                    )
-                    cursor = start + length + settings.merged_gap
-                if settings.key_mode == "SIMPLIFY":
-                    simplify_action(action, settings.rotation_tolerance, settings.location_tolerance)
-            else:
-                for source_file, clip, mirrored in jobs:
-                    action = bpy.data.actions.new(output_name(settings, source_file, clip, mirrored))
-                    action.use_fake_user = settings.fake_user
-                    created.append(action)
-                    bake_clip(context, settings, source_file, clip, target, action, 1, mirrored)
-                    if settings.key_mode == "SIMPLIFY":
-                        simplify_action(action, settings.rotation_tolerance, settings.location_tolerance)
-            assign_action_and_slot(target, created[-1])
-            _attach_target_outputs(target, created, settings.retarget_batch_id)
-            settings.retarget_completed_count = len(jobs)
+            while self._begin_job(context):
+                while True:
+                    try:
+                        next(self._current_iterator)
+                    except StopIteration as finished:
+                        self._complete_job(context, finished.value or 0)
+                        break
         except Exception as exc:
-            for action in created:
-                bpy.data.actions.remove(action)
-            self.report({"ERROR"}, f"重定向失敗：{exc}")
+            if self._current_iterator is not None:
+                self._current_iterator.close()
+                self._current_iterator = None
+            self._remove_working_action()
+            settings.retarget_status = f"失敗，保留 {len(self._completed)}/{len(self._jobs_data)}：{exc}"
+            self.report({"ERROR"}, settings.retarget_status)
             return {"CANCELLED"}
         finally:
-            context.scene.frame_set(original_frame)
-        self.report({"INFO"}, f"完成 {len(jobs)} 個輸出片段")
-        self._popup(context, "重定向完成", f"已完成 {len(jobs)} 個輸出片段")
+            context.scene.frame_set(self._original_frame)
+        settings.retarget_status = f"完成 {len(self._completed)} 個輸出片段"
+        self.report({"INFO"}, settings.retarget_status)
         return {"FINISHED"}
 
     def _begin_job(self, context):
         settings = context.scene.fbr_settings
+        while self._job_index in self._completed:
+            self._job_index += 1
         if self._job_index >= len(self._jobs_data):
             return False
         source_file, clip, mirrored = self._jobs_data[self._job_index]
         if settings.output_mode == "MERGED":
-            action = self._merged_action
+            action = (
+                self._checkpoint.copy() if self._checkpoint
+                else bpy.data.actions.new(settings.merged_action_name or "Combined_Animation")
+            )
+            action.use_fake_user = settings.fake_user
             start = clip.custom_start if clip.custom_start >= 0 else self._cursor
         else:
             action = bpy.data.actions.new(output_name(settings, source_file, clip, mirrored))
             action.use_fake_user = settings.fake_user
-            self._created.append(action)
             start = 1
         self._current_action = action
+        action["_fbr_working"] = True
         self._current_start = start
         self._current_iterator = iter_bake_clip(
             context,
@@ -3098,35 +3244,32 @@ class FBR_OT_retarget(Operator):
         if self._current_iterator is not None:
             self._current_iterator.close()
             self._current_iterator = None
+        if cancelled or error:
+            self._remove_working_action()
         if self._timer is not None:
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
         context.window_manager.progress_end()
         context.scene.frame_set(self._original_frame)
         settings.retarget_running = False
-        settings.retarget_progress = 0.0 if cancelled or error else 1.0
+        settings.retarget_progress = min(1.0, self._done_steps / max(1, self._total_steps))
         if cancelled or error:
-            for action in list(self._created):
-                if action.name in bpy.data.actions:
-                    bpy.data.actions.remove(action)
-            settings.retarget_status = "已取消" if cancelled else f"失敗：{error}"
-            settings.retarget_completed_count = 0
+            settings.retarget_completed_count = len(self._completed)
+            settings.retarget_status = (
+                f"已取消，保留 {len(self._completed)}/{len(self._jobs_data)} 個動畫"
+                if cancelled else f"失敗，保留 {len(self._completed)}/{len(self._jobs_data)}：{error}"
+            )
             if error:
                 self.report({"ERROR"}, settings.retarget_status)
                 self._popup(context, "重定向失敗", str(error), "ERROR")
             else:
-                self.report({"WARNING"}, "已取消重定向")
+                self.report({"WARNING"}, settings.retarget_status)
             return {"CANCELLED"}
-        if settings.output_mode == "MERGED" and settings.key_mode == "SIMPLIFY":
-            simplify_action(
-                self._merged_action,
-                settings.rotation_tolerance,
-                settings.location_tolerance,
-            )
-        assign_action_and_slot(self._target, self._created[-1])
-        _attach_target_outputs(self._target, self._created, settings.retarget_batch_id)
-        settings.retarget_completed_count = len(self._jobs_data)
-        settings.retarget_status = f"完成 {len(self._jobs_data)} 個輸出片段"
+        if self._last_completed_action:
+            assign_action_and_slot(self._target, self._last_completed_action)
+        settings.retarget_completed_count = len(self._completed)
+        settings.retarget_progress = 1.0
+        settings.retarget_status = f"完成 {len(self._completed)} 個輸出片段"
         self.report({"INFO"}, settings.retarget_status)
         self._popup(context, "重定向完成", settings.retarget_status)
         return {"FINISHED"}
@@ -3141,36 +3284,15 @@ class FBR_OT_retarget(Operator):
         if not jobs:
             self.report({"ERROR"}, "沒有啟用的動畫片段")
             return {"CANCELLED"}
-        settings.retarget_total_count = len(jobs)
-        settings.retarget_completed_count = 0
-        settings.retarget_batch_id = uuid.uuid4().hex
+        self._prepare_run(context, settings, target, jobs)
         if bpy.app.background:
-            return self._run_blocking(context, settings, target, jobs)
+            return self._run_blocking(context)
 
-        self._target = target
-        self._jobs_data = jobs
-        self._job_index = 0
-        self._created = []
-        self._current_iterator = None
-        self._current_action = None
-        self._merged_action = None
-        self._cursor = settings.merged_start
-        self._original_frame = context.scene.frame_current
-        self._done_steps = 0
-        self._total_steps = sum(
-            max(1, math.ceil(clip.frame_end - clip.frame_start) + 1)
-            for _source, clip, _mirrored in jobs
-        )
-        if settings.output_mode == "MERGED":
-            self._merged_action = bpy.data.actions.new(
-                settings.merged_action_name or "Combined_Animation"
-            )
-            self._merged_action.use_fake_user = settings.fake_user
-            self._created.append(self._merged_action)
         settings.retarget_running = True
-        settings.retarget_progress = 0.0
-        settings.retarget_status = "準備中…"
+        settings.retarget_progress = min(1.0, self._done_steps / max(1, self._total_steps))
+        settings.retarget_status = f"接續中：{len(self._completed)}/{len(jobs)} 已完成"
         context.window_manager.progress_begin(0, self._total_steps)
+        context.window_manager.progress_update(self._done_steps)
         self._timer = context.window_manager.event_timer_add(0.01, window=context.window)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
@@ -3192,18 +3314,7 @@ class FBR_OT_retarget(Operator):
                 )
             except StopIteration as finished:
                 length = finished.value or 0
-                settings = context.scene.fbr_settings
-                if settings.output_mode == "MERGED":
-                    self._cursor = self._current_start + length + settings.merged_gap
-                elif settings.key_mode == "SIMPLIFY":
-                    simplify_action(
-                        self._current_action,
-                        settings.rotation_tolerance,
-                        settings.location_tolerance,
-                    )
-                self._current_iterator = None
-                self._job_index += 1
-                settings.retarget_completed_count = self._job_index
+                self._complete_job(context, length)
             return {"RUNNING_MODAL"}
         except Exception as exc:
             return self._finish_modal(context, error=exc)

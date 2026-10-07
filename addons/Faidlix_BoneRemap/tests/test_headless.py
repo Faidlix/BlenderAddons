@@ -12,6 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(ROOT))
 
 import Faidlix_BoneRemap as addon
+import Faidlix_BoneRemap.operators as operators_module
 from Faidlix_BoneRemap.model import (
     armature_signature,
     iter_action_fcurves,
@@ -668,9 +669,15 @@ def main():
     assert any(slot == target.animation_data.action_slot for slot in batch_output.slots)
     assert settings.retarget_completed_count == 2 and settings.retarget_total_count == 2
     assert set(_object_actions(target)) == {output, batch_output}
+    action_order = [item.name for item in _object_actions(target)]
     bpy.context.scene.frame_start = 0
     bpy.context.scene.frame_end = 570
     assert bpy.ops.fbr.preview_target_action(action_name=output.name) == {"FINISHED"}
+    assert [item.name for item in _object_actions(target)] == action_order
+    assert settings.target_preview_action == output.name
+    assert bpy.ops.fbr.preview_target_action(action_name=batch_output.name) == {"FINISHED"}
+    assert [item.name for item in _object_actions(target)] == action_order
+    assert settings.target_preview_action == batch_output.name
     assert bpy.context.scene.frame_start == int(output.frame_range[0])
     assert bpy.context.scene.frame_end == int(output.frame_range[1])
     assert bpy.context.scene.frame_current == bpy.context.scene.frame_start
@@ -729,6 +736,109 @@ def main():
         pose_bone.matrix_basis == identity
         for pose_bone in target.pose.bones
     )
+    # A failure after one complete clip keeps that clip attached.  The next
+    # run skips it and restarts only the incomplete clip from its first frame.
+    original_iterator = operators_module.iter_bake_clip
+    iterator_calls = []
+
+    def interrupt_second_clip(*args, **kwargs):
+        iterator_calls.append(args[3].action_name)
+        inner = original_iterator(*args, **kwargs)
+        try:
+            if len(iterator_calls) == 2:
+                yield next(inner)
+                raise RuntimeError("test interruption")
+            return (yield from inner)
+        finally:
+            inner.close()
+
+    operators_module.iter_bake_clip = interrupt_second_clip
+    try:
+        try:
+            assert bpy.ops.fbr.retarget() == {"CANCELLED"}
+        except RuntimeError as exc:
+            assert "test interruption" in str(exc)
+    finally:
+        operators_module.iter_bake_clip = original_iterator
+    assert settings.retarget_completed_count == 1
+    assert settings.retarget_total_count == 2
+    assert len(_object_actions(target)) == 1
+    kept_action = _object_actions(target)[0]
+    assert kept_action.get("_fbr_job_index") == 0
+    assert len(iterator_calls) == 2
+    assert bpy.ops.fbr.retarget() == {"FINISHED"}
+    assert settings.retarget_completed_count == 2
+    assert len(_object_actions(target)) == 2
+    assert kept_action in _object_actions(target)
+    assert _object_actions(target)[0] == kept_action
+    completed_actions = tuple(_object_actions(target))
+    assert bpy.ops.fbr.retarget() == {"FINISHED"}
+    assert tuple(_object_actions(target)) == completed_actions
+    assert bpy.ops.fbr.clear_target_animation() == {"FINISHED"}
+
+    # Drive the modal Esc branch without opening a foreground window.
+    class ModalRun:
+        _remove_working_action = operators_module.FBR_OT_retarget._remove_working_action
+
+        def report(self, _types, _message):
+            pass
+
+    modal_run = ModalRun()
+    jobs = operators_module.FBR_OT_retarget._jobs(settings)
+    operators_module.FBR_OT_retarget._prepare_run(
+        modal_run, bpy.context, settings, target, jobs
+    )
+    modal_run._timer = None
+    bpy.context.window_manager.progress_begin(0, modal_run._total_steps)
+    assert operators_module.FBR_OT_retarget._begin_job(modal_run, bpy.context)
+    while True:
+        try:
+            next(modal_run._current_iterator)
+        except StopIteration as finished:
+            operators_module.FBR_OT_retarget._complete_job(
+                modal_run, bpy.context, finished.value or 0
+            )
+            break
+    assert operators_module.FBR_OT_retarget._begin_job(modal_run, bpy.context)
+    next(modal_run._current_iterator)
+    assert len(_object_actions(target)) == 1
+    assert operators_module.FBR_OT_retarget._finish_modal(
+        modal_run, bpy.context, cancelled=True
+    ) == {"CANCELLED"}
+    assert settings.retarget_completed_count == 1
+    assert len(_object_actions(target)) == 1
+    assert bpy.ops.fbr.retarget() == {"FINISHED"}
+    assert settings.retarget_completed_count == 2
+    assert len(_object_actions(target)) == 2
+    assert bpy.ops.fbr.clear_target_animation() == {"FINISHED"}
+
+    settings.output_mode = "MERGED"
+    iterator_calls.clear()
+    operators_module.iter_bake_clip = interrupt_second_clip
+    try:
+        try:
+            assert bpy.ops.fbr.retarget() == {"CANCELLED"}
+        except RuntimeError as exc:
+            assert "test interruption" in str(exc)
+    finally:
+        operators_module.iter_bake_clip = original_iterator
+    assert settings.retarget_completed_count == 1
+    assert len(_object_actions(target)) == 1
+    merged_checkpoint = _object_actions(target)[0]
+    assert merged_checkpoint.get("_fbr_completed_jobs") == 1
+    assert bpy.ops.fbr.retarget() == {"FINISHED"}
+    assert settings.retarget_completed_count == 2
+    assert len(_object_actions(target)) == 1
+    assert _object_actions(target)[0].get("_fbr_completed_jobs") == 2
+    assert _object_actions(target)[0].name == settings.merged_action_name
+    assert merged_checkpoint not in _object_actions(target)
+    assert bpy.ops.fbr.remove_target_action(
+        action_name=_object_actions(target)[0].name
+    ) == {"FINISHED"}
+    assert settings.retarget_completed_count == 0
+    assert bpy.ops.fbr.clear_target_animation() == {"FINISHED"}
+    settings.output_mode = "SEPARATE"
+
     leader = settings.files.add()
     leader.uid = "leader"
     leader.display_name = "leader.blend"
