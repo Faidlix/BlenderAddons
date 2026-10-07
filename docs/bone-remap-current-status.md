@@ -4,7 +4,7 @@
 
 ## 問題與版本事實
 
-- 正式 Blender 擴充目錄中的 `faidlix_bone_remap` 標示 0.6.7，且與 `repository/faidlix_bone_remap-0.6.7.zip` 的 `ui.py`、`operators.py`、`model.py` 內容一致。
+- 更新前正式 Blender 擴充目錄中的 `faidlix_bone_remap` 標示 0.6.7，且與 `repository/faidlix_bone_remap-0.6.7.zip` 的 `ui.py`、`operators.py`、`model.py` 內容一致。
 - 工作樹原始碼也曾標示 0.6.7，但上述三檔內容不同；正式 0.6.7 沒有工作樹後續加入的「使用 Pole」、Pole 長度／大小比與浮動 IK 編輯視窗。發布前查詢 GitHub `main` 的來源及索引為 0.6.4（2026-10-07）；推送後必須重新讀回確認。
 - 使用者的畫面中，來源前方／Target 前方按鈕文字空白，T-Pose／播放文字遭截斷，動畫父列仍未依要求顯示 `檔名(動畫數量)`。使用者要求先前 IK 功能也一併修正。
 
@@ -23,12 +23,13 @@
 - 角色1003 專案重定向測試：`FBR_PROJECT_RETARGET` 已通過，五段動畫有動態曲線；腳 IK 控制器在測試取樣影格與目標腳的最大距離約 0.00957 Blender 單位。測試只覆蓋其設計的情境，不等於目視確認全部手腳動畫與來源一致。
 - ZIP：Blender 建置、metadata validate、隔離 `user_default` 安裝、模組及新 operator 讀回通過；`ui.py` 位元組與原始碼一致。ZIP 44338 bytes，SHA-256 `f6a76bc09575bce9ddfd56455de36f397519f046bcaccb59c49bbb826c3e6478`，已寫入索引。
 - 根目錄 `tests/test_readme_download_links.py` 通過 `README_DOWNLOAD_LINKS=PASS`。
-- GitHub `main` 已推至 `ccefcc61fa50568436efcd6c661752d702ff9ed2` 並以 `git ls-remote` 讀回。由 GitHub raw 下載的 0.6.8 ZIP 為 44338 bytes，SHA-256 與索引相同；在全新隔離 Blender 使用者目錄安裝、啟用後讀回 `(0, 6, 8)` 與新 operator 成功。這不等於正式 Blender 已更新，也尚未驗證線上更新操作流程。
+- GitHub `main` 的 0.6.8 發布提交 `ccefcc61fa50568436efcd6c661752d702ff9ed2` 已以 `git ls-remote` 讀回；後續驗證紀錄另有提交。由 GitHub raw 下載的 0.6.8 ZIP 為 44338 bytes，SHA-256 與索引相同；在全新隔離 Blender 使用者目錄安裝、啟用後讀回 `(0, 6, 8)` 與新 operator 成功。
+- 確認 Blender 沒有執行後，將原正式擴充備份至 `backups/faidlix_bone_remap-0.6.7-before-0.6.8-20261007`，再由 GitHub 下載 ZIP 重新安裝至 `FaidlixBlenderAdd_ons`。正式安裝目錄 manifest 是 0.6.8，七個套件檔案逐一與下載 ZIP 位元組相同；尚未驗證線上更新按鈕與前景操作。
 - 尚未做前景窄側欄文字目視檢查。根目錄工作樹有許多既有未追蹤驗證檔，未納入發布，也不可為了發布一併清除或提交。
-- 正式 Blender 目前仍是 0.6.7；不可宣稱使用者正在用 0.6.8。
+- 正式磁碟安裝為 0.6.8，但尚未在使用者前景 Blender 以此版本完成目視驗證；不要把磁碟安裝與執行中畫面視為同一件事。
 
 ## 下一步
 
 1. 在前景 Blender 以窄側欄檢查按鈕文字、動畫父列、時間欄與拖曳分隔線，必要時修正後重建 ZIP／索引 hash。
 2. 用角色1003與 Run.fbx 目視比較來源和目標（含 IK／無 IK），特別複查手部控制器、Pole、Root 水平位移及播放中的前方軸即時更新；目前自動測試不足以宣稱這些已全部解決。
-3. GitHub 推送與遠端 ZIP 比對已完成；仍需在確認使用者保存並關閉原 Blender 後，從正式 Repository 執行更新／安裝並測試前景操作。隔離測試不得替代這一步。
+3. GitHub 推送、遠端 ZIP 比對與正式磁碟安裝已完成；仍需打開 Blender，在前景核對外掛版本、線上更新狀態及實際操作。隔離／背景測試不得替代這一步。
