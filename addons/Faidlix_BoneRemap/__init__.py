@@ -8,7 +8,7 @@ from . import model, operators, ui, updater
 bl_info = {
     "name": "Faidlix Bone Remap",
     "author": "Faidlix",
-    "version": (0, 6, 7),
+    "version": (0, 6, 8),
     "blender": (4, 5, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Batch import and retarget armature actions",
@@ -60,6 +60,7 @@ def register():
 
 def unregister():
     operators.stop_animation_preview(bpy.context)
+    operators.close_all_ik_editor_windows()
     if _sync_active_armature in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_sync_active_armature)
     if hasattr(bpy.types.Scene, "fbr_settings"):

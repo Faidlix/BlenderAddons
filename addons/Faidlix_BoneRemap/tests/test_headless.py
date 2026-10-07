@@ -18,6 +18,9 @@ from Faidlix_BoneRemap.model import (
     rebuild_animation_rows,
 )
 from Faidlix_BoneRemap.operators import _mapping_axes_match, _selected_animation_paths
+from Faidlix_BoneRemap.retarget import (
+    assign_action_and_slot, bake_clip, pose_only_action,
+)
 from Faidlix_BoneRemap.ui import (
     FBR_UL_animation_rows,
     FBR_UL_mappings,
@@ -197,6 +200,20 @@ def main():
     entry.expanded = True
     entry.clips.remove(1)
     rebuild_animation_rows(settings)
+    assert bpy.ops.fbr.set_forward_axis(
+        file_index=0, role="SOURCE", axis="+X"
+    ) == {"FINISHED"}
+    assert entry.source_forward_axis == "+X"
+    assert bpy.ops.fbr.set_forward_axis(
+        file_index=0, role="TARGET", axis="-Y"
+    ) == {"FINISHED"}
+    assert entry.target_forward_axis == "-Y"
+    assert bpy.ops.fbr.set_forward_axis(
+        file_index=0, role="SOURCE", axis="AUTO"
+    ) == {"FINISHED"}
+    assert bpy.ops.fbr.set_forward_axis(
+        file_index=0, role="TARGET", axis="AUTO"
+    ) == {"FINISHED"}
     assert bpy.ops.fbr.toggle_clip_option(
         file_index=0,
         clip_index=0,
@@ -504,11 +521,17 @@ def main():
     assert hand_map.ik_chain_count == 2
     assert hand_map.ik_iterations == 500
     assert abs(hand_map.ik_shape_scale - 0.05) < 1.0e-6
+    assert hand_map.ik_use_pole
+    assert abs(hand_map.ik_pole_length - 0.5) < 1.0e-6
+    assert abs(hand_map.ik_pole_size_ratio - 0.7) < 1.0e-6
     assert bpy.ops.fbr.ik_settings(
+        "INVOKE_DEFAULT",
         file_index=0, mapping_index=hand_index, action="START"
     ) == {"FINISHED"}
     assert hand_map.ik_control_bone in target.data.bones
     assert hand_map.ik_pole_bone in target.data.bones
+    pole_control = target.pose.bones[hand_map.ik_pole_bone]
+    assert abs(pole_control.custom_shape_scale_xyz.x - 0.035) < 1.0e-6
     assert target.data.bones[hand_map.ik_pole_bone].get("_fbr_ik_pole")
     hand_constraint = next(
         constraint
@@ -516,6 +539,13 @@ def main():
         if constraint.type == "IK" and constraint.name.startswith("FBR IK")
     )
     assert hand_constraint.subtarget == hand_map.ik_control_bone
+    assert hand_constraint.pole_subtarget == hand_map.ik_pole_bone
+    pole_before = pole_control.matrix.translation.copy()
+    hand_map.ik_pole_length = 0.8
+    assert (pole_control.matrix.translation - pole_before).length > 1.0e-6
+    hand_map.ik_use_pole = False
+    assert hand_constraint.pole_target is None
+    hand_map.ik_use_pole = True
     assert hand_constraint.pole_subtarget == hand_map.ik_pole_bone
     assert hand_constraint.chain_count == 2
     assert hand_constraint.iterations == 500
@@ -525,6 +555,8 @@ def main():
     assert hand_map.ik_control_bone == "" and hand_map.ik_pole_bone == ""
 
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="START") == {"FINISHED"}
+    assert bpy.context.view_layer.objects.active == target
+    assert target.mode == "POSE"
     control_name = arm_map.ik_control_bone
     assert arm_map.ik_enabled and control_name in target.data.bones
     constraint = next(
@@ -660,6 +692,80 @@ def main():
     assert settings.files[1].uid == "follower"
     assert settings.files[1].reuse_mapping == entry.uid
     assert not settings.files[1].mapping_is_independent
+    # FBX object-scale keys must not override the aligned source armature,
+    # and fractional source keys must be sampled with a scene subframe.
+    fractional = action.copy()
+    fractional.name = "FractionalSource"
+    for curve in iter_action_fcurves(fractional):
+        if curve.keyframe_points and 'pose.bones["Hips"]' in curve.data_path:
+            curve.keyframe_points[-1].co.x = 10.5
+            curve.update()
+    source_matrix = source.matrix_world.copy()
+    assign_action_and_slot(source, fractional)
+    source.scale = (0.000049,) * 3
+    source.keyframe_insert(data_path="scale", frame=1.25)
+    source.scale = (0.0001,) * 3
+    source.keyframe_insert(data_path="scale", frame=10.5)
+    source.matrix_world = source_matrix
+    filtered = pose_only_action(fractional)
+    assert filtered != fractional
+    assert all(
+        curve.data_path.startswith('pose.bones[')
+        for curve in iter_action_fcurves(filtered)
+    )
+    bpy.data.actions.remove(filtered)
+    fractional_clip = SimpleNamespace(
+        action_name=fractional.name,
+        in_place=False,
+    )
+    settings.key_mode = "SOURCE"
+    fractional_output = bpy.data.actions.new("FractionalOutput")
+    baked_count = bake_clip(
+        bpy.context, settings, entry, fractional_clip,
+        target, fractional_output, 1.0,
+    )
+    assert baked_count > 0
+    assert source.matrix_world == source_matrix
+    assert any(
+        abs(point.co.x - 1.25) < 1.0e-5
+        for curve in iter_action_fcurves(fractional_output)
+        for point in curve.keyframe_points
+    )
+    fractional_entry = entry.clips.add()
+    fractional_entry.action_name = fractional.name
+    fractional_entry.frame_start, fractional_entry.frame_end = fractional.frame_range
+    entry.preview_clip = str(len(entry.clips) - 1)
+    assert bpy.ops.fbr.preview_animation(file_index=0, action="SHOW") == {"FINISHED"}
+    assert source.display_type == "SOLID"
+    assert source.animation_data.action != fractional
+    bpy.context.scene.frame_set(1)
+    preview_matrix = source.matrix_world.copy()
+    bpy.context.scene.frame_set(10)
+    assert source.matrix_world == preview_matrix
+    assert bpy.ops.fbr.auto_align_axes(file_index=0) == {"FINISHED"}
+    assert settings.preview_running and settings.preview_mode == "ANIMATION"
+    assert bpy.ops.fbr.auto_map(file_index=0) == {"FINISHED"}
+    assert settings.preview_running and settings.preview_mode == "ANIMATION"
+    assert source.matrix_world == preview_matrix
+    entry.source_forward_axis = "+X"
+    assert settings.preview_running and settings.preview_mode == "ANIMATION"
+    assert source.animation_data.action != fractional
+    assert min(source.matrix_world.to_scale()) > 0.1
+    entry.target_forward_axis = "-Y"
+    assert settings.preview_running and settings.preview_mode == "ANIMATION"
+    assert min(source.matrix_world.to_scale()) > 0.1
+    assert bpy.ops.fbr.preview_animation(file_index=0, action="HIDE") == {"FINISHED"}
+    assert bpy.ops.fbr.preview_tpose(file_index=0, action="SHOW") == {"FINISHED"}
+    assert bpy.ops.fbr.auto_align_axes(file_index=0) == {"FINISHED"}
+    assert settings.preview_running and settings.preview_mode == "TPOSE"
+    assert bpy.ops.fbr.auto_map(file_index=0) == {"FINISHED"}
+    assert settings.preview_running and settings.preview_mode == "TPOSE"
+    assert source.data.pose_position == "REST"
+    assert min(source.matrix_world.to_scale()) > 0.1
+    assert bpy.ops.fbr.preview_tpose(file_index=0, action="HIDE") == {"FINISHED"}
+    entry.clips.remove(len(entry.clips) - 1)
+    assign_action_and_slot(source, action)
+    bpy.data.actions.remove(fractional)
     # Reset must remove all add-on IK controls and hidden Custom Shape data,
     # not just clear the mapping collection that referenced them.
     entry = settings.files[0]

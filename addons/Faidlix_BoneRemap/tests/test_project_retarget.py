@@ -119,6 +119,10 @@ def main():
         _import(path)
 
     assert len(settings.files) == 4
+    for imported in settings.files:
+        armature = bpy.data.objects[imported.source_object]
+        assert not armature.animation_data or armature.animation_data.action is None
+        assert all(bpy.data.actions[clip.action_name].use_fake_user for clip in imported.clips)
     enabled = []
     source_dynamic = {}
     for source in settings.files:
@@ -155,6 +159,23 @@ def main():
         assert _matrix_distance(target.matrix_world, target_matrix) < 1.0e-6, (
             f"{source.display_name} 自動配骨架改動 Target 物件矩陣"
         )
+        if source.display_name == "Run.fbx":
+            run_obj = bpy.data.objects[source.source_object]
+            expected_scale = min(run_obj.matrix_world.to_scale())
+            assert bpy.ops.fbr.preview_tpose(file_index=file_index, action="SHOW") == {"FINISHED"}
+            assert bpy.ops.fbr.auto_map(file_index=file_index) == {"FINISHED"}
+            assert settings.preview_mode == "TPOSE"
+            assert min(run_obj.matrix_world.to_scale()) > expected_scale * 0.9
+            source.source_forward_axis = "+X"
+            assert min(run_obj.matrix_world.to_scale()) > expected_scale * 0.9
+            source.source_forward_axis = "AUTO"
+            assert bpy.ops.fbr.preview_tpose(file_index=file_index, action="HIDE") == {"FINISHED"}
+            source.preview_clip = "0"
+            assert bpy.ops.fbr.preview_animation(file_index=file_index, action="SHOW") == {"FINISHED"}
+            assert bpy.ops.fbr.auto_map(file_index=file_index) == {"FINISHED"}
+            assert settings.preview_mode == "ANIMATION"
+            assert min(run_obj.matrix_world.to_scale()) > expected_scale * 0.9
+            assert bpy.ops.fbr.preview_animation(file_index=file_index, action="HIDE") == {"FINISHED"}
         mapping_index = _foot_mapping_index(source)
         assert bpy.ops.fbr.ik_settings(
             file_index=file_index,
@@ -196,6 +217,8 @@ def main():
         )
         assert control and not control.use_deform
         assert pole and not pole.use_deform and pole.get("_fbr_ik_pole")
+        lower = target.data.bones[mapping.target_bone].parent
+        assert (pole.head_local - lower.head_local).length <= lower.length * 0.6 + 1.0e-4
         solver = target.pose.bones[mapping.target_bone].parent
         constraint = next(
             item
@@ -214,6 +237,32 @@ def main():
                 "target": mapping.target_bone,
             }
         )
+
+    run_index = next(
+        index for index, item in enumerate(settings.files)
+        if item.display_name == "Run.fbx"
+    )
+    run_source = settings.files[run_index]
+    run_obj = bpy.data.objects[run_source.source_object]
+    run_scale = min(run_obj.matrix_world.to_scale())
+    assert bpy.ops.fbr.preview_tpose(file_index=run_index, action="SHOW") == {"FINISHED"}
+    assert bpy.ops.fbr.auto_map(file_index=run_index) == {"FINISHED"}
+    assert settings.preview_mode == "TPOSE"
+    assert min(run_obj.matrix_world.to_scale()) > run_scale * 0.9
+    assert bpy.ops.fbr.preview_tpose(file_index=run_index, action="HIDE") == {"FINISHED"}
+    run_source.preview_clip = "0"
+    assert bpy.ops.fbr.preview_animation(file_index=run_index, action="SHOW") == {"FINISHED"}
+    assert bpy.ops.fbr.auto_map(file_index=run_index) == {"FINISHED"}
+    assert settings.preview_mode == "ANIMATION"
+    assert min(run_obj.matrix_world.to_scale()) > run_scale * 0.9
+    assert bpy.ops.fbr.preview_animation(file_index=run_index, action="HIDE") == {"FINISHED"}
+    run_foot_index = _foot_mapping_index(run_source)
+    assert bpy.ops.fbr.ik_settings(
+        file_index=run_index, mapping_index=run_foot_index, action="START"
+    ) == {"FINISHED"}
+    assert bpy.ops.fbr.ik_settings(
+        file_index=run_index, mapping_index=run_foot_index, action="OK"
+    ) == {"FINISHED"}
 
     for source in settings.files:
         for clip in source.clips:
@@ -253,6 +302,10 @@ def main():
     }
     static_failures = []
     for action in outputs:
+        assert not any(
+            'pose.bones["Left_Foot"].' in curve.data_path
+            for curve in iter_action_fcurves(action)
+        ), f"{action.name} 的腳仍保留直接 FK Key"
         values = _curve_values(action)
         assert values and all(math.isfinite(value) for value in values)
         dynamic_curve_count = _dynamic_curve_count(action)

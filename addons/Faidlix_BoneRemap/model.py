@@ -215,6 +215,14 @@ def update_ik_settings(self, context):
     _update_ik_preview(context, self)
 
 
+def update_ik_pole_length(self, context):
+    if not context or not context.scene:
+        return
+    from .operators import _update_ik_preview
+
+    _update_ik_preview(context, self, move_pole=True)
+
+
 def update_active_mapping_index(self, _context):
     if (
         (self.axis_editing or self.ik_editing)
@@ -315,6 +323,16 @@ class FBR_BoneMap(PropertyGroup):
         update=update_ik_settings,
     )
     ik_use_tail: BoolProperty(name="使用骨尾", default=True, update=update_ik_settings)
+    ik_use_pole: BoolProperty(name="使用 Pole", default=True, update=update_ik_settings)
+    ik_pole_length: FloatProperty(
+        name="調整長度", default=0.5, min=0.01, max=10.0,
+        update=update_ik_pole_length,
+    )
+    ik_pole_size_ratio: FloatProperty(
+        name="大小", default=0.7, min=0.01, max=10.0,
+        description="Pole 顯示大小相對於 IK 控制器的比例",
+        update=update_ik_settings,
+    )
     ik_use_rotation: BoolProperty(
         name="使用旋轉",
         default=False,
@@ -442,6 +460,9 @@ class FBR_SourceFile(PropertyGroup):
     ik_backup_iterations: IntProperty(default=500, options={"SKIP_SAVE"})
     ik_backup_influence: FloatProperty(default=1.0, options={"SKIP_SAVE"})
     ik_backup_use_tail: BoolProperty(default=True, options={"SKIP_SAVE"})
+    ik_backup_use_pole: BoolProperty(default=True, options={"SKIP_SAVE"})
+    ik_backup_pole_length: FloatProperty(default=0.5, options={"SKIP_SAVE"})
+    ik_backup_pole_size_ratio: FloatProperty(default=0.7, options={"SKIP_SAVE"})
     ik_backup_use_rotation: BoolProperty(options={"SKIP_SAVE"})
     ik_backup_use_stretch: BoolProperty(options={"SKIP_SAVE"})
     ik_backup_shape: StringProperty(default="BOX", options={"SKIP_SAVE"})
@@ -509,10 +530,13 @@ class FBR_Settings(PropertyGroup):
         max=0.65,
     )
     animation_action_factor: FloatProperty(
-        name="動畫名稱寬度",
-        default=0.58,
-        min=0.30,
-        max=0.80,
+        name="檔案／動畫名稱寬度",
+        default=0.68,
+        min=0.40,
+        max=0.82,
+    )
+    animation_options_factor: FloatProperty(
+        name="原地動畫寬度", default=0.5, min=0.2, max=0.8,
     )
     animation_child_name_factor: FloatProperty(
         name="子動畫名稱寬度",

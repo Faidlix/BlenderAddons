@@ -96,6 +96,32 @@ def _frame_sequence(action, mode):
     return list(range(math.floor(start), math.ceil(end) + 1))
 
 
+def pose_only_action(action):
+    """Make a temporary source Action that cannot animate the armature object.
+
+    FBX files commonly key object scale/rotation as well as pose bones.  The
+    object channels otherwise overwrite the alignment matrix on every frame.
+    """
+    if not any(not curve.data_path.startswith('pose.bones[')
+               for curve in iter_action_fcurves(action)):
+        return action
+    copy = action.copy()
+    copy.name = f"__FBR_SOURCE_POSE__{action.name}"
+    copy.use_fake_user = False
+    legacy = getattr(copy, "fcurves", None)
+    if legacy:
+        for curve in list(legacy):
+            if not curve.data_path.startswith('pose.bones['):
+                legacy.remove(curve)
+    for layer in getattr(copy, "layers", ()):
+        for strip in getattr(layer, "strips", ()):
+            for channelbag in getattr(strip, "channelbags", ()):
+                for curve in list(channelbag.fcurves):
+                    if not curve.data_path.startswith('pose.bones['):
+                        channelbag.fcurves.remove(curve)
+    return copy
+
+
 def _reflect_basis(matrix):
     reflection = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
     return reflection @ matrix @ reflection
@@ -183,7 +209,9 @@ def _ik_chain_names(target_obj, mapping):
     )
     if not bone:
         return set()
-    result = set()
+    # The endpoint is driven by the IK control as well.  Keeping its FK keys
+    # would make the final pose a mixture of two competing animations.
+    result = {endpoint.name} if endpoint else set()
     remaining = mapping.ik_chain_count
     while bone and (remaining > 0 or mapping.ik_chain_count == 0):
         result.add(bone.name)
@@ -200,7 +228,7 @@ def _ik_solver_pose_bone(target_obj, mapping):
     return endpoint
 
 
-def _ik_pole_position(solver):
+def _ik_pole_position(solver, distance_factor=0.5):
     upper = solver.parent if solver else None
     if not solver or not upper:
         return None
@@ -211,8 +239,15 @@ def _ik_pole_position(solver):
         bend = limb.cross(Vector((0.0, 0.0, 1.0)))
         if bend.length_squared < 1.0e-10:
             bend = limb.cross(Vector((0.0, 1.0, 0.0)))
-    distance = max(upper.length + solver.length, solver.length * 2.0, 0.01)
+    # Keep the pole near the elbow/knee, not a full limb length away.
+    distance = max(solver.length * distance_factor, 0.01)
     return solver.head + bend.normalized() * distance
+
+
+def _set_scene_frame(scene, frame):
+    """Evaluate integer and fractional Action keys without losing subframes."""
+    whole = math.floor(frame)
+    scene.frame_set(whole, subframe=float(frame - whole))
 
 
 def _fbr_ik_constraint(pose_bone):
@@ -259,11 +294,10 @@ def iter_bake_clip(
     source_obj.hide_set(False)
     source_obj.animation_data.use_nla = False
     target_obj.animation_data.use_nla = False
-    assign_action_and_slot(source_obj, source_action)
+    evaluation_action = pose_only_action(source_action)
+    assign_action_and_slot(source_obj, evaluation_action)
     assign_action_and_slot(target_obj, out_action)
     frames = _frame_sequence(source_action, settings.key_mode)
-    if not frames:
-        return 0
 
     root_baselines = {}
     root_vertical_baselines = {}
@@ -273,8 +307,10 @@ def iter_bake_clip(
     global_correction = Quaternion(source_file.global_axis_correction).normalized()
     applied_scale = float(source_obj.get("_fbr_alignment_scale", 1.0))
     try:
+        if not frames:
+            return 0
         for frame_index, source_frame in enumerate(frames):
-            context.scene.frame_set(source_frame)
+            _set_scene_frame(context.scene, source_frame)
             context.view_layer.update()
             evaluated_source = source_obj.evaluated_get(
                 context.evaluated_depsgraph_get()
@@ -289,7 +325,10 @@ def iter_bake_clip(
                 endpoint = target_obj.pose.bones.get(mapping.target_bone)
                 owner = _ik_solver_pose_bone(target_obj, mapping)
                 control = target_obj.pose.bones.get(mapping.ik_control_bone)
-                pole = target_obj.pose.bones.get(mapping.ik_pole_bone)
+                pole = (
+                    target_obj.pose.bones.get(mapping.ik_pole_bone)
+                    if mapping.ik_use_pole else None
+                )
                 constraint = _fbr_ik_constraint(owner) if owner else None
                 if not endpoint or not owner or not control or not constraint:
                     continue
@@ -413,7 +452,8 @@ def iter_bake_clip(
             desired_ik_transforms = {
                 mapping.as_pointer(): (
                     endpoint.matrix.copy(),
-                    _ik_pole_position(owner),
+                    _ik_pole_position(owner, mapping.ik_pole_length)
+                    if mapping.ik_use_pole else None,
                 )
                 for mapping, endpoint, owner, _control, _pole, _constraint in ik_mappings
             }
@@ -475,6 +515,8 @@ def iter_bake_clip(
                 target_obj.animation_data.action_slot = previous_target_slot
             except TypeError:
                 pass
+        if evaluation_action != source_action and evaluation_action.users == 0:
+            bpy.data.actions.remove(evaluation_action)
 
 
 def bake_clip(*args, **kwargs):

@@ -7,10 +7,10 @@ from .model import (
     rebuild_animation_rows,
     reuse_mapping_items,
 )
-from .operators import _mapping_axes_match
+from .operators import _mapping_axes_match, ik_editor_window_for
 
 
-ADDON_VERSION = (0, 6, 7)
+ADDON_VERSION = (0, 6, 8)
 
 
 def _source_file_index(settings, source_file):
@@ -61,68 +61,73 @@ def _reused_mapping_sources(settings, source):
     ]
 
 
-def _animation_row_columns(row, settings, child=False):
+def _animation_row_columns(row, settings):
     remove = row.row(align=True)
     remove.ui_units_x = 1.25
     enabled = row.row(align=True)
     enabled.ui_units_x = 1.35
     content = row.split(factor=settings.animation_info_factor)
     information = content.row(align=True)
-    if child:
-        action_and_timing = information.split(
-            factor=settings.animation_action_factor
-        )
-        action = action_and_timing.row(align=True)
-        timing = action_and_timing.row(align=True)
-        controls = content.row(align=True)
-        return remove, enabled, None, action, timing, controls
-    filename_and_action = information.split(factor=settings.animation_file_factor)
-    filename = filename_and_action.row(align=True)
-    action_and_timing = filename_and_action.split(
-        factor=settings.animation_action_factor
-    )
-    action = action_and_timing.row(align=True)
-    timing = action_and_timing.row(align=True)
-    controls = content.row(align=True)
-    return remove, enabled, filename, action, timing, controls
+    name_and_timing = information.split(factor=settings.animation_action_factor)
+    name = name_and_timing.row(align=True)
+    timing = name_and_timing.row(align=True)
+    options = content.split(factor=settings.animation_options_factor)
+    inplace = options.row(align=True)
+    mirror = options.row(align=True)
+    return remove, enabled, name, timing, inplace, mirror
 
 
 def _remove_file_button(layout, file_index):
-    button = layout.operator("fbr.remove_file", text="━", emboss=False)
+    button = layout.operator("fbr.remove_file", text="", icon="TRASH", emboss=False)
     button.file_index = file_index
 
 
-def _drag_handle(layout, property_name):
-    handle = layout.operator("fbr.drag_column", text="│", emboss=False)
-    handle.property_name = property_name
+def _drag_handle(layout, settings, property_name):
+    handle = layout.row(align=True)
+    handle.ui_units_x = 0.25
+    handle.prop(settings, property_name, text="│", emboss=True)
     return handle
+
+
+def _draw_forward_axis_buttons(layout, source, file_index, role):
+    property_name = "source_forward_axis" if role == "SOURCE" else "target_forward_axis"
+    row = layout.row(align=True)
+    row.label(text="來源前方" if role == "SOURCE" else "Target 前方")
+    buttons = row.row(align=True)
+    for axis, label in (("AUTO", "自動"), ("+X", "+X"), ("-X", "-X"), ("+Y", "+Y"), ("-Y", "-Y")):
+        button = buttons.operator(
+            "fbr.set_forward_axis",
+            text=label,
+            depress=getattr(source, property_name) == axis,
+        )
+        button.file_index = file_index
+        button.role = role
+        button.axis = axis
 
 
 def _draw_animation_header(layout, settings):
     row = layout.row(align=True)
-    remove, enabled, filename, action, timing, controls = _animation_row_columns(
+    remove, enabled, name, timing, inplace, mirror = _animation_row_columns(
         row, settings
     )
     remove.label(text="")
-    enabled.label(text="啟用")
-    filename.label(text="檔案名稱")
-    _drag_handle(filename, "animation_file_factor")
-    action.label(text="動畫名稱")
-    _drag_handle(action, "animation_action_factor")
+    enabled.label(text="")
+    name.label(text="檔案／動畫名稱")
+    _drag_handle(name, settings, "animation_action_factor")
     timing.label(text="時間")
-    _drag_handle(timing, "animation_info_factor")
-    options = controls.row(align=True)
-    options.label(text="設為原地動畫")
-    options.label(text="複製對稱動畫")
+    _drag_handle(timing, settings, "animation_info_factor")
+    inplace.label(text="設為原地動畫")
+    _drag_handle(inplace, settings, "animation_options_factor")
+    mirror.label(text="複製對稱動畫")
 
 
 def _draw_multi_clip_header(layout, source, file_index, settings):
     row = layout.row(align=True)
-    remove, enabled, filename, action, _timing, _controls = _animation_row_columns(
+    remove, enabled, name, _timing, _inplace, _mirror = _animation_row_columns(
         row, settings
     )
     _remove_file_button(remove, file_index)
-    filename.prop(
+    name.prop(
         source,
         "expanded",
         text="",
@@ -138,38 +143,30 @@ def _draw_multi_clip_header(layout, source, file_index, settings):
     )
     toggle = enabled.operator("fbr.toggle_file", text="", icon=icon, emboss=False)
     toggle.index = file_index
-    filename.label(text=source.display_name)
-    action.label(text=f"{len(source.clips)} 個動畫")
+    name.label(text=f"{source.display_name}({len(source.clips)} 個動畫)")
 
 
 def _draw_clip_row(context, layout, source, file_index, clip, clip_index, show_file_name):
     row = layout.row(align=True)
-    remove, enabled, filename, action, timing, controls = _animation_row_columns(
+    remove, enabled, name, timing, inplace_cell, mirror_cell = _animation_row_columns(
         row,
         context.scene.fbr_settings,
-        child=not show_file_name,
     )
     frame_text, seconds_text = _clip_timing_labels(context.scene, clip)
     if show_file_name:
         _remove_file_button(remove, file_index)
         enabled.prop(clip, "enabled", text="")
-        filename.label(text=source.display_name)
-        action.label(text=clip.action_name)
+        name.label(text=f"{source.display_name} / {clip.action_name}")
     else:
         remove.label(text="")
         enabled.prop(clip, "enabled", text="")
-        action.label(text=clip.action_name)
+        name.label(text=clip.action_name)
     timing.alignment = "LEFT"
-    frames = timing.row(align=True)
-    frames.ui_units_x = 4.2
-    frames.alignment = "LEFT"
-    frames.label(text=frame_text)
-    seconds = timing.row(align=True)
-    seconds.ui_units_x = 5.2
-    seconds.alignment = "LEFT"
-    seconds.label(text=seconds_text)
+    time_parts = timing.split(factor=0.52)
+    time_parts.label(text=frame_text)
+    time_parts.label(text=seconds_text)
 
-    inplace = controls.operator(
+    inplace = inplace_cell.operator(
         "fbr.toggle_clip_option",
         text="O" if clip.in_place else "X",
         depress=clip.in_place,
@@ -177,8 +174,7 @@ def _draw_clip_row(context, layout, source, file_index, clip, clip_index, show_f
     inplace.file_index = file_index
     inplace.clip_index = clip_index
     inplace.option = "IN_PLACE"
-    controls.separator(factor=0.15)
-    copy = controls.operator(
+    copy = mirror_cell.operator(
         "fbr.toggle_clip_option",
         text="O" if clip.mirror_mode == "COPY" else "X",
         depress=clip.mirror_mode == "COPY",
@@ -383,11 +379,13 @@ def _draw_axis_correction(layout, file_index, source_file):
 def _draw_ik_settings(layout, file_index, source_file):
     active = source_file.mappings[source_file.active_mapping_index]
     editor = layout.box()
+    editor.label(text=f"IK 設定：{active.source_bone} → {active.target_bone}", icon="CONSTRAINT_BONE")
     if active.ik_enabled:
         shape = editor.row(align=True)
-        shape.prop(active, "ik_shape", text="")
-        shape.prop(active, "ik_shape_scale", text="大小")
-        shape.prop(active, "ik_shape_wire_width", text="Width")
+        shape.prop(active, "ik_shape", text="", expand=True)
+        dimensions = editor.row(align=True)
+        dimensions.prop(active, "ik_shape_scale", text="大小")
+        dimensions.prop(active, "ik_shape_wire_width", text="Width")
         appearance = editor.row(align=True)
         appearance.prop(active, "ik_shape_color", text="顏色")
         solver = editor.row(align=True)
@@ -396,22 +394,25 @@ def _draw_ik_settings(layout, file_index, source_file):
         solver.prop(active, "ik_influence")
         options = editor.row(align=True)
         options.prop(active, "ik_use_tail", toggle=True)
+        options.prop(active, "ik_use_pole", toggle=True)
         options.prop(active, "ik_use_rotation", toggle=True)
         options.prop(active, "ik_use_stretch", toggle=True)
+        if active.ik_use_pole:
+            pole = editor.row(align=True)
+            pole.prop(active, "ik_pole_length")
+            pole.prop(active, "ik_pole_size_ratio", text="大小")
     else:
         editor.label(text="IK 與控制骨已刪除", icon="INFO")
-    buttons = editor.grid_flow(
-        row_major=True, columns=4, even_columns=True, even_rows=True, align=True
-    )
-    delete = buttons.operator("fbr.delete_ik", text="刪除 IK")
+    buttons = editor.row(align=True)
+    buttons.operator_context = "EXEC_DEFAULT"
+    delete = buttons.operator("fbr.delete_ik", text="刪除 IK", icon="TRASH")
     delete.file_index = file_index
     delete.mapping_index = source_file.active_mapping_index
-    buttons.label(text="")
-    cancel = buttons.operator("fbr.ik_settings", text="Cancel")
+    cancel = buttons.operator("fbr.ik_settings", text="取消")
     cancel.file_index = file_index
     cancel.mapping_index = source_file.active_mapping_index
     cancel.action = "CANCEL"
-    okay = buttons.operator("fbr.ik_settings", text="OK")
+    okay = buttons.operator("fbr.ik_settings", text="確認")
     okay.file_index = file_index
     okay.mapping_index = source_file.active_mapping_index
     okay.action = "OK"
@@ -597,18 +598,21 @@ class FBR_PT_main(Panel):
             mapping_choice.context_pointer_set("fbr_source_file", source)
             mapping_choice.menu("FBR_MT_reuse_mapping", text=mapping_label)
             row.separator(factor=0.25)
-            preview_controls = row.row(align=True)
-            preview_controls.ui_units_x = 18.0
             preview_active = (
                 settings.preview_running and settings.preview_source_uid == source.uid
             )
+            if len(source.clips) > 1:
+                clip_selector = group.row(align=True)
+                clip_selector.enabled = (
+                    editing_index < 0 and not settings.retarget_running
+                )
+                clip_selector.prop(source, "preview_clip", text="預覽動畫")
+            preview_controls = group.row(align=True)
             preview_controls.enabled = (
                 bool(source.clips)
                 and editing_index < 0
                 and not settings.retarget_running
             )
-            if len(source.clips) > 1:
-                preview_controls.prop(source, "preview_clip", text="")
             tpose_active = (
                 preview_active and settings.preview_mode == "TPOSE"
             )
@@ -682,19 +686,16 @@ class FBR_PT_main(Panel):
             tools.label(text="")
             forward = group.column(align=True)
             forward.enabled = not locked
-            source_axes = forward.row(align=True)
-            source_axes.label(text="來源前方")
-            source_axes.prop(source, "source_forward_axis", text="", expand=True)
-            target_axes = forward.row(align=True)
-            target_axes.label(text="Target 前方")
-            target_axes.prop(source, "target_forward_axis", text="", expand=True)
+            _draw_forward_axis_buttons(forward, source, file_index, "SOURCE")
+            _draw_forward_axis_buttons(forward, source, file_index, "TARGET")
 
             list_area = group.column(align=True)
+            list_area.enabled = not locked
             list_header = list_area.row(align=True)
             columns = list_header.split(factor=settings.mapping_source_factor)
             source_header = columns.row(align=True)
             source_header.label(text="來源骨骼")
-            _drag_handle(source_header, "mapping_source_factor")
+            _drag_handle(source_header, settings, "mapping_source_factor")
             target_and_tools = columns.split(factor=settings.mapping_target_factor)
             target_header = target_and_tools.row(align=True)
             target_header.alignment = "LEFT"
@@ -703,7 +704,7 @@ class FBR_PT_main(Panel):
             ik_header.ui_units_x = 5.0
             ik_header.alignment = "CENTER"
             ik_header.label(text="IK 設定")
-            _drag_handle(ik_header, "mapping_target_factor")
+            _drag_handle(ik_header, settings, "mapping_target_factor")
             tools_header = target_and_tools.row(align=False)
             tools_header.alignment = "RIGHT"
             axis_header = tools_header.row(align=True)
@@ -719,6 +720,9 @@ class FBR_PT_main(Panel):
                 "active_mapping_index",
                 rows=6,
             )
+            if (source.ik_editing and ik_editor_window_for(source.uid) is None
+                    and 0 <= source.active_mapping_index < len(source.mappings)):
+                _draw_ik_settings(group, file_index, source)
             if reused_sources:
                 reused_box = group.box()
                 reused_count = sum(len(candidate.clips) for candidate in reused_sources)
@@ -803,9 +807,40 @@ class FBR_PT_main(Panel):
             run.operator("fbr.retarget", text="開始批次重定向", icon="PLAY")
 
 
+class FBR_PT_ik_window(Panel):
+    bl_idname = "FBR_PT_ik_window"
+    bl_label = "設定 IK"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "scene"
+    bl_order = -1000
+
+    @classmethod
+    def poll(cls, context):
+        settings = getattr(context.scene, "fbr_settings", None)
+        window = context.window
+        if settings is None or window is None:
+            return False
+        return any(
+            source.ik_editing
+            and ik_editor_window_for(source.uid) == window
+            and 0 <= source.active_mapping_index < len(source.mappings)
+            for source in settings.files
+        )
+
+    def draw(self, context):
+        settings = context.scene.fbr_settings
+        window = context.window
+        for index, source in enumerate(settings.files):
+            if source.ik_editing and ik_editor_window_for(source.uid) == window:
+                _draw_ik_settings(self.layout, index, source)
+                break
+
+
 CLASSES = (
     FBR_UL_animation_rows,
     FBR_UL_mappings,
     FBR_MT_reuse_mapping,
     FBR_PT_main,
+    FBR_PT_ik_window,
 )
