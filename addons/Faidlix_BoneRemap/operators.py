@@ -513,8 +513,99 @@ def _ik_rest_pole_position(owner_obj, endpoint_name, distance_factor=1.0, forwar
     upper = lower.parent if lower else None
     if not endpoint or not lower or not upper:
         return None
+    counterpart_name = flip_bone_name(endpoint_name)
+    if (_ik_side(endpoint_name) == "R" and counterpart_name != endpoint_name
+            and counterpart_name in owner_obj.data.bones):
+        opposite = owner_obj.data.bones[counterpart_name]
+        opposite_lower = opposite.parent
+        if opposite_lower:
+            mirror_joint = opposite_lower.head_local.copy()
+            mirror_joint.x *= -1
+            tolerance = max(lower.length, opposite_lower.length, 0.01) * 0.02
+            if (mirror_joint - lower.head_local).length <= tolerance:
+                opposite_position = _ik_rest_pole_position(
+                    owner_obj, counterpart_name, distance_factor, forward_axis,
+                )
+                if opposite_position is not None:
+                    opposite_position.x *= -1
+                    return opposite_position
     forward = _character_basis(owner_obj, forward_axis) @ Vector((0.0, -1.0, 0.0))
     return lower.head_local + forward.normalized() * lower.length * distance_factor
+
+
+def _ik_side(name):
+    if name.startswith(("Left_", "left_", "LEFT_")) or name.endswith((".L", "_L", "-L")):
+        return "L"
+    if name.startswith(("Right_", "right_", "RIGHT_")) or name.endswith((".R", "_R", "-R")):
+        return "R"
+    return ""
+
+
+def _ik_control_name(prefix, endpoint_name):
+    side = _ik_side(endpoint_name)
+    opposite = flip_bone_name(endpoint_name)
+    if not side or opposite == endpoint_name:
+        return f"{prefix}_{endpoint_name}"
+    left_name = endpoint_name if side == "L" else opposite
+    stem = left_name
+    for marker in ("Left_", "left_", "LEFT_"):
+        if stem.startswith(marker):
+            stem = stem[len(marker):]
+            break
+    else:
+        for marker in (".L", "_L", "-L"):
+            if stem.endswith(marker):
+                stem = stem[:-len(marker)]
+                break
+    return f"{prefix}_{stem}.{side}"
+
+
+def _rename_generated_ik_control(context, owner_obj, mapping, endpoint_name, prop, prefix):
+    old_name = getattr(mapping, prop)
+    bone = owner_obj.data.bones.get(old_name) if old_name else None
+    if not bone or not bone.get("_fbr_ik_control", False):
+        return
+    desired = _ik_control_name(prefix, endpoint_name)
+    if desired == old_name or desired in owner_obj.data.bones:
+        return
+    bone.name = desired
+    for source_file in context.scene.fbr_settings.files:
+        for item in source_file.mappings:
+            if getattr(item, prop) == old_name:
+                setattr(item, prop, desired)
+
+
+def _sync_ik_control_parent(context, owner_obj, endpoint_name, control_name):
+    """Follow the nearest IK-equipped deform ancestor, without parenting poles."""
+    endpoint = owner_obj.data.bones.get(endpoint_name)
+    if not endpoint or control_name not in owner_obj.data.bones:
+        return
+    controls_by_endpoint = {}
+    for source_file in context.scene.fbr_settings.files:
+        for item in source_file.mappings:
+            if not item.ik_enabled or not item.ik_control_bone:
+                continue
+            item_owner, item_endpoint = _ik_owner(context, item)
+            if item_owner == owner_obj and item.ik_control_bone in owner_obj.data.bones:
+                controls_by_endpoint[item_endpoint] = item.ik_control_bone
+    ancestor = endpoint.parent
+    parent_name = ""
+    while ancestor:
+        candidate = controls_by_endpoint.get(ancestor.name, "")
+        if candidate and candidate != control_name:
+            parent_name = candidate
+            break
+        ancestor = ancestor.parent
+    current = owner_obj.data.bones[control_name]
+    if (current.parent.name if current.parent else "") == parent_name:
+        return
+    _set_active_object_mode(context, owner_obj, "EDIT")
+    edit_bone = owner_obj.data.edit_bones[control_name]
+    rest_matrix = edit_bone.matrix.copy()
+    edit_bone.parent = owner_obj.data.edit_bones.get(parent_name) if parent_name else None
+    edit_bone.use_connect = False
+    edit_bone.matrix = rest_matrix
+    bpy.ops.object.mode_set(mode="OBJECT")
 
 
 def _add_ik_control_bones(context, owner_obj, endpoint_name, mapping):
@@ -543,7 +634,9 @@ def _add_ik_control_bones(context, owner_obj, endpoint_name, mapping):
     _set_active_object_mode(context, owner_obj, "EDIT")
     control_name = mapping.ik_control_bone if control_valid else ""
     if not control_valid:
-        edit_bone = owner_obj.data.edit_bones.new(f"FBR_IK_{endpoint_name}")
+        edit_bone = owner_obj.data.edit_bones.new(
+            _ik_control_name("FBR_IK", endpoint_name)
+        )
         edit_bone.matrix = endpoint_matrix
         edit_bone.use_deform = False
         control_name = edit_bone.name
@@ -551,7 +644,9 @@ def _add_ik_control_bones(context, owner_obj, endpoint_name, mapping):
     if pole_required and not pole_valid:
         pole_matrix = endpoint_matrix.copy()
         pole_matrix.translation = pole_position
-        edit_pole = owner_obj.data.edit_bones.new(f"FBR_Pole_{endpoint_name}")
+        edit_pole = owner_obj.data.edit_bones.new(
+            _ik_control_name("FBR_Pole", endpoint_name)
+        )
         edit_pole.matrix = pole_matrix
         edit_pole.length = max(endpoint.length * 0.5, 0.01)
         edit_pole.use_deform = False
@@ -716,6 +811,13 @@ def _sync_ik_mapping(context, mapping):
             mapping.ik_control_bone = existing_control.name
             if constraint.pole_target == owner_obj:
                 mapping.ik_pole_bone = constraint.pole_subtarget
+    if mapping.ik_enabled:
+        _rename_generated_ik_control(
+            context, owner_obj, mapping, endpoint_name, "ik_control_bone", "FBR_IK",
+        )
+        _rename_generated_ik_control(
+            context, owner_obj, mapping, endpoint_name, "ik_pole_bone", "FBR_Pole",
+        )
     if mapping.ik_enabled and (
         constraint is None
         or not mapping.ik_control_bone
@@ -740,6 +842,16 @@ def _sync_ik_mapping(context, mapping):
             constraint.subtarget = control_name
     if not mapping.ik_enabled or constraint is None:
         return
+    _sync_ik_control_parent(context, owner_obj, endpoint_name, mapping.ik_control_bone)
+    for source_file in context.scene.fbr_settings.files:
+        for child_mapping in source_file.mappings:
+            if child_mapping.as_pointer() == mapping.as_pointer() or not child_mapping.ik_enabled:
+                continue
+            child_owner, child_endpoint = _ik_owner(context, child_mapping)
+            if child_owner == owner_obj and child_endpoint:
+                _sync_ik_control_parent(
+                    context, owner_obj, child_endpoint, child_mapping.ik_control_bone,
+                )
     constraint.target = owner_obj
     constraint.subtarget = mapping.ik_control_bone
     constraint.pole_target = owner_obj if pole_required and mapping.ik_pole_bone else None

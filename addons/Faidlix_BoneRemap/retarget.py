@@ -437,6 +437,10 @@ def iter_bake_clip(
                 muted_constraints.append((constraint, constraint.mute))
                 constraint.mute = True
 
+            # Child IK controls inherit their parent's pose. Solve parent
+            # controls first even when the mapping list is in another order.
+            ik_mappings.sort(key=lambda item: len(item[1].parent_recursive))
+
             # The output action is evaluated as the scene advances.  Without
             # resetting every pose channel here, an IK control starts from the
             # previous frame's solved offset and the iterative correction adds

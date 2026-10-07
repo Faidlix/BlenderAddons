@@ -128,6 +128,71 @@ def make_action(source):
     return action
 
 
+def test_symmetric_ik_controls(settings):
+    armature = bpy.data.armatures.new("SymmetricIKData")
+    rig = bpy.data.objects.new("SymmetricIK", armature)
+    bpy.context.collection.objects.link(rig)
+    bpy.context.view_layer.objects.active = rig
+    rig.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    root = armature.edit_bones.new("Hips")
+    root.head, root.tail = (0, 0, 0), (0, 0, 1)
+    for side, sign in (("Left", 1), ("Right", -1)):
+        upper = armature.edit_bones.new(f"{side}_UpperArm")
+        upper.parent = root
+        upper.head, upper.tail = (0, 0, 1), (sign * 0.6, -0.03, 1)
+        lower = armature.edit_bones.new(f"{side}_LowerArm")
+        lower.parent = upper
+        lower.head, lower.tail = upper.tail, (sign * 1.15, 0, 1)
+        hand = armature.edit_bones.new(f"{side}_Hand")
+        hand.parent = lower
+        hand.head, hand.tail = lower.tail, (sign * 1.30, 0, 1)
+        upper_leg = armature.edit_bones.new(f"{side}_UpperLeg")
+        upper_leg.parent = root
+        upper_leg.head, upper_leg.tail = (sign * 0.15, 0, 0.9), (sign * 0.15, -0.03, 0.5)
+        lower_leg = armature.edit_bones.new(f"{side}_LowerLeg")
+        lower_leg.parent = upper_leg
+        lower_leg.head, lower_leg.tail = upper_leg.tail, (sign * 0.15, 0, 0.12)
+        foot = armature.edit_bones.new(f"{side}_Foot")
+        foot.parent = lower_leg
+        foot.head, foot.tail = lower_leg.tail, (sign * 0.15, -0.13, 0.08)
+        toes = armature.edit_bones.new(f"{side}_Toes")
+        toes.parent = foot
+        toes.head, toes.tail = foot.tail, (sign * 0.15, -0.23, 0.08)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    settings.target_armature = rig.name
+    entry = settings.files.add()
+    entry.uid = "symmetric-ik-test"
+    entry.source_object = rig.name
+    for side in ("Left", "Right"):
+        for part in ("Hand", "Foot", "Toes"):
+            mapping = entry.mappings.add()
+            mapping.source_bone = f"{side}_{part}"
+            mapping.target_bone = mapping.source_bone
+    for part in ("Hand", "Foot", "Toes"):
+        index = next(i for i, item in enumerate(entry.mappings) if item.source_bone == f"Left_{part}")
+        assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=index, action="START") == {"FINISHED"}
+        assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=index, action="OK") == {"FINISHED"}
+    for part in ("Hand", "Foot", "Toes"):
+        left = next(item for item in entry.mappings if item.source_bone == f"Left_{part}")
+        right = next(item for item in entry.mappings if item.source_bone == f"Right_{part}")
+        assert bpy.utils.flip_name(left.ik_control_bone) == right.ik_control_bone
+        assert left.ik_pole_bone and right.ik_pole_bone
+        assert bpy.utils.flip_name(left.ik_pole_bone) == right.ik_pole_bone
+        if part == "Toes":
+            foot_left = next(item for item in entry.mappings if item.source_bone == "Left_Foot")
+            foot_right = next(item for item in entry.mappings if item.source_bone == "Right_Foot")
+            assert rig.data.bones[left.ik_control_bone].parent.name == foot_left.ik_control_bone
+            assert rig.data.bones[right.ik_control_bone].parent.name == foot_right.ik_control_bone
+        if left.ik_pole_bone and right.ik_pole_bone:
+            a = rig.data.bones[left.ik_pole_bone].head_local
+            b = rig.data.bones[right.ik_pole_bone].head_local
+            assert (a.x + b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2 < 1.0e-8
+    # Pose Mode's interactive X Mirror requires a foreground 3D View; the
+    # headless contract is Blender's side-pair naming and mirrored rest pose.
+    assert bpy.ops.fbr.reset_all() == {"FINISHED"}
+
+
 def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     addon.register()
@@ -538,6 +603,24 @@ def main():
     assert hand_map.ik_shape == "CIRCLE"
     assert hand_map.ik_control_bone in target.data.bones
     assert hand_map.ik_pole_bone in target.data.bones
+    assert bpy.utils.flip_name(hand_map.ik_control_bone) == right_map.ik_control_bone
+    if right_map.ik_pole_bone:
+        assert bpy.utils.flip_name(hand_map.ik_pole_bone) == right_map.ik_pole_bone
+    finger_index = next(
+        index for index, item in enumerate(entry.mappings)
+        if item.source_bone == "Left_IndexProximal"
+    )
+    assert bpy.ops.fbr.ik_settings(
+        "INVOKE_DEFAULT", file_index=0, mapping_index=finger_index, action="START"
+    ) == {"FINISHED"}
+    assert target.data.bones[left_finger_map.ik_control_bone].parent.name == hand_map.ik_control_bone
+    assert not target.data.bones[left_finger_map.ik_control_bone].use_connect
+    assert bpy.ops.fbr.ik_settings(
+        file_index=0, mapping_index=finger_index, action="RESET"
+    ) == {"FINISHED"}
+    assert bpy.ops.fbr.ik_settings(
+        file_index=0, mapping_index=finger_index, action="CANCEL"
+    ) == {"FINISHED"}
     pole_control = target.pose.bones[hand_map.ik_pole_bone]
     assert abs(pole_control.custom_shape_scale_xyz.x - 0.035) < 1.0e-6
     assert target.data.bones[hand_map.ik_pole_bone].get("_fbr_ik_pole")
@@ -945,6 +1028,7 @@ def main():
     assert reset_control not in target.data.bones
     assert "__FBR_IK_Shapes__" not in bpy.data.collections
     assert not any(obj.get("_fbr_ik_shape", False) for obj in bpy.data.objects)
+    test_symmetric_ik_controls(settings)
     print("FBR_HEADLESS_OK")
     addon.unregister()
 

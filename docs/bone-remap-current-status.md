@@ -1,6 +1,15 @@
 # Faidlix Bone Remap 交接狀態
 
-更新日期：2026-10-07。此檔區分 GitHub 發布、隔離安裝與正式 Blender 安裝；三者不可混為一談。
+更新日期：2026-10-08。此檔區分 GitHub 發布、隔離安裝與正式 Blender 安裝；三者不可混為一談。
+
+## 0.6.13 IK 親子層級與鏡像（2026-10-08）
+
+- 已修改 `operators.py`：外掛 IK／Pole 控制骨改用 Blender 可辨識的 `.L/.R` 尾碼；舊控制骨在再次同步 IK 時改名，並更新 mapping 名稱參照。Target 骨架若有 Foot → Toes 等父子關係，對應的 IK 控制骨連到最近的 IK 父控制骨，Pole 保持獨立。對稱參考肘／膝位置下，右側 Pole 由左側結果鏡射，避免左右微小軸差導致初始位置不一致。
+- 已修改 `retarget.py`：階層式 IK 控制骨依父到子順序求解／下 Key，避免清單順序改變子控制骨結果。
+- 已修改 `tests/test_headless.py`：建立對稱且微彎的手腳骨架，驗證左右 `.L/.R` 對應、Pole 鏡像位置與 Foot → Toes IK 親子關係。Blender 5.2 隔離 headless `FBR_HEADLESS_OK` 及角色1003五段 `FBR_PROJECT_RETARGET` 已通過；這些是原始碼測試，尚不能證明前景滑鼠拖動時即時鏡像。前景 Pose Mode X-Axis Mirror 實際拖動 IK／Pole 仍待目視驗收。
+- 版本欄位已升到 0.6.13；GitHub 發布與正式安裝結果以本節後續紀錄為準，不得由此條視為已完成。
+- 候選 ZIP `repository/faidlix_bone_remap-0.6.13.zip` 為 50758 bytes、SHA-256 `831a2744e6eb00e276d83c4e8128ad14a01a1ef6521a4490e3a580281e53edc4`，Blender extension metadata validate 通過，索引已對應。隔離背景 MCP 從候選 ZIP 安裝版讀回 `(0, 6, 13)`，驗證左右 Foot/Toes 控制骨 `.L/.R`、Pole 對稱、Toes IK 控制骨為 Foot IK 子骨；MCP 程序已停止。
+- 正式 Blender 安裝狀態：檢查時仍有使用者 Blender 程序執行中（PID 24064）；為避免熱替換，**本次尚未正式安裝，也未完成前景拖動目視驗收**。需待使用者儲存並關閉 Blender 後，再備份正式 0.6.12、由 GitHub ZIP 安裝與讀回；不可把隔離 MCP 測試當成正式安裝。
 
 ## 問題與版本事實
 
