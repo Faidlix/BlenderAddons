@@ -1,6 +1,6 @@
 # Faidlix Bone Remap 交接狀態
 
-更新日期：2026-10-07。此檔記錄目前工作樹，不代表已發布到 GitHub 或安裝到正式 Blender。
+更新日期：2026-10-07。此檔區分 GitHub 發布、隔離安裝與正式 Blender 安裝；三者不可混為一談。
 
 ## 問題與版本事實
 
@@ -23,11 +23,12 @@
 - 角色1003 專案重定向測試：`FBR_PROJECT_RETARGET` 已通過，五段動畫有動態曲線；腳 IK 控制器在測試取樣影格與目標腳的最大距離約 0.00957 Blender 單位。測試只覆蓋其設計的情境，不等於目視確認全部手腳動畫與來源一致。
 - ZIP：Blender 建置、metadata validate、隔離 `user_default` 安裝、模組及新 operator 讀回通過；`ui.py` 位元組與原始碼一致。ZIP 44338 bytes，SHA-256 `f6a76bc09575bce9ddfd56455de36f397519f046bcaccb59c49bbb826c3e6478`，已寫入索引。
 - 根目錄 `tests/test_readme_download_links.py` 通過 `README_DOWNLOAD_LINKS=PASS`。
-- 尚未做前景窄側欄文字目視檢查，也尚未從 GitHub 正式 Repository 下載安裝測試。根目錄工作樹有許多既有未追蹤驗證檔，不可為了發布一併清除或提交。
+- GitHub `main` 已推至 `ccefcc61fa50568436efcd6c661752d702ff9ed2` 並以 `git ls-remote` 讀回。由 GitHub raw 下載的 0.6.8 ZIP 為 44338 bytes，SHA-256 與索引相同；在全新隔離 Blender 使用者目錄安裝、啟用後讀回 `(0, 6, 8)` 與新 operator 成功。這不等於正式 Blender 已更新，也尚未驗證線上更新操作流程。
+- 尚未做前景窄側欄文字目視檢查。根目錄工作樹有許多既有未追蹤驗證檔，未納入發布，也不可為了發布一併清除或提交。
 - 正式 Blender 目前仍是 0.6.7；不可宣稱使用者正在用 0.6.8。
 
 ## 下一步
 
 1. 在前景 Blender 以窄側欄檢查按鈕文字、動畫父列、時間欄與拖曳分隔線，必要時修正後重建 ZIP／索引 hash。
 2. 用角色1003與 Run.fbx 目視比較來源和目標（含 IK／無 IK），特別複查手部控制器、Pole、Root 水平位移及播放中的前方軸即時更新；目前自動測試不足以宣稱這些已全部解決。
-3. 發布前依 `CONTRIBUTING.md` 檢查受控改動、推送 GitHub，從 GitHub Repository 下載安裝正式測試。正式安裝前確認使用者已保存並關閉原 Blender；目前不得以本機 ZIP 隔離測試替代正式驗證。
+3. GitHub 推送與遠端 ZIP 比對已完成；仍需在確認使用者保存並關閉原 Blender 後，從正式 Repository 執行更新／安裝並測試前景操作。隔離測試不得替代這一步。
