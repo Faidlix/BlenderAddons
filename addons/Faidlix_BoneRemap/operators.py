@@ -34,7 +34,7 @@ _TARGET_BONE_ITEMS_CACHE = {}
 _AXIS_PREVIEW_STATE = {}
 _ANIMATION_PREVIEW_STATE = {}
 _IK_EDIT_STATE = {}
-_IK_EDITOR_WINDOWS = {}
+_IK_SELECTION_STATE = {}
 _IK_UPDATE_GUARD = False
 _AXIS_UPDATE_GUARD = False
 _FORWARD_UPDATE_GUARD = False
@@ -42,115 +42,40 @@ IK_CONSTRAINT_NAME = "FBR IK"
 IK_SHAPE_COLLECTION = "__FBR_IK_Shapes__"
 
 
-def ik_editor_window_for(source_uid):
-    """Return the live floating IK editor window, if one is open."""
-    pointer = _IK_EDITOR_WINDOWS.get(source_uid)
-    if pointer is None:
-        return None
-    return next(
-        (window for window in bpy.context.window_manager.windows
-         if window.as_pointer() == pointer),
-        None,
+def _remember_ik_selection(context, source_uid):
+    active = context.view_layer.objects.active
+    _IK_SELECTION_STATE[source_uid] = (
+        active.as_pointer() if active else None,
+        active.mode if active else "OBJECT",
+        {obj.as_pointer() for obj in context.selected_objects},
     )
 
 
-def _ik_editor_close(source_uid):
-    pointer = _IK_EDITOR_WINDOWS.pop(source_uid, None)
-    if pointer is None:
+def _restore_ik_selection(context, source_uid):
+    state = _IK_SELECTION_STATE.pop(source_uid, None)
+    if state is None:
         return
-
-    def close_window():
-        window = next(
-            (item for item in bpy.context.window_manager.windows
-             if item.as_pointer() == pointer),
-            None,
-        )
-        if window:
-            area = next(iter(window.screen.areas), None)
-            region = next((item for item in area.regions if item.type == "WINDOW"), None) if area else None
-            if area and region:
-                try:
-                    with bpy.context.temp_override(window=window, area=area, region=region):
-                        bpy.ops.wm.window_close()
-                except RuntimeError:
-                    pass
-        return None
-
-    bpy.app.timers.register(close_window, first_interval=0.01)
-
-
-def _ik_editor_watchdog():
-    if not _IK_EDITOR_WINDOWS:
-        return None
-    live = {window.as_pointer() for window in bpy.context.window_manager.windows}
-    for uid, pointer in list(_IK_EDITOR_WINDOWS.items()):
-        if pointer in live:
-            continue
-        _IK_EDITOR_WINDOWS.pop(uid, None)
-        for scene in bpy.data.scenes:
-            settings = getattr(scene, "fbr_settings", None)
-            if settings is None:
-                continue
-            for file_index, source in enumerate(settings.files):
-                if source.uid != uid or not source.ik_editing:
-                    continue
-                try:
-                    bpy.ops.fbr.ik_settings(
-                        file_index=file_index,
-                        mapping_index=source.active_mapping_index,
-                        action="CANCEL",
-                    )
-                except RuntimeError:
-                    source.ik_editing = False
-                    _IK_EDIT_STATE.pop(uid, None)
-    return 0.2 if _IK_EDITOR_WINDOWS else None
-
-
-def _ik_editor_open(context, source_uid):
-    if ik_editor_window_for(source_uid):
-        return True
-    window = context.window
-    if window is None or bpy.app.background:
-        return False
-    area = next((item for item in window.screen.areas if item.type == "PROPERTIES"), None)
-    if area is None:
-        area = context.area
-    if area is None:
-        return False
-    region = next((item for item in area.regions if item.type == "WINDOW"), None)
-    if region is None:
-        return False
-    before = {item.as_pointer() for item in context.window_manager.windows}
-    try:
-        with context.temp_override(window=window, area=area, region=region):
-            result = bpy.ops.screen.area_dupli("INVOKE_DEFAULT")
-    except RuntimeError:
-        return False
-    if not ({"FINISHED", "RUNNING_MODAL"} & result):
-        return False
-    duplicate = next(
-        (item for item in context.window_manager.windows if item.as_pointer() not in before),
-        None,
-    )
-    if duplicate is None:
-        return False
-    duplicate_area = next(iter(duplicate.screen.areas), None)
-    if duplicate_area is None:
-        return False
-    if duplicate_area.type != "PROPERTIES":
-        duplicate_area.type = "PROPERTIES"
-    duplicate_area.spaces.active.context = "SCENE"
-    _IK_EDITOR_WINDOWS[source_uid] = duplicate.as_pointer()
-    if not bpy.app.timers.is_registered(_ik_editor_watchdog):
-        bpy.app.timers.register(_ik_editor_watchdog, first_interval=0.2)
-    return True
-
-
-def close_all_ik_editor_windows():
-    for uid in tuple(_IK_EDITOR_WINDOWS):
-        _ik_editor_close(uid)
-    if bpy.app.timers.is_registered(_ik_editor_watchdog):
-        bpy.app.timers.unregister(_ik_editor_watchdog)
+    active_pointer, original_mode, selected_pointers = state
+    objects = {obj.as_pointer(): obj for obj in context.view_layer.objects}
+    active = objects.get(active_pointer)
+    current = context.view_layer.objects.active
+    if current and current.mode != "OBJECT":
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except RuntimeError:
+            pass
+    for obj in context.selected_objects:
+        obj.select_set(False)
+    for pointer in selected_pointers:
+        selected = objects.get(pointer)
+        if selected:
+            selected.select_set(True)
+    context.view_layer.objects.active = active
+    if active and original_mode != "OBJECT":
+        try:
+            bpy.ops.object.mode_set(mode=original_mode)
+        except RuntimeError:
+            pass
 
 
 def _bone_color_state(bones):
@@ -2486,7 +2411,11 @@ class FBR_OT_preview_target_action(Operator):
             bpy.ops.screen.animation_cancel(restore_frame=False)
         _clear_target_pose(target)
         assign_action_and_slot(target, action)
-        context.scene.frame_set(int(math.floor(action.frame_range[0])))
+        first_frame = int(math.floor(action.frame_range[0]))
+        last_frame = max(first_frame, int(math.ceil(action.frame_range[1])))
+        context.scene.frame_start = first_frame
+        context.scene.frame_end = last_frame
+        context.scene.frame_set(first_frame)
         settings.target_preview_action = action.name
         if screen:
             try:
@@ -2494,6 +2423,33 @@ class FBR_OT_preview_target_action(Operator):
             except RuntimeError:
                 pass
         _tag_view3d_redraw(context)
+        return {"FINISHED"}
+
+
+class FBR_OT_set_ik_shape(Operator):
+    bl_idname = "fbr.set_ik_shape"
+    bl_label = "設定 IK 控制器樣式"
+    bl_options = {"INTERNAL", "UNDO"}
+
+    file_index: IntProperty()
+    mapping_index: IntProperty()
+    shape: EnumProperty(
+        items=(
+            ("BOX", "方盒線框", ""),
+            ("SPHERE", "球形", ""),
+            ("CIRCLE", "圓圈", ""),
+            ("SQUARE", "方形", ""),
+        )
+    )
+
+    def execute(self, context):
+        files = context.scene.fbr_settings.files
+        if not (0 <= self.file_index < len(files)):
+            return {"CANCELLED"}
+        mappings = files[self.file_index].mappings
+        if not (0 <= self.mapping_index < len(mappings)):
+            return {"CANCELLED"}
+        mappings[self.mapping_index].ik_shape = self.shape
         return {"FINISHED"}
 
 
@@ -2514,17 +2470,7 @@ class FBR_OT_ik_settings(Operator):
     )
 
     def invoke(self, context, _event):
-        if self.action != "START":
-            return self.execute(context)
-        result = self.execute(context)
-        if "FINISHED" in result:
-            source = context.scene.fbr_settings.files[self.file_index]
-            if not bpy.app.background and not _ik_editor_open(context, source.uid):
-                self.action = "CANCEL"
-                self.execute(context)
-                self.report({"ERROR"}, "無法開啟 IK 彈出視窗；請在有視窗的區域重試")
-                return {"CANCELLED"}
-        return result
+        return self.execute(context)
 
     def cancel(self, context):
         self.action = "CANCEL"
@@ -2585,6 +2531,7 @@ class FBR_OT_ik_settings(Operator):
         if pair_name == mapping.source_bone:
             pair = None
         if self.action == "START":
+            _remember_ik_selection(context, source.uid)
             for candidate in files:
                 _end_axis_preview(context, candidate)
                 candidate.axis_editing = False
@@ -2643,7 +2590,7 @@ class FBR_OT_ik_settings(Operator):
                 if item.ik_enabled:
                     _sync_ik_mapping(context, item)
             source.ik_editing = False
-            _ik_editor_close(source.uid)
+            _restore_ik_selection(context, source.uid)
         elif self.action == "OK":
             if mapping.ik_enabled:
                 _sync_ik_mapping(context, mapping)
@@ -2651,7 +2598,7 @@ class FBR_OT_ik_settings(Operator):
                 _sync_ik_mapping(context, pair)
             _IK_EDIT_STATE.pop(source.uid, None)
             source.ik_editing = False
-            _ik_editor_close(source.uid)
+            _restore_ik_selection(context, source.uid)
         _tag_view3d_redraw(context)
         return {"FINISHED"}
 
@@ -2688,7 +2635,7 @@ class FBR_OT_delete_ik(Operator):
                 _delete_ik_mapping(context, pair)
         _IK_EDIT_STATE.pop(source.uid, None)
         source.ik_editing = False
-        _ik_editor_close(source.uid)
+        _restore_ik_selection(context, source.uid)
         _tag_view3d_redraw(context)
         return {"FINISHED"}
 
@@ -3281,6 +3228,7 @@ CLASSES = (
     FBR_OT_clear_target_animation,
     FBR_OT_remove_target_action,
     FBR_OT_preview_target_action,
+    FBR_OT_set_ik_shape,
     FBR_OT_ik_settings,
     FBR_OT_delete_ik,
     FBR_OT_axis_correction,

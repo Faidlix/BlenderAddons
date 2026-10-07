@@ -528,6 +528,10 @@ def main():
         "INVOKE_DEFAULT",
         file_index=0, mapping_index=hand_index, action="START"
     ) == {"FINISHED"}
+    assert bpy.ops.fbr.set_ik_shape(
+        file_index=0, mapping_index=hand_index, shape="CIRCLE"
+    ) == {"FINISHED"}
+    assert hand_map.ik_shape == "CIRCLE"
     assert hand_map.ik_control_bone in target.data.bones
     assert hand_map.ik_pole_bone in target.data.bones
     pole_control = target.pose.bones[hand_map.ik_pole_bone]
@@ -577,6 +581,13 @@ def main():
         file_index=0, mapping_index=hand_index, action="RESET"
     ) == {"FINISHED"}
     assert hand_map.ik_control_bone == "" and hand_map.ik_pole_bone == ""
+    assert bpy.ops.fbr.ik_settings(
+        file_index=0, mapping_index=hand_index, action="CANCEL"
+    ) == {"FINISHED"}
+    bpy.ops.object.mode_set(mode="OBJECT")
+    target.select_set(False)
+    source.select_set(True)
+    bpy.context.view_layer.objects.active = source
 
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="START") == {"FINISHED"}
     assert bpy.context.view_layer.objects.active == target
@@ -610,12 +621,16 @@ def main():
     control_color = target.data.bones[control_name].color.custom.normal
     assert control_color[2] > control_color[1] > control_color[0]
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="OK") == {"FINISHED"}
+    assert bpy.context.view_layer.objects.active == source
+    assert source.mode == "OBJECT"
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="START") == {"FINISHED"}
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="RESET") == {"FINISHED"}
     assert not arm_map.ik_enabled and control_name not in target.data.bones
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=1, action="CANCEL") == {"FINISHED"}
     control_name = arm_map.ik_control_bone
     assert arm_map.ik_enabled and control_name in target.data.bones
+    assert bpy.context.view_layer.objects.active == source
+    assert source.mode == "OBJECT"
 
     unmapped_map = entry.mappings.add()
     unmapped_map.source_bone = "Unmapped"
@@ -629,6 +644,8 @@ def main():
         file_index=0, mapping_index=len(entry.mappings) - 1
     ) == {"FINISHED"}
     assert not entry.ik_editing and unmapped_control not in source.data.bones
+    assert bpy.context.view_layer.objects.active == source
+    assert source.mode == "OBJECT"
 
     root_map = entry.mappings[0]
     arm_map = entry.mappings[1]
@@ -651,6 +668,12 @@ def main():
     assert any(slot == target.animation_data.action_slot for slot in batch_output.slots)
     assert settings.retarget_completed_count == 2 and settings.retarget_total_count == 2
     assert set(_object_actions(target)) == {output, batch_output}
+    bpy.context.scene.frame_start = 0
+    bpy.context.scene.frame_end = 570
+    assert bpy.ops.fbr.preview_target_action(action_name=output.name) == {"FINISHED"}
+    assert bpy.context.scene.frame_start == int(output.frame_range[0])
+    assert bpy.context.scene.frame_end == int(output.frame_range[1])
+    assert bpy.context.scene.frame_current == bpy.context.scene.frame_start
     assert all(track.mute for track in target.animation_data.nla_tracks)
     assert bpy.data.objects.get("Source") == source
     assert bpy.data.objects.get("Target") == target

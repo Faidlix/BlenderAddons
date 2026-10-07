@@ -7,10 +7,10 @@ from .model import (
     rebuild_animation_rows,
     reuse_mapping_items,
 )
-from .operators import _mapping_axes_match, _object_actions, ik_editor_window_for
+from .operators import _mapping_axes_match, _object_actions
 
 
-ADDON_VERSION = (0, 6, 9)
+ADDON_VERSION = (0, 6, 10)
 
 
 def _source_file_index(settings, source_file):
@@ -401,8 +401,17 @@ def _draw_ik_settings(layout, file_index, source_file):
     editor = layout.box()
     editor.label(text=f"IK 設定：{active.source_bone} → {active.target_bone}", icon="CONSTRAINT_BONE")
     if active.ik_enabled:
-        shape = editor.row(align=True)
-        shape.prop(active, "ik_shape", text="", expand=True)
+        for choices in (("BOX", "SPHERE"), ("CIRCLE", "SQUARE")):
+            shape_row = editor.row(align=True)
+            for shape_id in choices:
+                label = {"BOX": "方盒線框", "SPHERE": "球形", "CIRCLE": "圓圈", "SQUARE": "方形"}[shape_id]
+                button = shape_row.operator(
+                    "fbr.set_ik_shape", text=label,
+                    depress=active.ik_shape == shape_id,
+                )
+                button.file_index = file_index
+                button.mapping_index = source_file.active_mapping_index
+                button.shape = shape_id
         dimensions = editor.row(align=True)
         dimensions.prop(active, "ik_shape_scale", text="大小")
         dimensions.prop(active, "ik_shape_wire_width", text="Width")
@@ -732,6 +741,8 @@ class FBR_PT_main(Panel):
                 "active_mapping_index",
                 rows=6,
             )
+            if source.ik_editing and 0 <= source.active_mapping_index < len(source.mappings):
+                _draw_ik_settings(group, file_index, source)
             if reused_sources:
                 reused_box = group.box()
                 reused_count = sum(len(candidate.clips) for candidate in reused_sources)
@@ -822,9 +833,20 @@ class FBR_PT_main(Panel):
         )
         if not target:
             summary.enabled = False
+        if settings.retarget_running:
+            layout.progress(
+                factor=settings.retarget_progress,
+                type="BAR",
+                text=f"背景處理：{settings.retarget_status} （Esc 取消）",
+            )
+        else:
+            run = layout.row()
+            run.scale_y = 1.3
+            run.enabled = bool(target and enabled and editing_index < 0)
+            run.operator("fbr.retarget", text="開始批次重定向", icon="PLAY")
         if target and settings.target_actions_expanded:
             actions = _object_actions(target)
-            action_list = check.box()
+            action_list = layout.box()
             header = action_list.row(align=True)
             remove_header = header.row(align=True)
             remove_header.ui_units_x = 1.25
@@ -863,47 +885,6 @@ class FBR_PT_main(Panel):
                 start, end = action.frame_range
                 fps = context.scene.render.fps / max(context.scene.render.fps_base, 1.0e-8)
                 action_row.label(text=f"{start:g}-{end:g}  ({(end-start)/fps:.1f} 秒)")
-        if settings.retarget_running:
-            layout.progress(
-                factor=settings.retarget_progress,
-                type="BAR",
-                text=f"背景處理：{settings.retarget_status} （Esc 取消）",
-            )
-        else:
-            run = layout.row()
-            run.scale_y = 1.3
-            run.enabled = bool(target and enabled and editing_index < 0)
-            run.operator("fbr.retarget", text="開始批次重定向", icon="PLAY")
-
-
-class FBR_PT_ik_window(Panel):
-    bl_idname = "FBR_PT_ik_window"
-    bl_label = "設定 IK"
-    bl_space_type = "PROPERTIES"
-    bl_region_type = "WINDOW"
-    bl_context = "scene"
-    bl_order = -1000
-
-    @classmethod
-    def poll(cls, context):
-        settings = getattr(context.scene, "fbr_settings", None)
-        window = context.window
-        if settings is None or window is None:
-            return False
-        return any(
-            source.ik_editing
-            and ik_editor_window_for(source.uid) == window
-            and 0 <= source.active_mapping_index < len(source.mappings)
-            for source in settings.files
-        )
-
-    def draw(self, context):
-        settings = context.scene.fbr_settings
-        window = context.window
-        for index, source in enumerate(settings.files):
-            if source.ik_editing and ik_editor_window_for(source.uid) == window:
-                _draw_ik_settings(self.layout, index, source)
-                break
 
 
 CLASSES = (
@@ -911,5 +892,4 @@ CLASSES = (
     FBR_UL_mappings,
     FBR_MT_reuse_mapping,
     FBR_PT_main,
-    FBR_PT_ik_window,
 )
