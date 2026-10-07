@@ -37,6 +37,7 @@
 - 已驗證：隔離 Blender 5.2 headless `FBR_HEADLESS_OK`；角色1003 + Run.fbx 等 5 段專案測試通過。Run 的 IK 與無 IK 基線在影格 1/5/10/15/20 比較，膝蓋最大誤差 0.00472、腳最大誤差 0.000021 Blender 單位（角色尺度約 1.16）。此為取樣驗證，不代表所有動畫與手部均已目視相同。
 - 版本、ZIP、README、索引改為 0.6.9；ZIP 48238 bytes，SHA-256 `806dc5d3afb468084dbd2b21af585b0401aa6dd59a3f88bf623daed00bcded25`。Blender metadata、headless／專案測試、README 連結檢查通過。發布提交 `66285725198b8c03c98adf19c05ec43a2c366438` 已推送並從 GitHub `main` 讀回；GitHub raw ZIP 大小與雜湊一致，在全新隔離 Blender 環境安裝、啟用並讀回 `(0, 6, 9)` 及新 operator 成功。
 - **正式使用者環境尚未安裝 0.6.9，也未完成前景目視驗證。** 2026-10-07 透過 Blender MCP 讀到目前前景開啟 `角色1005.blend`、`bpy.data.is_dirty=True`、1 個視窗；因此不得強制關閉或覆蓋執行中擴充。待使用者儲存並關閉 Blender 後，先備份正式 0.6.8 擴充，再以已驗證的 GitHub ZIP 安裝、讀回並開啟前景確認。
+- 已確認全外掛可用的獨立背景 MCP 方法：在隔離 Blender 資源目錄安裝 MCP 與 GitHub ZIP，以 `--background --online-mode --command blender_mcp --host 127.0.0.1 --port 9887` 啟動後，透過本機 MCP 回讀 `background=true`、Bone Remap `(0, 6, 9)`、`fbr.drag_column` 已註冊；已停止該測試程序。這只驗證背景連線與套件載入，未取代本外掛的前景 UI 驗收。
 - 仍待驗證／調整：浮動 IK 視窗與分隔線的實際滑鼠互動及窄側欄文字、手部和多動畫完整目視比較、不同前方軸與直肢／快速旋轉的 Pole 穩定性、播放目標清單的前景操作。Pole 校正目前以關節位置最小化；尚未做完整旋轉誤差／`pole_angle` 自動校準。不要把本機測試結果表述為正式發布品質。
 
 ## 原始待辦與後續驗收
