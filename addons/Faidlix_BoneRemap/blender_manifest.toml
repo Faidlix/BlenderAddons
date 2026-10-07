@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "faidlix_bone_remap"
-version = "0.6.11"
+version = "0.6.12"
 name = "Faidlix Bone Remap"
 tagline = "Batch import and retarget armature actions"
 maintainer = "Faidlix"

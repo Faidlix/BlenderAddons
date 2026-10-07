@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.dirname(ROOT))
 
 import Faidlix_BoneRemap as addon
 import Faidlix_BoneRemap.operators as operators_module
+import Faidlix_BoneRemap.ui as ui_module
+import Faidlix_BoneRemap.updater as updater_module
 from Faidlix_BoneRemap.model import (
     armature_signature,
     iter_action_fcurves,
@@ -130,6 +132,7 @@ def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     addon.register()
     version_text = ".".join(str(part) for part in addon.bl_info["version"])
+    assert addon.bl_info["version"] == ui_module.ADDON_VERSION == updater_module.ADDON_VERSION
     assert bpy.types.FBR_PT_main.bl_label == "Faidlix_Retarget Motion"
     assert hasattr(bpy.types.FBR_PT_main, "draw_header_preset")
     timing_scene = SimpleNamespace(render=SimpleNamespace(fps=30, fps_base=1.0))

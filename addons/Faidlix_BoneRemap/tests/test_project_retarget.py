@@ -228,6 +228,17 @@ def main():
         assert constraint.subtarget == mapping.ik_control_bone
         assert constraint.pole_subtarget == mapping.ik_pole_bone
         assert constraint.chain_count == 2 and constraint.iterations == 500
+        # The calibrated angle must place the knee nearer its own FK rest
+        # direction than the opposite (180-degree flipped) pole angle.
+        original_angle = constraint.pole_angle
+        desired_joint = target.data.bones[solver.name].head_local.copy()
+        original_error = (solver.head - desired_joint).length
+        constraint.pole_angle = original_angle + math.pi
+        bpy.context.view_layer.update()
+        flipped_error = (solver.head - desired_joint).length
+        constraint.pole_angle = original_angle
+        bpy.context.view_layer.update()
+        assert original_error < flipped_error, (original_error, flipped_error)
         ik_controls.append(
             {
                 "name": mapping.ik_control_bone,
@@ -237,6 +248,41 @@ def main():
                 "target": mapping.target_bone,
             }
         )
+
+    hand_source = settings.files[0]
+    left_hand_index = next(
+        index for index, item in enumerate(hand_source.mappings)
+        if item.target_bone == "Left_Hand"
+    )
+    assert bpy.ops.fbr.ik_settings(
+        file_index=0, mapping_index=left_hand_index, action="START"
+    ) == {"FINISHED"}
+    assert bpy.ops.fbr.ik_settings(
+        file_index=0, mapping_index=left_hand_index, action="OK"
+    ) == {"FINISHED"}
+    for hand_name in ("Left_Hand", "Right_Hand"):
+        hand_mapping = next(
+            item for item in hand_source.mappings if item.target_bone == hand_name
+        )
+        hand_solver = target.pose.bones[hand_name].parent
+        hand_constraint = next(
+            item for item in hand_solver.constraints
+            if item.type == "IK" and item.name.startswith("FBR IK")
+        )
+        expected_elbow = target.data.bones[hand_solver.name].head_local.copy()
+        calibrated_angle = hand_constraint.pole_angle
+        calibrated_error = (hand_solver.head - expected_elbow).length
+        hand_constraint.pole_angle = calibrated_angle + math.pi
+        bpy.context.view_layer.update()
+        flipped_error = (hand_solver.head - expected_elbow).length
+        hand_constraint.pole_angle = calibrated_angle
+        bpy.context.view_layer.update()
+        print("IK_HAND_POLE", hand_name, calibrated_angle,
+              calibrated_error, flipped_error)
+        assert calibrated_error < flipped_error, hand_name
+    assert bpy.ops.fbr.ik_settings(
+        file_index=0, mapping_index=left_hand_index, action="RESET"
+    ) == {"FINISHED"}
 
     run_index = next(
         index for index, item in enumerate(settings.files)

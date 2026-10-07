@@ -580,6 +580,88 @@ def _ik_constraint(pose_bone):
     )
 
 
+def _calibrate_ik_pole_angle(context, owner_obj, endpoint_name, mapping, constraint):
+    """Fit this chain's pole angle to its own FK rest bend, not its side name."""
+    if (not constraint.pole_target or not mapping.ik_pole_bone
+            or abs(mapping.ik_pole_length) < 0.02):
+        return
+    endpoint = owner_obj.data.bones.get(endpoint_name)
+    lower = endpoint.parent if endpoint else None
+    upper = lower.parent if lower else None
+    if not upper:
+        return
+    axis = lower.tail_local - upper.head_local
+    if axis.length_squared < 1.0e-10:
+        return
+    bend = lower.head_local - upper.head_local
+    bend -= axis * bend.dot(axis) / axis.length_squared
+    if bend.length_squared < axis.length_squared * 1.0e-8:
+        # A straight rest chain gives no reliable left/right bend reference.
+        return
+    control = owner_obj.pose.bones.get(mapping.ik_control_bone)
+    pole = owner_obj.pose.bones.get(mapping.ik_pole_bone)
+    owner = owner_obj.pose.bones.get(lower.name)
+    if not control or not pole or not owner:
+        return
+    pole_position = _ik_rest_pole_position(
+        owner_obj, endpoint_name, mapping.ik_pole_length,
+        _ik_forward_axis(context, mapping, owner_obj),
+    )
+    if pole_position is None:
+        return
+    saved_basis = {bone.name: bone.matrix_basis.copy() for bone in owner_obj.pose.bones}
+    saved_mutes = [
+        (item, item.mute)
+        for bone in owner_obj.pose.bones for item in bone.constraints
+        if item.type == "IK" and item.name.startswith(IK_CONSTRAINT_NAME)
+    ]
+    old_angle = constraint.pole_angle
+    chosen_angle = old_angle
+    try:
+        for item, _muted in saved_mutes:
+            item.mute = item != constraint
+        identity = Matrix.Identity(4)
+        for bone in owner_obj.pose.bones:
+            bone.matrix_basis = identity
+        control.matrix = endpoint.matrix_local.copy()
+        pole_matrix = pole.bone.matrix_local.copy()
+        pole_matrix.translation = pole_position
+        pole.matrix = pole_matrix
+        context.view_layer.update()
+        desired_joint = lower.head_local.copy()
+        best_angle = old_angle
+        best_error = float("inf")
+        worst_error = 0.0
+        for index in range(24):
+            angle = -math.pi + index * math.pi / 12
+            constraint.pole_angle = angle
+            context.view_layer.update()
+            error = (owner.head - desired_joint).length
+            if not math.isfinite(error):
+                continue
+            worst_error = max(worst_error, error)
+            if error < best_error:
+                best_error, best_angle = error, angle
+        if worst_error - best_error <= max(owner.length * 1.0e-5, 1.0e-7):
+            return
+        for step in (math.pi / 48, math.pi / 192):
+            for offset in range(-4, 5):
+                angle = best_angle + offset * step
+                constraint.pole_angle = angle
+                context.view_layer.update()
+                error = (owner.head - desired_joint).length
+                if error < best_error:
+                    best_error, best_angle = error, angle
+        chosen_angle = (best_angle + math.pi) % (2 * math.pi) - math.pi
+    finally:
+        constraint.pole_angle = chosen_angle
+        for item, muted in saved_mutes:
+            item.mute = muted
+        for bone in owner_obj.pose.bones:
+            bone.matrix_basis = saved_basis[bone.name]
+        context.view_layer.update()
+
+
 def _remove_generated_pole_keys(owner_obj, pole_name):
     """Discard keys for a deleted generated control, never touch source Actions."""
     data_path = f'pose.bones["{pole_name}"]'
@@ -687,6 +769,8 @@ def _sync_ik_mapping(context, mapping):
     constraint.use_tail = mapping.ik_use_tail
     constraint.use_rotation = mapping.ik_use_rotation
     constraint.use_stretch = mapping.ik_use_stretch
+    if pole_required:
+        _calibrate_ik_pole_angle(context, owner_obj, endpoint_name, mapping, constraint)
     controls = [
         owner_obj.pose.bones.get(name)
         for name in (mapping.ik_control_bone, mapping.ik_pole_bone)
