@@ -10,6 +10,7 @@
 - 版本欄位已升到 0.6.13；GitHub 發布與正式安裝結果以本節後續紀錄為準，不得由此條視為已完成。
 - 候選 ZIP `repository/faidlix_bone_remap-0.6.13.zip` 為 50758 bytes、SHA-256 `831a2744e6eb00e276d83c4e8128ad14a01a1ef6521a4490e3a580281e53edc4`，Blender extension metadata validate 通過，索引已對應。隔離背景 MCP 從候選 ZIP 安裝版讀回 `(0, 6, 13)`，驗證左右 Foot/Toes 控制骨 `.L/.R`、Pole 對稱、Toes IK 控制骨為 Foot IK 子骨；MCP 程序已停止。
 - 正式 Blender 安裝狀態：檢查時仍有使用者 Blender 程序執行中（PID 24064）；為避免熱替換，**本次尚未正式安裝，也未完成前景拖動目視驗收**。需待使用者儲存並關閉 Blender 後，再備份正式 0.6.12、由 GitHub ZIP 安裝與讀回；不可把隔離 MCP 測試當成正式安裝。
+- 發布提交 `91262326b2739624bd9f32cfff88f259034c781b` 已推送並以 `git ls-remote` 確認 GitHub `main`。從該提交的 GitHub raw 下載 ZIP 與本機皆為 50758 bytes，SHA-256 相同；全新隔離 Blender 5.2.2 從該 ZIP 安裝、啟用，讀回 UI／updater `(0, 6, 13)` 與場景屬性成功。正式安裝仍受前景 Blender 執行中阻擋。
 
 ## 問題與版本事實
 
