@@ -56,7 +56,8 @@
 - 批次重定向每完成一段就附掛到目標骨架與動畫清單；正在計算的工作 Action 標記為暫存，不顯示為完成片段。Esc 或錯誤僅丟棄當前未完成的 Action，保留已完整片段與 `(完成/總數)`；再次執行以批次計畫簽章及 Action metadata 辨識已完成片段並跳過，未完成單段從頭重算。
 - 合併長 Action 使用每段完成後的附掛 checkpoint：計算下一段時用副本工作，Esc 留下上一個完整 checkpoint；重啟從該段後接續，成功時用新 checkpoint 取代舊版。手動刪除目標 Action 後完成數從實際掛載重新計算。`model.py` 新增持久化的計畫簽章；清除所有目標動畫會重設它。
 - 隔離 Blender 5.2 headless `FBR_HEADLESS_OK` 已通過，涵蓋兩種輸出模式的中途錯誤保留／續算、模擬 modal Esc、完成後重按不重複輸出、刪除後計數及播放順序；角色1003五段 `FBR_PROJECT_RETARGET` 通過。**前景滑鼠操作、正式安裝與目視仍待驗證。**
-- 隔離背景 Blender MCP 讀回安裝版 `(0, 6, 11)`，驗證播放前後清單順序均為 `FBR MCP First`、`FBR MCP Second`，且續算簽章屬性存在。發行包 `repository/faidlix_bone_remap-0.6.11.zip` 已建置，48893 bytes，SHA-256 `755e15744f3dfeba33bf832f585173c27c5976fdddb6b0442f6d2bb6651f2a15`；extension metadata validate 與 README 下載連結檢查通過。後續仍須 GitHub 推送／回讀及隔離 GitHub 安裝。
+- 隔離背景 Blender MCP 讀回安裝版 `(0, 6, 11)`，驗證播放前後清單順序均為 `FBR MCP First`、`FBR MCP Second`，且續算簽章屬性存在。發行包 `repository/faidlix_bone_remap-0.6.11.zip` 已建置，48893 bytes，SHA-256 `755e15744f3dfeba33bf832f585173c27c5976fdddb6b0442f6d2bb6651f2a15`；extension metadata validate 與 README 下載連結檢查通過。
+- 發行提交 `7ce98fb0e7031c1f292e2b79be734f683eea0bfb` 已推送並從 GitHub `main` 讀回；GitHub raw 0.6.11 ZIP 為 48893 bytes，SHA-256 與本機完全相同。全新隔離 Blender 5.2.2 從該 ZIP 安裝、啟用並讀回 `(0, 6, 11)` 與 `fbr.retarget`。正式前景仍為未儲存的 `角色1005.blend`，正式安裝／滑鼠目視驗收待安全條件滿足後進行。
 
 ## 原始待辦與後續驗收
 
