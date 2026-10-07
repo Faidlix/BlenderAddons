@@ -35,7 +35,8 @@
 - 已完成：輸出摘要列移入「刪除所有動畫」，加入 `(已處理/總數)` 與摺疊清單；清單從 Target 實際掛載的 Action／NLA 讀取，逐項可預覽及從 Target 移除。非本批次 Action 顯示灰字，移除不刪共用 Action 資料塊。
 - 已完成：Pole 烘焙逐幀使用來源及 Target FK 彎曲平面求初值，對目標肘／膝位置做角度搜尋校正；修正左右肢體迴圈共用最後一根骨頭的錯誤。IK Action 不再作逐通道 Key 精簡，避免中間影格膝蓋偏移；切換目標動畫預覽前清空殘留 Pose。
 - 已驗證：隔離 Blender 5.2 headless `FBR_HEADLESS_OK`；角色1003 + Run.fbx 等 5 段專案測試通過。Run 的 IK 與無 IK 基線在影格 1/5/10/15/20 比較，膝蓋最大誤差 0.00472、腳最大誤差 0.000021 Blender 單位（角色尺度約 1.16）。此為取樣驗證，不代表所有動畫與手部均已目視相同。
-- 本機版本、ZIP、README、索引改為 0.6.9；ZIP 48238 bytes，SHA-256 `806dc5d3afb468084dbd2b21af585b0401aa6dd59a3f88bf623daed00bcded25`。Blender metadata 驗證、重建後隔離重裝與模組 `(0, 6, 9)`／新 operator 讀回、`retarget.py` 與原始碼雜湊比對、README 下載連結檢查均通過。**尚未推送 GitHub，尚未正式安裝／前景目視驗證。**
+- 版本、ZIP、README、索引改為 0.6.9；ZIP 48238 bytes，SHA-256 `806dc5d3afb468084dbd2b21af585b0401aa6dd59a3f88bf623daed00bcded25`。Blender metadata、headless／專案測試、README 連結檢查通過。發布提交 `66285725198b8c03c98adf19c05ec43a2c366438` 已推送並從 GitHub `main` 讀回；GitHub raw ZIP 大小與雜湊一致，在全新隔離 Blender 環境安裝、啟用並讀回 `(0, 6, 9)` 及新 operator 成功。
+- **正式使用者環境尚未安裝 0.6.9，也未完成前景目視驗證。** 2026-10-07 透過 Blender MCP 讀到目前前景開啟 `角色1005.blend`、`bpy.data.is_dirty=True`、1 個視窗；因此不得強制關閉或覆蓋執行中擴充。待使用者儲存並關閉 Blender 後，先備份正式 0.6.8 擴充，再以已驗證的 GitHub ZIP 安裝、讀回並開啟前景確認。
 - 仍待驗證／調整：浮動 IK 視窗與分隔線的實際滑鼠互動及窄側欄文字、手部和多動畫完整目視比較、不同前方軸與直肢／快速旋轉的 Pole 穩定性、播放目標清單的前景操作。Pole 校正目前以關節位置最小化；尚未做完整旋轉誤差／`pole_angle` 自動校準。不要把本機測試結果表述為正式發布品質。
 
 ## 原始待辦與後續驗收
