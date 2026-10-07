@@ -14,7 +14,7 @@ sys.path.insert(0, str(ADDON_ROOT.parent))
 
 import Faidlix_BoneRemap as addon
 from Faidlix_BoneRemap.model import iter_action_fcurves
-from Faidlix_BoneRemap.retarget import assign_action_and_slot, mapping_source
+from Faidlix_BoneRemap.retarget import _clear_target_pose, assign_action_and_slot, bake_clip, mapping_source
 from Faidlix_BoneRemap.operators import _character_basis
 
 
@@ -218,7 +218,7 @@ def main():
         assert control and not control.use_deform
         assert pole and not pole.use_deform and pole.get("_fbr_ik_pole")
         lower = target.data.bones[mapping.target_bone].parent
-        assert (pole.head_local - lower.head_local).length <= lower.length * 0.6 + 1.0e-4
+        assert (pole.head_local - lower.head_local).length <= lower.length * 1.1 + 1.0e-4
         solver = target.pose.bones[mapping.target_bone].parent
         constraint = next(
             item
@@ -367,6 +367,58 @@ def main():
 
     print("FBR_PROJECT_RETARGET=" + json.dumps(report, ensure_ascii=False, sort_keys=True))
     assert not static_failures, f"輸出被烘焙成靜止姿勢：{static_failures}"
+
+    # Compare the IK result with the same Run clip baked without IK. The
+    # control following the foot alone does not prove the knee was preserved.
+    run_mapping_owner = mapping_source(settings, run_source)
+    run_mapping = run_mapping_owner.mappings[_foot_mapping_index(run_mapping_owner)]
+    run_output = next(action for action in outputs if action.name == "Run_Run")
+    baseline = bpy.data.actions.new("FBR_Test_Run_NoIK")
+    solver = target.pose.bones[run_mapping.target_bone].parent
+    constraint = next(
+        item for item in solver.constraints
+        if item.type == "IK" and item.name.startswith("FBR IK")
+    )
+    run_mapping.ik_enabled = False
+    constraint.mute = True
+    try:
+        bake_clip(
+            bpy.context, settings, run_source, run_source.clips[0],
+            target, baseline, 1,
+        )
+    finally:
+        run_mapping.ik_enabled = True
+        constraint.mute = False
+    samples = {}
+    for label, action, muted in (
+        ("no_ik", baseline, True), ("ik", run_output, False),
+    ):
+        _clear_target_pose(target)
+        constraint.mute = muted
+        assign_action_and_slot(target, action)
+        samples[label] = []
+        for frame in (1, 5, 10, 15, 20):
+            bpy.context.scene.frame_set(frame)
+            bpy.context.view_layer.update()
+            lower = target.pose.bones[run_mapping.target_bone].parent
+            foot = target.pose.bones[run_mapping.target_bone]
+            samples[label].append((lower.head.copy(), foot.head.copy()))
+    constraint.mute = False
+    joint_errors = [
+        (ik[0] - fk[0]).length
+        for fk, ik in zip(samples["no_ik"], samples["ik"])
+    ]
+    foot_errors = [
+        (ik[1] - fk[1]).length
+        for fk, ik in zip(samples["no_ik"], samples["ik"])
+    ]
+    print("FBR_IK_FK_FRAMES", [
+        (round(joint, 5), round(foot, 5))
+        for joint, foot in zip(joint_errors, foot_errors)
+    ])
+    print("FBR_IK_FK_COMPARISON", max(joint_errors), max(foot_errors), target_height)
+    assert max(joint_errors) < target_height * 0.02
+    assert max(foot_errors) < target_height * 0.01
 
 
 if __name__ == "__main__":

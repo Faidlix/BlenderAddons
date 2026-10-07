@@ -304,7 +304,7 @@ class FBR_BoneMap(PropertyGroup):
     ik_chain_count: IntProperty(
         name="關聯骨頭數",
         default=2,
-        min=0,
+        min=1,
         max=255,
         update=update_ik_settings,
     )
@@ -325,7 +325,7 @@ class FBR_BoneMap(PropertyGroup):
     ik_use_tail: BoolProperty(name="使用骨尾", default=True, update=update_ik_settings)
     ik_use_pole: BoolProperty(name="使用 Pole", default=True, update=update_ik_settings)
     ik_pole_length: FloatProperty(
-        name="調整長度", default=0.5, min=0.01, max=10.0,
+        name="調整長度", default=1.0, min=-10.0, max=10.0,
         update=update_ik_pole_length,
     )
     ik_pole_size_ratio: FloatProperty(
@@ -538,6 +538,9 @@ class FBR_Settings(PropertyGroup):
     animation_options_factor: FloatProperty(
         name="原地動畫寬度", default=0.5, min=0.2, max=0.8,
     )
+    animation_mirror_fraction: FloatProperty(
+        name="對稱動畫欄寬", default=0.16, min=0.10, max=0.30,
+    )
     animation_child_name_factor: FloatProperty(
         name="子動畫名稱寬度",
         default=0.62,
@@ -551,11 +554,19 @@ class FBR_Settings(PropertyGroup):
         max=0.42,
     )
     mapping_target_factor: FloatProperty(
-        name="Target／IK 寬度",
+        name="Target 骨骼右界",
         default=0.58,
         min=0.38,
         max=0.76,
     )
+    mapping_axis_factor: FloatProperty(
+        name="IK 設定右界", default=0.70, min=0.55, max=0.88,
+    )
+    target_actions_expanded: BoolProperty(default=False)
+    retarget_completed_count: IntProperty(default=0, min=0)
+    retarget_total_count: IntProperty(default=0, min=0)
+    retarget_batch_id: StringProperty(default="")
+    target_preview_action: StringProperty(default="", options={"SKIP_SAVE"})
     output_mode: EnumProperty(
         name="輸出",
         items=(

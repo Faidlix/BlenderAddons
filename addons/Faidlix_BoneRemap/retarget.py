@@ -212,12 +212,11 @@ def _ik_chain_names(target_obj, mapping):
     # The endpoint is driven by the IK control as well.  Keeping its FK keys
     # would make the final pose a mixture of two competing animations.
     result = {endpoint.name} if endpoint else set()
-    remaining = mapping.ik_chain_count
-    while bone and (remaining > 0 or mapping.ik_chain_count == 0):
+    remaining = max(1, int(mapping.ik_chain_count))
+    while bone and remaining > 0:
         result.add(bone.name)
         bone = bone.parent
-        if mapping.ik_chain_count:
-            remaining -= 1
+        remaining -= 1
     return result
 
 
@@ -228,20 +227,111 @@ def _ik_solver_pose_bone(target_obj, mapping):
     return endpoint
 
 
-def _ik_pole_position(solver, distance_factor=0.5):
+def _ik_bend_direction(upper_head, joint, tip):
+    axis = tip - upper_head
+    if axis.length_squared < 1.0e-10:
+        return None
+    bend = joint - upper_head
+    bend -= axis * bend.dot(axis) / axis.length_squared
+    if bend.length_squared < axis.length_squared * 1.0e-8:
+        return None
+    return bend.normalized()
+
+
+def _source_ik_bend_direction(evaluated_source, target_obj, source_name):
+    endpoint = evaluated_source.pose.bones.get(source_name)
+    lower = endpoint.parent if endpoint else None
+    upper = lower.parent if lower else None
+    if not upper:
+        return None
+    source_direction = _ik_bend_direction(upper.head, lower.head, lower.tail)
+    if source_direction is None:
+        return None
+    source_world = evaluated_source.matrix_world.to_3x3() @ source_direction
+    target_local = target_obj.matrix_world.inverted_safe().to_3x3() @ source_world
+    return target_local.normalized() if target_local.length_squared > 1.0e-10 else None
+
+
+def _ik_pole_position(solver, distance_factor=1.0, source_direction=None,
+                      previous=None, forward_direction=None):
     upper = solver.parent if solver else None
     if not solver or not upper:
-        return None
-    midpoint = (upper.head + solver.tail) * 0.5
-    bend = solver.head - midpoint
-    if bend.length_squared < 1.0e-10:
-        limb = solver.tail - upper.head
-        bend = limb.cross(Vector((0.0, 0.0, 1.0)))
-        if bend.length_squared < 1.0e-10:
-            bend = limb.cross(Vector((0.0, 1.0, 0.0)))
-    # Keep the pole near the elbow/knee, not a full limb length away.
-    distance = max(solver.length * distance_factor, 0.01)
-    return solver.head + bend.normalized() * distance
+        return None, None
+    direction = _ik_bend_direction(upper.head, solver.head, solver.tail)
+    axis = solver.tail - upper.head
+    forward = None
+    if forward_direction is not None and axis.length_squared > 1.0e-10:
+        forward = forward_direction - axis * forward_direction.dot(axis) / axis.length_squared
+        if forward.length_squared > 1.0e-10:
+            forward.normalize()
+            if distance_factor < 0:
+                forward.negate()
+        else:
+            forward = None
+    if source_direction is not None and axis.length_squared > 1.0e-10:
+        source_plane = source_direction - axis * source_direction.dot(axis) / axis.length_squared
+        if source_plane.length_squared > 1.0e-10:
+            direction = source_plane.normalized()
+    if forward is not None and direction is not None and direction.dot(forward) < 0:
+        # A signed length selects the front/back hemisphere. Source motion
+        # still steers the pole within that hemisphere.
+        direction.negate()
+    if direction is None and forward is not None:
+        direction = forward.copy()
+    if direction is None and previous is not None:
+        direction = previous.copy()
+    if direction is None:
+        direction = axis.cross(Vector((0.0, 0.0, 1.0)))
+        if direction.length_squared < 1.0e-10:
+            direction = axis.cross(Vector((0.0, 1.0, 0.0)))
+        direction.normalize()
+    if previous is not None and direction.dot(previous) < -0.7:
+        # A fully straight frame has no reliable bend plane. Preserve the
+        # previous pole hemisphere instead of causing a one-frame IK flip.
+        if _ik_bend_direction(upper.head, solver.head, solver.tail) is None:
+            direction = previous.copy()
+    # Zero is the joint in the UI; a tiny solver offset avoids a degenerate
+    # pole vector while evaluating the IK constraint.
+    distance = solver.length * max(abs(distance_factor), 0.02)
+    return solver.head + direction * distance, direction
+
+
+def _refine_pole_position(context, owner, desired_joint, upper_head,
+                          tip, pole, initial_position):
+    axis = tip - upper_head
+    if axis.length_squared < 1.0e-10:
+        return initial_position
+    axis.normalize()
+    tolerance = max(owner.length * 0.02, 1.0e-5)
+    best_position = initial_position
+    best_error = float("inf")
+    pole_rest = pole.bone.matrix_local.copy()
+    base_vector = initial_position - upper_head
+    best_angle = 0.0
+    for angles in (
+        (index * math.pi / 6 for index in range(12)),
+        (best_angle + index * math.pi / 36 for index in range(-5, 6)),
+    ):
+        for angle in angles:
+            position = upper_head + Quaternion(axis, angle) @ base_vector
+            pole_matrix = pole_rest.copy()
+            pole_matrix.translation = position
+            pole.matrix = pole_matrix
+            context.view_layer.update()
+            error = (owner.head - desired_joint).length
+            if error < best_error:
+                best_error = error
+                best_position = position.copy()
+                best_angle = angle
+            if error <= tolerance:
+                break
+        if best_error <= tolerance:
+            break
+    pole_matrix = pole_rest.copy()
+    pole_matrix.translation = best_position
+    pole.matrix = pole_matrix
+    context.view_layer.update()
+    return best_position
 
 
 def _set_scene_frame(scene, frame):
@@ -300,7 +390,7 @@ def iter_bake_clip(
     frames = _frame_sequence(source_action, settings.key_mode)
 
     root_baselines = {}
-    root_vertical_baselines = {}
+    previous_pole_directions = {}
     root_target_names = {
         mapping.target_bone for mapping in mappings if mapping.is_root
     }
@@ -336,7 +426,7 @@ def iter_bake_clip(
                 constraint.subtarget = mapping.ik_control_bone
                 constraint.pole_target = target_obj if pole else None
                 constraint.pole_subtarget = mapping.ik_pole_bone if pole else ""
-                constraint.chain_count = mapping.ik_chain_count
+                constraint.chain_count = max(1, mapping.ik_chain_count)
                 constraint.iterations = mapping.ik_iterations
                 constraint.influence = mapping.ik_influence
                 constraint.use_tail = mapping.ik_use_tail
@@ -356,8 +446,7 @@ def iter_bake_clip(
             _clear_target_pose(target_obj)
             context.view_layer.update()
 
-            # Foot/hand IK may walk all the way up the hierarchy when its
-            # chain count is zero or large.  Root motion must never become an
+            # A large foot/hand IK chain can reach the root. Root motion must never become an
             # IK-owned channel: it is authored by the mapped Root bone and
             # remains stable while the limb solver adjusts only the chain.
             ik_chain_names.difference_update(root_target_names)
@@ -423,12 +512,6 @@ def iter_bake_clip(
                         baseline = root_baselines.setdefault(mapping.target_bone, location.copy())
                         location.x -= baseline.x
                         location.y -= baseline.y
-                    if ik_mappings and mapping.is_root:
-                        vertical = root_vertical_baselines.setdefault(
-                            mapping.target_bone,
-                            location.z,
-                        )
-                        location.z = vertical
                     if settings.extract_root_motion and mapping.is_root:
                         trajectory = target_obj.pose.bones.get("c_traj")
                         if trajectory and trajectory.name != target_pose.name:
@@ -449,14 +532,36 @@ def iter_bake_clip(
                         )
 
             context.view_layer.update()
-            desired_ik_transforms = {
-                mapping.as_pointer(): (
-                    endpoint.matrix.copy(),
-                    _ik_pole_position(owner, mapping.ik_pole_length)
-                    if mapping.ik_use_pole else None,
+            desired_ik_transforms = {}
+            for mapping, endpoint, owner, _control, _pole, _constraint in ik_mappings:
+                pole_position = None
+                desired_joint = owner.head.copy()
+                upper_head = owner.parent.head.copy() if owner.parent else owner.head.copy()
+                tip = owner.tail.copy()
+                if mapping.ik_use_pole:
+                    source_name = mapping.source_bone
+                    if mirrored:
+                        counterpart = flip_bone_name(source_name)
+                        if counterpart in evaluated_source.pose.bones:
+                            source_name = counterpart
+                    source_bend = _source_ik_bend_direction(
+                        evaluated_source, target_obj, source_name
+                    )
+                    from .operators import _character_basis
+                    forward = _character_basis(
+                        target_obj, source_file.target_forward_axis
+                    ) @ Vector((0.0, -1.0, 0.0))
+                    pole_position, direction = _ik_pole_position(
+                        owner, mapping.ik_pole_length, source_bend,
+                        previous_pole_directions.get(mapping.as_pointer()),
+                        forward,
+                    )
+                    if direction is not None:
+                        previous_pole_directions[mapping.as_pointer()] = direction
+                desired_ik_transforms[mapping.as_pointer()] = (
+                    endpoint.matrix.copy(), pole_position,
+                    desired_joint, upper_head, tip,
                 )
-                for mapping, endpoint, owner, _control, _pole, _constraint in ik_mappings
-            }
             for bone_name in ik_chain_names:
                 pose_bone = target_obj.pose.bones.get(bone_name)
                 if pose_bone:
@@ -467,10 +572,12 @@ def iter_bake_clip(
             for constraint, was_muted in muted_constraints:
                 constraint.mute = was_muted
             context.view_layer.update()
-            for mapping, _endpoint, _owner, control, pole, constraint in ik_mappings:
+            for mapping, _endpoint, owner, control, pole, constraint in ik_mappings:
                 if constraint.mute:
                     continue
-                desired_matrix, pole_position = desired_ik_transforms[mapping.as_pointer()]
+                desired_matrix, pole_position, desired_joint, upper_head, tip = (
+                    desired_ik_transforms[mapping.as_pointer()]
+                )
                 # ARP-style endpoint solving: bake the complete endpoint
                 # transform to a separate control, while the IK constraint
                 # lives on the lower limb.  This keeps the hand/foot at the
@@ -486,10 +593,10 @@ def iter_bake_clip(
                         group=control.name,
                     )
                 if pole and pole_position is not None:
-                    pole_matrix = pole.bone.matrix_local.copy()
-                    pole_matrix.translation = pole_position
-                    pole.matrix = pole_matrix
-                    context.view_layer.update()
+                    _refine_pole_position(
+                        context, owner, desired_joint,
+                        upper_head, tip, pole, pole_position,
+                    )
                     pole.keyframe_insert(
                         data_path="location",
                         frame=target_frame,
@@ -554,6 +661,11 @@ def _rdp_indices(points, tolerance):
 
 
 def simplify_action(action, rotation_tolerance, location_tolerance):
+    if any('pose.bones["FBR_IK_' in curve.data_path
+           for curve in iter_action_fcurves(action)):
+        # Channel-by-channel simplification changes the parent/pole/control
+        # combination and is not pose-equivalent for an IK solve.
+        return 0
     removed = 0
     for curve in list(iter_action_fcurves(action)):
         points = list(curve.keyframe_points)

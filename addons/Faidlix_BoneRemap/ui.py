@@ -7,10 +7,10 @@ from .model import (
     rebuild_animation_rows,
     reuse_mapping_items,
 )
-from .operators import _mapping_axes_match, ik_editor_window_for
+from .operators import _mapping_axes_match, _object_actions, ik_editor_window_for
 
 
-ADDON_VERSION = (0, 6, 8)
+ADDON_VERSION = (0, 6, 9)
 
 
 def _source_file_index(settings, source_file):
@@ -71,7 +71,10 @@ def _animation_row_columns(row, settings):
     name_and_timing = information.split(factor=settings.animation_action_factor)
     name = name_and_timing.row(align=True)
     timing = name_and_timing.row(align=True)
-    options = content.split(factor=settings.animation_options_factor)
+    options_fraction = 1.0 - settings.animation_mirror_fraction / max(
+        1.0 - settings.animation_info_factor, 0.01
+    )
+    options = content.split(factor=max(0.1, min(0.9, options_fraction)))
     inplace = options.row(align=True)
     mirror = options.row(align=True)
     return remove, enabled, name, timing, inplace, mirror
@@ -84,9 +87,28 @@ def _remove_file_button(layout, file_index):
 
 def _drag_handle(layout, settings, property_name):
     handle = layout.row(align=True)
-    handle.ui_units_x = 0.25
-    handle.prop(settings, property_name, text="│", emboss=True)
+    handle.ui_units_x = 0.65
+    drag = handle.operator("fbr.drag_column", text="│", emboss=True)
+    drag.property_name = property_name
     return handle
+
+
+def _mapping_row_columns(row, settings):
+    source_end = settings.mapping_source_factor
+    target_end = max(source_end + 0.1, settings.mapping_target_factor)
+    axis_start = max(target_end + 0.08, settings.mapping_axis_factor)
+    source_and_rest = row.split(factor=source_end)
+    source = source_and_rest.row(align=True)
+    target_and_rest = source_and_rest.split(
+        factor=(target_end - source_end) / (1.0 - source_end)
+    )
+    target = target_and_rest.row(align=True)
+    ik_and_axis = target_and_rest.split(
+        factor=(axis_start - target_end) / (1.0 - target_end)
+    )
+    ik = ik_and_axis.row(align=True)
+    axis = ik_and_axis.row(align=True)
+    return source, target, ik, axis
 
 
 def _draw_forward_axis_buttons(layout, source, file_index, role):
@@ -117,7 +139,7 @@ def _draw_animation_header(layout, settings):
     timing.label(text="時間")
     _drag_handle(timing, settings, "animation_info_factor")
     inplace.label(text="設為原地動畫")
-    _drag_handle(inplace, settings, "animation_options_factor")
+    _drag_handle(inplace, settings, "animation_mirror_fraction")
     mirror.label(text="複製對稱動畫")
 
 
@@ -166,17 +188,23 @@ def _draw_clip_row(context, layout, source, file_index, clip, clip_index, show_f
     time_parts.label(text=frame_text)
     time_parts.label(text=seconds_text)
 
-    inplace = inplace_cell.operator(
+    inplace_cell.alignment = "CENTER"
+    inplace_button = inplace_cell.row(align=True)
+    inplace_button.ui_units_x = 5.0
+    inplace = inplace_button.operator(
         "fbr.toggle_clip_option",
-        text="O" if clip.in_place else "X",
+        text="啟用" if clip.in_place else "未啟用",
         depress=clip.in_place,
     )
     inplace.file_index = file_index
     inplace.clip_index = clip_index
     inplace.option = "IN_PLACE"
-    copy = mirror_cell.operator(
+    mirror_cell.alignment = "CENTER"
+    mirror_button = mirror_cell.row(align=True)
+    mirror_button.ui_units_x = 5.0
+    copy = mirror_button.operator(
         "fbr.toggle_clip_option",
-        text="O" if clip.mirror_mode == "COPY" else "X",
+        text="啟用" if clip.mirror_mode == "COPY" else "未啟用",
         depress=clip.mirror_mode == "COPY",
     )
     copy.file_index = file_index
@@ -264,9 +292,10 @@ def _draw_mapping_row(context, layout, source_file, item, index):
     file_index = _source_file_index(settings, source_file)
 
     row = layout.row(align=True)
-    columns = row.split(factor=settings.mapping_source_factor)
+    source_cell, target_row, ik_slot, axis_tools = _mapping_row_columns(
+        row, settings
+    )
     group_kind, is_group_parent, is_group_child = _mapping_group_info(source_file, item)
-    source_cell = columns.row(align=True)
     if is_group_parent:
         prop_name = "hands_expanded" if group_kind == "HAND" else "feet_expanded"
         expanded = getattr(source_file, prop_name)
@@ -280,9 +309,6 @@ def _draw_mapping_row(context, layout, source_file, item, index):
     elif is_group_child:
         source_cell.label(text="")
     source_cell.label(text=_paired_mapping_label(source_file, item, "source_bone"))
-    target_and_tools = columns.split(factor=settings.mapping_target_factor)
-
-    target_row = target_and_tools.row(align=True)
     target_row.alignment = "LEFT"
     if item.is_root:
         target_row.label(text="", icon="EVENT_R")
@@ -304,8 +330,6 @@ def _draw_mapping_row(context, layout, source_file, item, index):
         clear.mapping_index = index
     else:
         clear_slot.label(text="")
-    ik_slot = target_row.row(align=True)
-    ik_slot.ui_units_x = 5.0
     ik = ik_slot.operator(
         "fbr.ik_settings",
         text="IK 已設定" if item.ik_enabled else "設定 IK",
@@ -315,19 +339,15 @@ def _draw_mapping_row(context, layout, source_file, item, index):
     ik.mapping_index = index
     ik.action = "START"
 
-    tools = target_and_tools.row(align=False)
-    tools.alignment = "RIGHT"
     pair = _mapping_pair(source_file, item)
     axes_match = bool(item.target_bone) and _mapping_axes_match(source, target, item) and (
         not pair or not pair.target_bone or _mapping_axes_match(source, target, pair)
     )
-    axis_tools = tools.row(align=True)
-    axis_tools.ui_units_x = 10.0
-    axis_tools.label(text="O" if axes_match else "X")
-    edit = axis_tools.operator("fbr.axis_correction", text="調整軸向")
+    edit = axis_tools.operator("fbr.axis_correction", text="調整")
     edit.file_index = file_index
     edit.mapping_index = index
     edit.action = "START"
+    axis_tools.label(text="相同" if axes_match else "不相同")
 
 
 def _draw_axis_correction(layout, file_index, source_file):
@@ -519,7 +539,6 @@ class FBR_PT_main(Panel):
         target_choice = target_row.row(align=True)
         target_choice.ui_units_x = 11.0
         target_choice.prop(settings, "target_armature", text="")
-        target_row.operator("fbr.clear_target_animation", text="刪除所有動畫", icon="TRASH")
         target = bpy.data.objects.get(settings.target_armature)
 
         source_box = layout.box()
@@ -538,7 +557,6 @@ class FBR_PT_main(Panel):
         header.operator("fbr.clear_files", text="全部清空動畫檔", icon="TRASH")
         if not settings.files:
             source_box.label(text="尚未加入動畫檔案", icon="INFO")
-            return
 
         if settings.files_expanded:
             if not animation_rows_are_current(settings):
@@ -692,25 +710,19 @@ class FBR_PT_main(Panel):
             list_area = group.column(align=True)
             list_area.enabled = not locked
             list_header = list_area.row(align=True)
-            columns = list_header.split(factor=settings.mapping_source_factor)
-            source_header = columns.row(align=True)
+            source_header, target_header, ik_header, axis_header = _mapping_row_columns(
+                list_header, settings
+            )
             source_header.label(text="來源骨骼")
             _drag_handle(source_header, settings, "mapping_source_factor")
-            target_and_tools = columns.split(factor=settings.mapping_target_factor)
-            target_header = target_and_tools.row(align=True)
             target_header.alignment = "LEFT"
             target_header.label(text="Target 骨骼")
-            ik_header = target_header.row(align=True)
-            ik_header.ui_units_x = 5.0
+            _drag_handle(target_header, settings, "mapping_target_factor")
             ik_header.alignment = "CENTER"
             ik_header.label(text="IK 設定")
-            _drag_handle(ik_header, settings, "mapping_target_factor")
-            tools_header = target_and_tools.row(align=False)
-            tools_header.alignment = "RIGHT"
-            axis_header = tools_header.row(align=True)
-            axis_header.ui_units_x = 10.0
-            axis_header.alignment = "RIGHT"
-            axis_header.label(text="軸向相同")
+            _drag_handle(ik_header, settings, "mapping_axis_factor")
+            axis_header.alignment = "CENTER"
+            axis_header.label(text="來源和目標軸向")
             list_area.template_list(
                 "FBR_UL_mappings",
                 source.uid,
@@ -720,9 +732,6 @@ class FBR_PT_main(Panel):
                 "active_mapping_index",
                 rows=6,
             )
-            if (source.ik_editing and ik_editor_window_for(source.uid) is None
-                    and 0 <= source.active_mapping_index < len(source.mappings)):
-                _draw_ik_settings(group, file_index, source)
             if reused_sources:
                 reused_box = group.box()
                 reused_count = sum(len(candidate.clips) for candidate in reused_sources)
@@ -788,12 +797,72 @@ class FBR_PT_main(Panel):
         enabled = sum(clip.enabled for source in settings.files for clip in source.clips)
         check = layout.box()
         check.enabled = not locked
+        summary = check.row(align=True)
         if target and enabled:
-            check.label(text=f"{enabled} 個動畫片段可處理", icon="CHECKMARK")
+            summary.prop(
+                settings, "target_actions_expanded", text="",
+                icon="TRIA_DOWN" if settings.target_actions_expanded else "TRIA_RIGHT",
+                emboss=False,
+            )
+            total = settings.retarget_total_count or enabled
+            summary.label(
+                text=f"({settings.retarget_completed_count}/{total})個動畫已處理"
+            )
         elif not target:
-            check.label(text="請選擇主要骨架", icon="ERROR")
+            summary.label(text="請選擇主要骨架", icon="ERROR")
         else:
-            check.label(text="請加入並啟用動畫片段", icon="ERROR")
+            summary.prop(
+                settings, "target_actions_expanded", text="",
+                icon="TRIA_DOWN" if settings.target_actions_expanded else "TRIA_RIGHT",
+                emboss=False,
+            )
+            summary.label(text="請加入並啟用動畫片段", icon="ERROR")
+        summary.operator(
+            "fbr.clear_target_animation", text="刪除所有動畫", icon="TRASH"
+        )
+        if not target:
+            summary.enabled = False
+        if target and settings.target_actions_expanded:
+            actions = _object_actions(target)
+            action_list = check.box()
+            header = action_list.row(align=True)
+            remove_header = header.row(align=True)
+            remove_header.ui_units_x = 1.25
+            remove_header.label(text="")
+            preview_header = header.row(align=True)
+            preview_header.ui_units_x = 4.5
+            preview_header.label(text="預覽")
+            header.label(text="動畫名稱")
+            header.label(text="時間")
+            if not actions:
+                action_list.label(text="主要骨架目前沒有掛載動畫")
+            for action in actions:
+                action_row = action_list.row(align=True)
+                remove_cell = action_row.row(align=True)
+                remove_cell.ui_units_x = 1.25
+                remove = remove_cell.operator(
+                    "fbr.remove_target_action", text="", icon="TRASH", emboss=False
+                )
+                remove.action_name = action.name
+                preview_cell = action_row.row(align=True)
+                preview_cell.ui_units_x = 4.5
+                playing = bool(
+                    settings.target_preview_action == action.name
+                    and context.screen and context.screen.is_animation_playing
+                )
+                preview = preview_cell.operator(
+                    "fbr.preview_target_action",
+                    text="暫停" if playing else "播放",
+                    icon="PAUSE" if playing else "PLAY",
+                )
+                preview.action_name = action.name
+                generated = action.get("_fbr_batch_id") == settings.retarget_batch_id
+                name_cell = action_row.row(align=True)
+                name_cell.enabled = generated
+                name_cell.label(text=action.name)
+                start, end = action.frame_range
+                fps = context.scene.render.fps / max(context.scene.render.fps_base, 1.0e-8)
+                action_row.label(text=f"{start:g}-{end:g}  ({(end-start)/fps:.1f} 秒)")
         if settings.retarget_running:
             layout.progress(
                 factor=settings.retarget_progress,

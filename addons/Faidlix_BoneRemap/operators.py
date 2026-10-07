@@ -16,6 +16,7 @@ from .model import (
     rebuild_animation_rows,
 )
 from .retarget import (
+    _clear_target_pose,
     assign_action_and_slot,
     build_automatic_mapping,
     bake_clip,
@@ -113,6 +114,8 @@ def _ik_editor_open(context, source_uid):
         return False
     area = next((item for item in window.screen.areas if item.type == "PROPERTIES"), None)
     if area is None:
+        area = context.area
+    if area is None:
         return False
     region = next((item for item in area.regions if item.type == "WINDOW"), None)
     if region is None:
@@ -123,7 +126,7 @@ def _ik_editor_open(context, source_uid):
             result = bpy.ops.screen.area_dupli("INVOKE_DEFAULT")
     except RuntimeError:
         return False
-    if "FINISHED" not in result:
+    if not ({"FINISHED", "RUNNING_MODAL"} & result):
         return False
     duplicate = next(
         (item for item in context.window_manager.windows if item.as_pointer() not in before),
@@ -132,8 +135,10 @@ def _ik_editor_open(context, source_uid):
     if duplicate is None:
         return False
     duplicate_area = next(iter(duplicate.screen.areas), None)
-    if duplicate_area is None or duplicate_area.type != "PROPERTIES":
+    if duplicate_area is None:
         return False
+    if duplicate_area.type != "PROPERTIES":
+        duplicate_area.type = "PROPERTIES"
     duplicate_area.spaces.active.context = "SCENE"
     _IK_EDITOR_WINDOWS[source_uid] = duplicate.as_pointer()
     if not bpy.app.timers.is_registered(_ik_editor_watchdog):
@@ -549,21 +554,41 @@ def _ik_solver_bone_name(owner_obj, endpoint_name):
     return endpoint_name
 
 
-def _ik_rest_pole_position(owner_obj, endpoint_name, distance_factor=0.5):
+def _ik_forward_axis(context, mapping, owner_obj):
+    for source_file in context.scene.fbr_settings.files:
+        if any(item.as_pointer() == mapping.as_pointer() for item in source_file.mappings):
+            return (
+                source_file.source_forward_axis
+                if owner_obj.name == source_file.source_object
+                else source_file.target_forward_axis
+            )
+    return "AUTO"
+
+
+def _ik_rest_bend_sign(owner_obj, endpoint_name, forward_axis="AUTO"):
+    endpoint = owner_obj.data.bones.get(endpoint_name)
+    lower = endpoint.parent if endpoint else None
+    upper = lower.parent if lower else None
+    if not upper:
+        return 1.0
+    line = lower.tail_local - upper.head_local
+    if line.length_squared < 1.0e-10:
+        return 1.0
+    bend = lower.head_local - (
+        upper.head_local + line * (lower.head_local - upper.head_local).dot(line) / line.length_squared
+    )
+    forward = _character_basis(owner_obj, forward_axis) @ Vector((0.0, -1.0, 0.0))
+    return -1.0 if bend.dot(forward) < 0.0 else 1.0
+
+
+def _ik_rest_pole_position(owner_obj, endpoint_name, distance_factor=1.0, forward_axis="AUTO"):
     endpoint = owner_obj.data.bones.get(endpoint_name)
     lower = endpoint.parent if endpoint else None
     upper = lower.parent if lower else None
     if not endpoint or not lower or not upper:
         return None
-    midpoint = (upper.head_local + lower.tail_local) * 0.5
-    bend = lower.head_local - midpoint
-    if bend.length_squared < 1.0e-10:
-        limb = lower.tail_local - upper.head_local
-        bend = limb.cross(Vector((0.0, 0.0, 1.0)))
-        if bend.length_squared < 1.0e-10:
-            bend = limb.cross(Vector((0.0, 1.0, 0.0)))
-    distance = max(lower.length * distance_factor, 0.01)
-    return lower.head_local + bend.normalized() * distance
+    forward = _character_basis(owner_obj, forward_axis) @ Vector((0.0, -1.0, 0.0))
+    return lower.head_local + forward.normalized() * lower.length * distance_factor
 
 
 def _add_ik_control_bones(context, owner_obj, endpoint_name, mapping):
@@ -575,7 +600,8 @@ def _add_ik_control_bones(context, owner_obj, endpoint_name, mapping):
         and mapping.ik_control_bone in owner_obj.data.bones
     )
     pole_position = _ik_rest_pole_position(
-        owner_obj, endpoint_name, mapping.ik_pole_length
+        owner_obj, endpoint_name, mapping.ik_pole_length,
+        _ik_forward_axis(context, mapping, owner_obj),
     )
     pole_required = mapping.ik_use_pole and pole_position is not None
     pole_valid = (
@@ -626,6 +652,25 @@ def _ik_constraint(pose_bone):
         ),
         None,
     )
+
+
+def _remove_generated_pole_keys(owner_obj, pole_name):
+    """Discard keys for a deleted generated control, never touch source Actions."""
+    data_path = f'pose.bones["{pole_name}"]'
+    for action in bpy.data.actions:
+        if action.get("_fbr_target_armature") != owner_obj.name:
+            continue
+        legacy = getattr(action, "fcurves", None)
+        if legacy is not None:
+            for curve in list(legacy):
+                if curve.data_path.startswith(data_path):
+                    legacy.remove(curve)
+        for layer in getattr(action, "layers", ()):
+            for strip in getattr(layer, "strips", ()):
+                for channelbag in getattr(strip, "channelbags", ()):
+                    for curve in list(channelbag.fcurves):
+                        if curve.data_path.startswith(data_path):
+                            channelbag.fcurves.remove(curve)
 
 
 def _sync_ik_mapping(context, mapping):
@@ -691,7 +736,26 @@ def _sync_ik_mapping(context, mapping):
     constraint.subtarget = mapping.ik_control_bone
     constraint.pole_target = owner_obj if pole_required and mapping.ik_pole_bone else None
     constraint.pole_subtarget = mapping.ik_pole_bone if pole_required else ""
-    constraint.chain_count = mapping.ik_chain_count
+    if not pole_required and mapping.ik_pole_bone:
+        old_pole = mapping.ik_pole_bone
+        shared = any(
+            item.as_pointer() != mapping.as_pointer()
+            and item.ik_enabled and item.ik_use_pole
+            and item.ik_pole_bone == old_pole
+            for source_file in context.scene.fbr_settings.files
+            for item in source_file.mappings
+        )
+        if not shared and old_pole in owner_obj.data.bones:
+            if owner_obj.data.bones[old_pole].get("_fbr_ik_pole", False):
+                _remove_generated_pole_keys(owner_obj, old_pole)
+                _set_active_object_mode(context, owner_obj, "EDIT")
+                edit_pole = owner_obj.data.edit_bones.get(old_pole)
+                if edit_pole:
+                    owner_obj.data.edit_bones.remove(edit_pole)
+                bpy.ops.object.mode_set(mode="OBJECT")
+        mapping.ik_pole_bone = ""
+        _cleanup_unused_ik_shapes()
+    constraint.chain_count = max(1, mapping.ik_chain_count)
     constraint.iterations = mapping.ik_iterations
     constraint.influence = mapping.ik_influence
     constraint.use_tail = mapping.ik_use_tail
@@ -824,7 +888,8 @@ def _move_ik_pole_to_length(context, mapping):
         return
     pole = owner_obj.pose.bones.get(mapping.ik_pole_bone)
     position = _ik_rest_pole_position(
-        owner_obj, endpoint_name, mapping.ik_pole_length
+        owner_obj, endpoint_name, mapping.ik_pole_length,
+        _ik_forward_axis(context, mapping, owner_obj),
     )
     if pole and position is not None:
         matrix = pole.matrix.copy()
@@ -1514,6 +1579,38 @@ def _object_actions(obj):
     return actions
 
 
+def _attach_target_outputs(target, actions, batch_id):
+    animation_data = target.animation_data_create()
+    for action in actions:
+        track = animation_data.nla_tracks.new()
+        track.name = f"FBR Outputs {batch_id[:8]}"
+        track.mute = True
+        action["_fbr_target_armature"] = target.name
+        action["_fbr_batch_id"] = batch_id
+        strip = track.strips.new(action.name, int(math.floor(action.frame_range[0])), action)
+        slot = next(
+            (item for item in action.slots if item.target_id_type == target.id_type),
+            None,
+        )
+        if slot is not None:
+            strip.action_slot = slot
+
+
+def _detach_target_action(target, action):
+    animation_data = target.animation_data
+    if not animation_data or action not in _object_actions(target):
+        return False
+    if animation_data.action == action:
+        animation_data.action = None
+    for track in list(animation_data.nla_tracks):
+        for strip in list(track.strips):
+            if strip.action == action:
+                track.strips.remove(strip)
+        if not track.strips and track.name.startswith("FBR Outputs "):
+            animation_data.nla_tracks.remove(track)
+    return True
+
+
 def _compatible_actions(obj, actions):
     bone_names = set(obj.data.bones.keys())
     scored = []
@@ -1871,6 +1968,50 @@ class FBR_OT_toggle_file(Operator):
         for clip in source.clips:
             clip.enabled = enable
         return {"FINISHED"}
+
+
+class FBR_OT_drag_column(Operator):
+    bl_idname = "fbr.drag_column"
+    bl_label = "拖曳欄寬"
+    bl_description = "按住滑鼠左右拖曳；放開即完成"
+    bl_options = {"INTERNAL"}
+
+    property_name: StringProperty()
+
+    def invoke(self, context, event):
+        settings = getattr(context.scene, "fbr_settings", None)
+        if not settings or self.property_name not in {
+            "animation_action_factor", "animation_info_factor",
+            "animation_mirror_fraction", "mapping_source_factor",
+            "mapping_target_factor", "mapping_axis_factor",
+        }:
+            return {"CANCELLED"}
+        self._start_x = event.mouse_x
+        self._start_value = getattr(settings, self.property_name)
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        settings = context.scene.fbr_settings
+        if event.type in {"ESC", "RIGHTMOUSE"}:
+            setattr(settings, self.property_name, self._start_value)
+            return {"CANCELLED"}
+        if event.type == "LEFTMOUSE" and event.value == "RELEASE":
+            return {"FINISHED"}
+        if event.type == "MOUSEMOVE":
+            minimum, maximum = {
+                "animation_action_factor": (0.4, 0.82),
+                "animation_info_factor": (0.45, 1.0 - settings.animation_mirror_fraction - 0.10),
+                "animation_mirror_fraction": (0.10, 1.0 - settings.animation_info_factor - 0.10),
+                "mapping_source_factor": (0.12, settings.mapping_target_factor - 0.12),
+                "mapping_target_factor": (settings.mapping_source_factor + 0.12, settings.mapping_axis_factor - 0.08),
+                "mapping_axis_factor": (settings.mapping_target_factor + 0.08, 0.88),
+            }[self.property_name]
+            value = self._start_value + (event.mouse_x - self._start_x) * 0.0006
+            setattr(settings, self.property_name, max(minimum, min(maximum, value)))
+            if context.area:
+                context.area.tag_redraw()
+        return {"RUNNING_MODAL"}
 
 
 class FBR_OT_toggle_clip_option(Operator):
@@ -2284,12 +2425,75 @@ class FBR_OT_clear_target_animation(Operator):
             return {"CANCELLED"}
         stop_animation_preview(context)
         target.animation_data_clear()
+        settings = context.scene.fbr_settings
+        settings.retarget_completed_count = 0
+        settings.retarget_total_count = 0
+        settings.retarget_batch_id = ""
+        settings.target_preview_action = ""
         identity = Matrix.Identity(4)
         for pose_bone in target.pose.bones:
             pose_bone.matrix_basis = identity
         context.view_layer.update()
         _tag_view3d_redraw(context)
         self.report({"INFO"}, f"已清除 {target.name} 的所有動畫")
+        return {"FINISHED"}
+
+
+class FBR_OT_remove_target_action(Operator):
+    bl_idname = "fbr.remove_target_action"
+    bl_label = "移除目標動畫"
+    bl_description = "從主要骨架移除這個動畫；不刪除可能被其他物件使用的 Action 資料"
+    bl_options = {"INTERNAL", "UNDO"}
+
+    action_name: StringProperty()
+
+    def execute(self, context):
+        settings = context.scene.fbr_settings
+        target = _target_object(settings)
+        action = bpy.data.actions.get(self.action_name)
+        if not target or not action or not _detach_target_action(target, action):
+            return {"CANCELLED"}
+        if settings.target_preview_action == action.name:
+            screen = getattr(context, "screen", None)
+            if screen and screen.is_animation_playing:
+                bpy.ops.screen.animation_cancel(restore_frame=False)
+            settings.target_preview_action = ""
+        if action.get("_fbr_batch_id") == settings.retarget_batch_id:
+            settings.retarget_completed_count = max(0, settings.retarget_completed_count - 1)
+        _tag_view3d_redraw(context)
+        return {"FINISHED"}
+
+
+class FBR_OT_preview_target_action(Operator):
+    bl_idname = "fbr.preview_target_action"
+    bl_label = "播放／暫停目標動畫"
+    bl_options = {"INTERNAL"}
+
+    action_name: StringProperty()
+
+    def execute(self, context):
+        settings = context.scene.fbr_settings
+        target = _target_object(settings)
+        action = bpy.data.actions.get(self.action_name)
+        if not target or not action or action not in _object_actions(target):
+            return {"CANCELLED"}
+        screen = getattr(context, "screen", None)
+        if settings.target_preview_action == action.name and screen and screen.is_animation_playing:
+            bpy.ops.screen.animation_cancel(restore_frame=False)
+            return {"FINISHED"}
+        stop_animation_preview(context)
+        if screen and screen.is_animation_playing:
+            bpy.ops.screen.animation_cancel(restore_frame=False)
+        _clear_target_pose(target)
+        assign_action_and_slot(target, action)
+        context.scene.frame_set(int(math.floor(action.frame_range[0])))
+        settings.target_preview_action = action.name
+        if screen:
+            try:
+                bpy.ops.screen.animation_play()
+            except RuntimeError:
+                pass
+        _tag_view3d_redraw(context)
         return {"FINISHED"}
 
 
@@ -2315,7 +2519,11 @@ class FBR_OT_ik_settings(Operator):
         result = self.execute(context)
         if "FINISHED" in result:
             source = context.scene.fbr_settings.files[self.file_index]
-            _ik_editor_open(context, source.uid)
+            if not bpy.app.background and not _ik_editor_open(context, source.uid):
+                self.action = "CANCEL"
+                self.execute(context)
+                self.report({"ERROR"}, "無法開啟 IK 彈出視窗；請在有視窗的區域重試")
+                return {"CANCELLED"}
         return result
 
     def cancel(self, context):
@@ -2400,6 +2608,13 @@ class FBR_OT_ik_settings(Operator):
                 if item
             }
             source.ik_editing = True
+            if not mapping.ik_enabled:
+                owner_obj, endpoint_name = _ik_owner(context, mapping)
+                if owner_obj and endpoint_name:
+                    mapping.ik_pole_length = _ik_rest_bend_sign(
+                        owner_obj, endpoint_name,
+                        _ik_forward_axis(context, mapping, owner_obj),
+                    )
             mapping.ik_enabled = True
             _sync_ik_mapping(context, mapping)
             if pair:
@@ -2890,6 +3105,8 @@ class FBR_OT_retarget(Operator):
                     if settings.key_mode == "SIMPLIFY":
                         simplify_action(action, settings.rotation_tolerance, settings.location_tolerance)
             assign_action_and_slot(target, created[-1])
+            _attach_target_outputs(target, created, settings.retarget_batch_id)
+            settings.retarget_completed_count = len(jobs)
         except Exception as exc:
             for action in created:
                 bpy.data.actions.remove(action)
@@ -2946,6 +3163,7 @@ class FBR_OT_retarget(Operator):
                 if action.name in bpy.data.actions:
                     bpy.data.actions.remove(action)
             settings.retarget_status = "已取消" if cancelled else f"失敗：{error}"
+            settings.retarget_completed_count = 0
             if error:
                 self.report({"ERROR"}, settings.retarget_status)
                 self._popup(context, "重定向失敗", str(error), "ERROR")
@@ -2959,6 +3177,8 @@ class FBR_OT_retarget(Operator):
                 settings.location_tolerance,
             )
         assign_action_and_slot(self._target, self._created[-1])
+        _attach_target_outputs(self._target, self._created, settings.retarget_batch_id)
+        settings.retarget_completed_count = len(self._jobs_data)
         settings.retarget_status = f"完成 {len(self._jobs_data)} 個輸出片段"
         self.report({"INFO"}, settings.retarget_status)
         self._popup(context, "重定向完成", settings.retarget_status)
@@ -2974,6 +3194,9 @@ class FBR_OT_retarget(Operator):
         if not jobs:
             self.report({"ERROR"}, "沒有啟用的動畫片段")
             return {"CANCELLED"}
+        settings.retarget_total_count = len(jobs)
+        settings.retarget_completed_count = 0
+        settings.retarget_batch_id = uuid.uuid4().hex
         if bpy.app.background:
             return self._run_blocking(context, settings, target, jobs)
 
@@ -3033,6 +3256,7 @@ class FBR_OT_retarget(Operator):
                     )
                 self._current_iterator = None
                 self._job_index += 1
+                settings.retarget_completed_count = self._job_index
             return {"RUNNING_MODAL"}
         except Exception as exc:
             return self._finish_modal(context, error=exc)
@@ -3045,6 +3269,7 @@ CLASSES = (
     FBR_OT_remove_file,
     FBR_OT_reset_all,
     FBR_OT_toggle_file,
+    FBR_OT_drag_column,
     FBR_OT_toggle_clip_option,
     FBR_OT_select_target_bone,
     FBR_OT_clear_target_bone,
@@ -3054,6 +3279,8 @@ CLASSES = (
     FBR_OT_preview_tpose,
     FBR_OT_preview_animation,
     FBR_OT_clear_target_animation,
+    FBR_OT_remove_target_action,
+    FBR_OT_preview_target_action,
     FBR_OT_ik_settings,
     FBR_OT_delete_ik,
     FBR_OT_axis_correction,

@@ -17,7 +17,7 @@ from Faidlix_BoneRemap.model import (
     iter_action_fcurves,
     rebuild_animation_rows,
 )
-from Faidlix_BoneRemap.operators import _mapping_axes_match, _selected_animation_paths
+from Faidlix_BoneRemap.operators import _mapping_axes_match, _object_actions, _selected_animation_paths
 from Faidlix_BoneRemap.retarget import (
     assign_action_and_slot, bake_clip, pose_only_action,
 )
@@ -522,7 +522,7 @@ def main():
     assert hand_map.ik_iterations == 500
     assert abs(hand_map.ik_shape_scale - 0.05) < 1.0e-6
     assert hand_map.ik_use_pole
-    assert abs(hand_map.ik_pole_length - 0.5) < 1.0e-6
+    assert abs(hand_map.ik_pole_length - 1.0) < 1.0e-6
     assert abs(hand_map.ik_pole_size_ratio - 0.7) < 1.0e-6
     assert bpy.ops.fbr.ik_settings(
         "INVOKE_DEFAULT",
@@ -543,9 +543,33 @@ def main():
     pole_before = pole_control.matrix.translation.copy()
     hand_map.ik_pole_length = 0.8
     assert (pole_control.matrix.translation - pole_before).length > 1.0e-6
+    joint = target.data.bones[hand_map.target_bone].parent.head_local.copy()
+    positive = pole_control.matrix.translation.copy()
+    hand_map.ik_pole_length = 0.0
+    assert (pole_control.matrix.translation - joint).length < 1.0e-5
+    hand_map.ik_pole_length = -0.8
+    negative = pole_control.matrix.translation.copy()
+    assert ((positive - joint) + (negative - joint)).length < 1.0e-5
+    pole_action = bpy.data.actions.new("FBR_Pole_Key_Removal_Test")
+    pole_action["_fbr_target_armature"] = target.name
+    previous_target_action = target.animation_data.action if target.animation_data else None
+    assign_action_and_slot(target, pole_action)
+    pole_control.keyframe_insert(data_path="location", frame=1)
+    assert any(hand_map.ik_pole_bone in curve.data_path for curve in iter_action_fcurves(pole_action))
+    target.animation_data.action = previous_target_action
+    removed_pole_name = hand_map.ik_pole_bone
     hand_map.ik_use_pole = False
+    assert hand_map.ik_pole_bone == ""
+    assert not any(bone.get("_fbr_ik_pole") for bone in target.data.bones)
+    assert not any(removed_pole_name in curve.data_path for curve in iter_action_fcurves(pole_action))
+    bpy.data.actions.remove(pole_action)
+    hand_constraint = next(
+        constraint for constraint in target.pose.bones["Arm.L"].constraints
+        if constraint.type == "IK" and constraint.name.startswith("FBR IK")
+    )
     assert hand_constraint.pole_target is None
     hand_map.ik_use_pole = True
+    assert hand_map.ik_pole_bone in target.data.bones
     assert hand_constraint.pole_subtarget == hand_map.ik_pole_bone
     assert hand_constraint.chain_count == 2
     assert hand_constraint.iterations == 500
@@ -609,6 +633,7 @@ def main():
     root_map = entry.mappings[0]
     arm_map = entry.mappings[1]
     arm_map.ik_chain_count = 0
+    assert arm_map.ik_chain_count == 1
 
     batch_clip = entry.clips.add()
     batch_clip.action_name = action.name
@@ -624,6 +649,9 @@ def main():
     assert target.animation_data.action == batch_output
     assert target.animation_data.action_slot is not None
     assert any(slot == target.animation_data.action_slot for slot in batch_output.slots)
+    assert settings.retarget_completed_count == 2 and settings.retarget_total_count == 2
+    assert set(_object_actions(target)) == {output, batch_output}
+    assert all(track.mute for track in target.animation_data.nla_tracks)
     assert bpy.data.objects.get("Source") == source
     assert bpy.data.objects.get("Target") == target
     assert len(settings.files) == 1
@@ -659,6 +687,9 @@ def main():
             for point in curve.keyframe_points
         ]
         assert control_values and max(control_values) < 20.0
+    assert bpy.ops.fbr.remove_target_action(action_name=output.name) == {"FINISHED"}
+    assert output not in _object_actions(target)
+    assert settings.retarget_completed_count == 1
     assert bpy.ops.fbr.delete_ik(file_index=0, mapping_index=1) == {"FINISHED"}
     assert control_name not in target.data.bones
     assert not any(
