@@ -65,7 +65,9 @@
 - `operators.py::_calibrate_ik_pole_angle` 在啟用／更新 Pole 時，暫存並還原目標骨架姿勢；以每條鏈本身的 FK 參考肘／膝位置評估 IK 的候選 Pole Angle，左右各自選擇，不依骨名硬編 180°。直肢、Pole 長度近零或角度不影響關節時保留既有角度。
 - 角色1003 專案測試中，左右手校正角度分別約 `-3.125`、`-0.016` rad；相對參考姿勢的肘部誤差約 `0.00003`，故意加 180° 後約 `0.009`。腳部五段重定向比較仍通過。簡化 headless 測試通過，並加入 manifest／UI／updater 版本一致性檢查。**前景手部動畫目視與正式安裝尚待驗證。**
 - `__init__.py`、manifest、UI、updater、根 README、套件 README 與索引已同步至 0.6.12（修正原 updater 長期留在 0.6.7 的版本不一致）。ZIP 49642 bytes、SHA-256 `d2ec553be70e8dce8067c4f0425ba5a08db39729705fbad99edac6995be401a7`，Blender extension metadata、README 下載連結檢查通過。
-- 隔離背景 Blender MCP 已從候選 ZIP 安裝、註冊並讀回 0.6.12；測試左右鏡像手鏈：校正角度約 `-π`／`0`，肘部誤差各約 `0.000002`，故意翻轉 180° 後各約 `0.221`。已停止測試 MCP。GitHub 回讀、GitHub ZIP 全新隔離安裝及正式安裝尚待驗證。
+- 隔離背景 Blender MCP 已從候選 ZIP 安裝、註冊並讀回 0.6.12；測試左右鏡像手鏈：校正角度約 `-π`／`0`，肘部誤差各約 `0.000002`，故意翻轉 180° 後各約 `0.221`。已停止測試 MCP。
+- 發布提交 `f86fb5396e9d3cf2e44fecf5988dcf94519dbe64` 已推送並從 GitHub `main` 讀回。GitHub raw ZIP 為 49642 bytes、SHA-256 與本機一致；全新隔離 Blender 5.2.2 從 GitHub ZIP 安裝、啟用並讀回 `(0, 6, 12)`、IK operator 與 updater 版本。
+- 正式安裝前查無 Blender 執行中程序；先備份正式 0.6.11 至 `backups/faidlix_bone_remap-0.6.11-before-0.6.12-20261007`，再以 GitHub ZIP 安裝到 `FaidlixBlenderAdd_ons`。正式安裝的 7 個檔案逐一與 ZIP 位元組相同；獨立背景 Blender 從正式路徑載入 manifest／UI／updater `0.6.12`、場景屬性及 IK operator 成功。**仍未進行前景手部動畫目視驗收。**
 
 ## 原始待辦與後續驗收
 
