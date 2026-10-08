@@ -454,6 +454,7 @@ class FBR_SourceFile(PropertyGroup):
     alignment_scale: FloatProperty(default=1.0, min=1.0e-8, options={"HIDDEN"})
     preview_clip: EnumProperty(items=preview_clip_items, update=update_preview_clip)
     ik_editing: BoolProperty(default=False, options={"SKIP_SAVE"})
+    ik_existing_view: BoolProperty(default=False, options={"SKIP_SAVE"})
     ik_backup_enabled: BoolProperty(options={"SKIP_SAVE"})
     ik_backup_control_bone: StringProperty(options={"SKIP_SAVE"})
     ik_backup_pole_bone: StringProperty(options={"SKIP_SAVE"})
@@ -597,6 +598,14 @@ class FBR_Settings(PropertyGroup):
             ("SIMPLIFY", "每格 Bake 後精簡", "Bake 後移除誤差範圍內的中間 Key"),
         ),
         default="SIMPLIFY",
+    )
+    ik_bake_mode: EnumProperty(
+        name="IK 處理",
+        items=(
+            ("POSE", "姿勢 Bake", "沿用目前的姿勢烘焙流程"),
+            ("EXISTING", "沿用目標 IK", "使用目標骨架已有的 IK 控制骨與 Pole，不新增 IK"),
+        ),
+        default="POSE",
     )
     rotation_tolerance: FloatProperty(
         name="旋轉誤差",

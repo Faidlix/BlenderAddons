@@ -2,6 +2,15 @@
 
 更新日期：2026-10-08。此檔區分 GitHub 發布、隔離安裝與正式 Blender 安裝；三者不可混為一談。
 
+## 0.6.16 沿用目標既有 IK（2026-10-08）
+
+- `model.py`／`ui.py` 在原三種 Key 烘焙取樣按鈕之外，獨立加入「姿勢 Bake／沿用目標 IK」選項；預設保留原流程。映射列辨識現有 IK，設定區可唯讀查看其控制骨、Pole、鏈長、迭代、影響與其他參數，關閉仍還原原選取狀態。
+- `retarget.py` 在沿用模式中辨識同一目標骨架上的既有 IK，優先選對應端點的父骨約束，避免將腳的 IK 與腳趾 IK 混淆；逐影格讀取來源 IK 解算姿勢相對 FK 的位移／旋轉殘差，寫入現有控制骨與 Pole。**不新增控制骨，也不改寫現有 IK 約束**。多組同層 IK 或外部控制物件會報錯，不猜測、不寫入外部物件。
+- `operators.py` 將來源及目標 IK 約束設定納入批次續算簽章，IK 設定按鈕遇到既有 IK 時只進唯讀檢視，不重複建立；此模式與每格 Bake、只取來源 Key、每格 Bake 後精簡三種取樣方式可組合。
+- 已驗證：Blender 5.2.2 `FBR_HEADLESS_OK`；新建雙 IK 腳骨架上，來源 IK 控制骨驅動目標現有 IK，首末影格腳部位置誤差小於 `0.000001` Blender 單位，且目標骨數、IK 約束設定不變，模糊與外部控制器安全拒絕；`角色1008.blend` 新模式 Fairy_Dive 三影格左右腳位置誤差不超過 `0.003906` Blender 單位；原模式 1008 三段手腳回歸亦通過。測試均未儲存使用者 `.blend`。
+- 候選 0.6.16 ZIP 為 54195 bytes，SHA-256 `8b01831be37389d3e0b0308361e29633674d4565836e72ab089fa53e8f240109`；Blender extension validate、7 檔與原始碼逐檔比對、索引與 `README_DOWNLOAD_LINKS=PASS` 均通過。從該 ZIP 隔離安裝後，`FBR_INSTALLED_PACKAGE_OK`、雙 IK 骨架與 1008 新模式測試通過。背景 MCP 服務曾啟動，但 MCP 連線工具逾時，服務已停止；本次**僅以隔離 Blender CLI 驗證，不宣稱 MCP 通過**。
+- 待完成：GitHub 推送與遠端 ZIP 讀回、從 GitHub ZIP 再次隔離驗證及正式 Blender 安裝。前景側邊欄目視仍待驗證。
+
 ## 0.6.15 Action 命名、來源清空與摘要摺疊（2026-10-08）
 
 - 實作位置：`C:/Users/faidl/Desktop/3DAI測試/BlenderAddons-release-0614`；原 `BlenderAddons` 工作樹另有未授權發布的更新提示草稿，未混入本版。

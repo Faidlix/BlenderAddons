@@ -209,9 +209,9 @@ def assign_action_and_slot(target_obj, action):
     return slot
 
 
-def _ik_chain_names(target_obj, mapping):
+def _ik_chain_names(target_obj, mapping, owner_name=None, chain_count=None):
     endpoint = target_obj.data.bones.get(mapping.target_bone)
-    bone = (
+    bone = target_obj.data.bones.get(owner_name) if owner_name else (
         endpoint.parent
         if endpoint and endpoint.parent and endpoint.parent.parent
         else endpoint
@@ -221,7 +221,7 @@ def _ik_chain_names(target_obj, mapping):
     # The endpoint is driven by the IK control as well.  Keeping its FK keys
     # would make the final pose a mixture of two competing animations.
     result = {endpoint.name} if endpoint else set()
-    remaining = max(1, int(mapping.ik_chain_count))
+    remaining = max(1, int(chain_count if chain_count is not None else mapping.ik_chain_count))
     while bone and remaining > 0:
         result.add(bone.name)
         bone = bone.parent
@@ -360,6 +360,79 @@ def _fbr_ik_constraint(pose_bone):
     )
 
 
+def _existing_ik_for_mapping(target_obj, mapping):
+    """Find one same-armature IK for the mapped endpoint without changing it."""
+    endpoint = target_obj.pose.bones.get(mapping.target_bone)
+    if not endpoint:
+        return None
+    candidates = []
+    for owner in (endpoint.parent, endpoint):
+        if not owner:
+            continue
+        owner_candidates = []
+        for constraint in owner.constraints:
+            if constraint.type != "IK" or constraint.mute or constraint.influence <= 0:
+                continue
+            if constraint.target != target_obj or not constraint.subtarget:
+                raise RuntimeError(
+                    f"{owner.name} 的 IK 使用外部或未指定控制器；不會寫入外部物件"
+                )
+            control = target_obj.pose.bones.get(constraint.subtarget)
+            if not control:
+                raise RuntimeError(f"{owner.name} 的 IK 控制骨不存在：{constraint.subtarget}")
+            pole = None
+            if constraint.pole_target:
+                if constraint.pole_target != target_obj:
+                    raise RuntimeError(f"{owner.name} 的 IK Pole 位於外部物件；不會寫入")
+                pole = target_obj.pose.bones.get(constraint.pole_subtarget)
+                if not pole:
+                    raise RuntimeError(f"{owner.name} 的 IK Pole 骨不存在")
+            owner_candidates.append((owner, constraint, control, pole))
+        if owner_candidates:
+            # A foot can itself own the toes' IK while its parent owns the
+            # foot IK. Prefer the parent chain for this mapped endpoint.
+            candidates = owner_candidates
+            break
+    if len(candidates) > 1:
+        raise RuntimeError(f"{mapping.target_bone} 找到多組 IK，請先明確選擇一組")
+    return candidates[0] if candidates else None
+
+
+def _ik_endpoint_priority(mapping, owner_name):
+    name = normalize_bone_name(mapping.target_bone)
+    if any(part in name for part in ("foot", "hand", "wrist", "ankle")):
+        return 3
+    return 2 if mapping.target_bone != owner_name else 1
+
+
+def _source_fk_matrix(pose_bone, cache):
+    """Calculate the unconstrained pose from input bases for an IK residual."""
+    if pose_bone.name in cache:
+        return cache[pose_bone.name]
+    rest = pose_bone.bone.matrix_local
+    if pose_bone.parent:
+        parent_matrix = _source_fk_matrix(pose_bone.parent, cache)
+        matrix = (
+            parent_matrix @ pose_bone.parent.bone.matrix_local.inverted_safe()
+            @ rest @ pose_bone.matrix_basis
+        )
+    else:
+        matrix = rest @ pose_bone.matrix_basis
+    cache[pose_bone.name] = matrix
+    return matrix
+
+
+def _source_ik_residual(source_obj, evaluated_source, source_name, target_obj):
+    source_pose = evaluated_source.pose.bones.get(source_name)
+    if not source_pose:
+        return Matrix.Identity(4)
+    fk_matrix = _source_fk_matrix(source_pose, {})
+    source_delta = source_pose.matrix @ fk_matrix.inverted_safe()
+    world_delta = source_obj.matrix_world @ source_delta @ source_obj.matrix_world.inverted_safe()
+    target_delta = target_obj.matrix_world.inverted_safe() @ world_delta @ target_obj.matrix_world
+    return target_delta
+
+
 def iter_bake_clip(
     context,
     settings,
@@ -378,6 +451,24 @@ def iter_bake_clip(
     mappings = [item for item in mapping_file.mappings if item.target_bone]
     if not mappings:
         raise RuntimeError(f"{source_file.display_name} 沒有可用骨骼映射")
+
+    existing_ik = {}
+    if settings.ik_bake_mode == "EXISTING":
+        for mapping in mappings:
+            binding = _existing_ik_for_mapping(target_obj, mapping)
+            if not binding:
+                continue
+            owner, constraint, _control, _pole = binding
+            identity = constraint.as_pointer()
+            previous = existing_ik.get(identity)
+            # The foot/hand endpoint is the child of the solver. Do not also
+            # bake the same IK for a mapping directly on its lower limb.
+            if previous is None or _ik_endpoint_priority(
+                mapping, owner.name,
+            ) > _ik_endpoint_priority(previous[0], owner.name):
+                existing_ik[identity] = (mapping, binding)
+        if not existing_ik:
+            raise RuntimeError("Target 沒有可沿用的同骨架 IK；請選姿勢 Bake 或先設定 IK")
 
     source_obj.animation_data_create()
     target_obj.animation_data_create()
@@ -400,6 +491,7 @@ def iter_bake_clip(
 
     root_baselines = {}
     previous_pole_directions = {}
+    muted_constraints = []
     root_target_names = {
         mapping.target_bone for mapping in mappings if mapping.is_root
     }
@@ -418,31 +510,43 @@ def iter_bake_clip(
             ik_mappings = []
             ik_chain_names = set()
             muted_constraints = []
-            for mapping in mappings:
-                if not mapping.ik_enabled or not mapping.ik_control_bone:
-                    continue
-                endpoint = target_obj.pose.bones.get(mapping.target_bone)
-                owner = _ik_solver_pose_bone(target_obj, mapping)
-                control = target_obj.pose.bones.get(mapping.ik_control_bone)
-                pole = (
-                    target_obj.pose.bones.get(mapping.ik_pole_bone)
-                    if mapping.ik_use_pole else None
+            if settings.ik_bake_mode == "EXISTING":
+                bindings = (
+                    (mapping, *binding) for mapping, binding in existing_ik.values()
                 )
-                constraint = _fbr_ik_constraint(owner) if owner else None
+            else:
+                bindings = (
+                    (
+                        mapping,
+                        _ik_solver_pose_bone(target_obj, mapping),
+                        _fbr_ik_constraint(_ik_solver_pose_bone(target_obj, mapping))
+                        if _ik_solver_pose_bone(target_obj, mapping) else None,
+                        target_obj.pose.bones.get(mapping.ik_control_bone),
+                        target_obj.pose.bones.get(mapping.ik_pole_bone)
+                        if mapping.ik_use_pole else None,
+                    )
+                    for mapping in mappings
+                    if mapping.ik_enabled and mapping.ik_control_bone
+                )
+            for mapping, owner, constraint, control, pole in bindings:
+                endpoint = target_obj.pose.bones.get(mapping.target_bone)
                 if not endpoint or not owner or not control or not constraint:
                     continue
-                constraint.target = target_obj
-                constraint.subtarget = mapping.ik_control_bone
-                constraint.pole_target = target_obj if pole else None
-                constraint.pole_subtarget = mapping.ik_pole_bone if pole else ""
-                constraint.chain_count = max(1, mapping.ik_chain_count)
-                constraint.iterations = mapping.ik_iterations
-                constraint.influence = mapping.ik_influence
-                constraint.use_tail = mapping.ik_use_tail
-                constraint.use_rotation = mapping.ik_use_rotation
-                constraint.use_stretch = mapping.ik_use_stretch
+                if settings.ik_bake_mode != "EXISTING":
+                    constraint.target = target_obj
+                    constraint.subtarget = mapping.ik_control_bone
+                    constraint.pole_target = target_obj if pole else None
+                    constraint.pole_subtarget = mapping.ik_pole_bone if pole else ""
+                    constraint.chain_count = max(1, mapping.ik_chain_count)
+                    constraint.iterations = mapping.ik_iterations
+                    constraint.influence = mapping.ik_influence
+                    constraint.use_tail = mapping.ik_use_tail
+                    constraint.use_rotation = mapping.ik_use_rotation
+                    constraint.use_stretch = mapping.ik_use_stretch
                 ik_mappings.append((mapping, endpoint, owner, control, pole, constraint))
-                ik_chain_names.update(_ik_chain_names(target_obj, mapping))
+                ik_chain_names.update(_ik_chain_names(
+                    target_obj, mapping, owner.name, constraint.chain_count,
+                ))
                 muted_constraints.append((constraint, constraint.mute))
                 constraint.mute = True
 
@@ -551,7 +655,7 @@ def iter_bake_clip(
                 desired_joint = owner.head.copy()
                 upper_head = owner.parent.head.copy() if owner.parent else owner.head.copy()
                 tip = owner.tail.copy()
-                if mapping.ik_use_pole:
+                if pole:
                     source_name = mapping.source_bone
                     if mirrored:
                         counterpart = flip_bone_name(source_name)
@@ -564,15 +668,32 @@ def iter_bake_clip(
                     forward = _character_basis(
                         target_obj, source_file.target_forward_axis
                     ) @ Vector((0.0, -1.0, 0.0))
+                    pole_distance = (
+                        (pole.head - owner.head).length / max(owner.length, 1.0e-6)
+                        if settings.ik_bake_mode == "EXISTING"
+                        else mapping.ik_pole_length
+                    )
                     pole_position, direction = _ik_pole_position(
-                        owner, mapping.ik_pole_length, source_bend,
+                        owner, pole_distance, source_bend,
                         previous_pole_directions.get(mapping.as_pointer()),
                         forward,
                     )
                     if direction is not None:
                         previous_pole_directions[mapping.as_pointer()] = direction
+                desired_matrix = endpoint.matrix.copy()
+                if settings.ik_bake_mode == "EXISTING":
+                    source_name = mapping.source_bone
+                    if mirrored:
+                        counterpart = flip_bone_name(source_name)
+                        if counterpart in evaluated_source.pose.bones:
+                            source_name = counterpart
+                    desired_matrix = (
+                        _source_ik_residual(
+                            source_obj, evaluated_source, source_name, target_obj,
+                        ) @ desired_matrix
+                    )
                 desired_ik_transforms[mapping.as_pointer()] = (
-                    endpoint.matrix.copy(), pole_position,
+                    desired_matrix, pole_position,
                     desired_joint, upper_head, tip,
                 )
             for bone_name in ik_chain_names:
@@ -620,7 +741,7 @@ def iter_bake_clip(
             # solve; otherwise the endpoint inherits an unintended forearm
             # or shin rotation even when its position is correct.
             for mapping, endpoint, _owner, _control, _pole, constraint in ik_mappings:
-                if constraint.mute or _fbr_ik_constraint(endpoint):
+                if constraint.mute or _owner == endpoint or _fbr_ik_constraint(endpoint):
                     continue
                 desired_matrix = desired_ik_transforms[mapping.as_pointer()][0]
                 endpoint.rotation_mode = "QUATERNION"
@@ -636,6 +757,8 @@ def iter_bake_clip(
         out_action.use_fake_user = settings.fake_user
         return math.ceil(frames[-1] - frames[0]) + 1
     finally:
+        for constraint, was_muted in muted_constraints:
+            constraint.mute = was_muted
         source_obj.animation_data.action = previous_source_action
         target_obj.animation_data.action = previous_target_action
         if previous_source_action and previous_source_slot:

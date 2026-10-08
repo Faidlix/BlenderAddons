@@ -18,6 +18,7 @@ from .model import (
 )
 from .retarget import (
     _clear_target_pose,
+    _existing_ik_for_mapping,
     assign_action_and_slot,
     build_automatic_mapping,
     bake_clip,
@@ -1741,6 +1742,27 @@ def _reserve_source_action_names(settings, jobs):
             candidate.source_action_name = action.name
 
 
+def _ik_constraint_signature(obj):
+    if not obj or obj.type != "ARMATURE":
+        return ()
+    return tuple(sorted(
+        (
+            bone.name, constraint.name,
+            constraint.target.name if constraint.target else "",
+            constraint.subtarget,
+            constraint.pole_target.name if constraint.pole_target else "",
+            constraint.pole_subtarget,
+            constraint.chain_count, constraint.iterations,
+            round(constraint.pole_angle, 8), round(constraint.influence, 8),
+            constraint.use_tail, constraint.use_rotation,
+            constraint.use_stretch, constraint.mute,
+        )
+        for bone in obj.pose.bones
+        for constraint in bone.constraints
+        if constraint.type == "IK"
+    ))
+
+
 def _retarget_plan_signature(settings, target, jobs):
     """Identify the exact batch plan eligible for resuming completed jobs."""
     sources = []
@@ -1762,7 +1784,7 @@ def _retarget_plan_signature(settings, target, jobs):
             source_file.reuse_mapping, source_file.source_forward_axis,
             source_file.target_forward_axis, tuple(source_file.global_axis_correction),
             tuple(source_file.alignment_matrix), source_file.alignment_scale,
-            mappings,
+            mappings, _ik_constraint_signature(bpy.data.objects.get(source_file.source_object)),
         ))
     job_plan = tuple(
         (
@@ -1776,8 +1798,10 @@ def _retarget_plan_signature(settings, target, jobs):
         target.name, armature_signature(target), settings.output_mode,
         settings.naming_mode, settings.merged_action_name,
         settings.merged_start, settings.merged_gap, settings.key_mode,
+        settings.ik_bake_mode,
         settings.rotation_tolerance, settings.location_tolerance,
         settings.extract_root_motion, settings.auto_scale,
+        _ik_constraint_signature(target),
     )
     return hashlib.sha256(repr((options, tuple(sources), job_plan)).encode()).hexdigest()
 
@@ -2876,8 +2900,23 @@ class FBR_OT_ik_settings(Operator):
                 if item
             }
             source.ik_editing = True
+            source.ik_existing_view = False
+            owner_obj, endpoint_name = _ik_owner(context, mapping)
+            existing = None
+            if owner_obj and endpoint_name and not mapping.ik_enabled:
+                try:
+                    existing = _existing_ik_for_mapping(owner_obj, mapping)
+                except RuntimeError as exc:
+                    source.ik_editing = False
+                    _restore_ik_selection(context, source.uid)
+                    self.report({"ERROR"}, str(exc))
+                    return {"CANCELLED"}
+            if existing:
+                source.ik_existing_view = True
+                _set_active_object_mode(context, owner_obj, "POSE")
+                _tag_view3d_redraw(context)
+                return {"FINISHED"}
             if not mapping.ik_enabled:
-                owner_obj, endpoint_name = _ik_owner(context, mapping)
                 if owner_obj and endpoint_name:
                     mapping.ik_pole_length = _ik_rest_bend_sign(
                         owner_obj, endpoint_name,
@@ -2896,9 +2935,10 @@ class FBR_OT_ik_settings(Operator):
             if pair:
                 _delete_ik_mapping(context, pair)
         elif self.action == "CANCEL":
-            _delete_ik_mapping(context, mapping)
-            if pair:
-                _delete_ik_mapping(context, pair)
+            if not source.ik_existing_view:
+                _delete_ik_mapping(context, mapping)
+                if pair:
+                    _delete_ik_mapping(context, pair)
             backups = _IK_EDIT_STATE.pop(source.uid, {})
             for item in (mapping, pair):
                 if not item:
@@ -2911,6 +2951,7 @@ class FBR_OT_ik_settings(Operator):
                 if item.ik_enabled:
                     _sync_ik_mapping(context, item)
             source.ik_editing = False
+            source.ik_existing_view = False
             _restore_ik_selection(context, source.uid)
         elif self.action == "OK":
             if mapping.ik_enabled:
@@ -2919,6 +2960,7 @@ class FBR_OT_ik_settings(Operator):
                 _sync_ik_mapping(context, pair)
             _IK_EDIT_STATE.pop(source.uid, None)
             source.ik_editing = False
+            source.ik_existing_view = False
             _restore_ik_selection(context, source.uid)
         _tag_view3d_redraw(context)
         return {"FINISHED"}

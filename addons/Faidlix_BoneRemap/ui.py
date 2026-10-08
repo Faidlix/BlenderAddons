@@ -8,9 +8,10 @@ from .model import (
     reuse_mapping_items,
 )
 from .operators import _mapping_axes_match, _object_actions
+from .retarget import _existing_ik_for_mapping
 
 
-ADDON_VERSION = (0, 6, 15)
+ADDON_VERSION = (0, 6, 16)
 
 
 def _source_file_index(settings, source_file):
@@ -330,10 +331,19 @@ def _draw_mapping_row(context, layout, source_file, item, index):
         clear.mapping_index = index
     else:
         clear_slot.label(text="")
+    existing = None
+    existing_error = False
+    if target and item.target_bone and not item.ik_enabled:
+        try:
+            existing = _existing_ik_for_mapping(target, item)
+        except RuntimeError:
+            existing_error = True
     ik = ik_slot.operator(
         "fbr.ik_settings",
-        text="IK 已設定" if item.ik_enabled else "設定 IK",
-        depress=item.ik_enabled,
+        text="IK 已設定" if item.ik_enabled else (
+            "IK 需確認" if existing_error else ("IK 已存在" if existing else "設定 IK")
+        ),
+        depress=item.ik_enabled or existing is not None,
     )
     ik.file_index = file_index
     ik.mapping_index = index
@@ -400,6 +410,30 @@ def _draw_ik_settings(layout, file_index, source_file):
     active = source_file.mappings[source_file.active_mapping_index]
     editor = layout.box()
     editor.label(text=f"IK 設定：{active.source_bone} → {active.target_bone}", icon="CONSTRAINT_BONE")
+    if source_file.ik_existing_view:
+        target = bpy.data.objects.get(bpy.context.scene.fbr_settings.target_armature)
+        try:
+            existing = _existing_ik_for_mapping(target, active) if target else None
+        except RuntimeError as exc:
+            editor.label(text=str(exc), icon="ERROR")
+            existing = None
+        if existing:
+            owner, constraint, control, pole = existing
+            editor.label(text=f"沿用現有 IK：{owner.name} / {constraint.name}")
+            editor.label(text=f"控制骨：{control.name}；Pole：{pole.name if pole else '無'}")
+            editor.label(text=f"關聯骨頭數：{constraint.chain_count}；迭代：{constraint.iterations}")
+            editor.label(text=f"影響：{constraint.influence:.2f}；Pole 角度：{constraint.pole_angle:.3f} rad")
+            editor.label(text=(
+                f"骨尾：{'是' if constraint.use_tail else '否'}；"
+                f"旋轉：{'是' if constraint.use_rotation else '否'}；"
+                f"拉伸：{'是' if constraint.use_stretch else '否'}"
+            ))
+            editor.label(text="現有 IK 設定唯讀；沿用模式不新增或改寫約束")
+        close = editor.operator("fbr.ik_settings", text="關閉")
+        close.file_index = file_index
+        close.mapping_index = source_file.active_mapping_index
+        close.action = "OK"
+        return
     if active.ik_enabled:
         for choices in (("BOX", "SPHERE"), ("CIRCLE", "SQUARE")):
             shape_row = editor.row(align=True)
@@ -800,6 +834,9 @@ class FBR_PT_main(Panel):
         output_box.separator()
         key_modes = output_box.row(align=True)
         key_modes.prop(settings, "key_mode", expand=True)
+        ik_modes = output_box.row(align=True)
+        ik_modes.label(text="IK 處理")
+        ik_modes.prop(settings, "ik_bake_mode", expand=True)
         if settings.key_mode == "SIMPLIFY":
             tolerance = output_box.row(align=True)
             tolerance.prop(settings, "rotation_tolerance")
