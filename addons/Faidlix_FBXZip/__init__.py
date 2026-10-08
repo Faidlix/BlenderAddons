@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 7, 2),
+    "version": (1, 7, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -29,7 +29,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 7, 2)
+ADDON_VERSION = (1, 7, 3)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -761,7 +761,7 @@ class FBXZIP_PT_panel(Panel):
         layout.operator(FBXZIP_OT_export.bl_idname, icon="EXPORT")
         layout.separator()
         layout.operator(FBXZIP_OT_online_update.bl_idname, icon="FILE_REFRESH")
-        layout.label(text=f"版本 {'.'.join(map(str, bl_info['version']))}")
+        layout.label(text=f"版本 {'.'.join(map(str, ADDON_VERSION))}")
         if _UPDATE_STATUS:
             layout.label(text=_UPDATE_STATUS, icon="INFO")
 

@@ -15,8 +15,8 @@ root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root.parent))
 addon = importlib.import_module('Faidlix_FBXZip')
 addon.register()
-assert addon.bl_info['version'] == (1, 7, 2)
-assert addon.ADDON_VERSION == (1, 7, 2)
+assert addon.bl_info['version'] == (1, 7, 3)
+assert addon.ADDON_VERSION == (1, 7, 3)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
@@ -26,6 +26,31 @@ assert addon.FBXZIP_PT_panel.bl_order == 20
 assert 'DEFAULT_CLOSED' in addon.FBXZIP_PT_panel.bl_options
 assert hasattr(bpy.types, 'EXPORT_SCENE_OT_fbx_zip_online_update')
 assert addon.REPOSITORY_URL == 'https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json'
+
+
+class _PanelLayoutProbe:
+    def __init__(self):
+        self.labels = []
+
+    def operator(self, *_args, **_kwargs):
+        return None
+
+    def separator(self):
+        return None
+
+    def label(self, *, text='', **_kwargs):
+        self.labels.append(text)
+
+
+panel_probe = type('_PanelProbe', (), {'layout': _PanelLayoutProbe()})()
+legacy_info = addon.bl_info
+del addon.bl_info
+try:
+    addon.FBXZIP_PT_panel.draw(panel_probe, bpy.context)
+finally:
+    addon.bl_info = legacy_info
+assert '版本 1.7.3' in panel_probe.layout.labels
+
 bpy.ops.mesh.primitive_cube_add()
 obj = bpy.context.object
 material = bpy.data.materials.new('ExportSmoke')
