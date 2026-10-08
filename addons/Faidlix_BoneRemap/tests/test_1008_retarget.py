@@ -10,6 +10,7 @@ import bpy
 ADDON_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ADDON_ROOT.parent))
 
+import Faidlix_BoneRemap as addon  # noqa: E402
 from Faidlix_BoneRemap.retarget import (  # noqa: E402
     _clear_target_pose,
     assign_action_and_slot,
@@ -36,6 +37,8 @@ def _positions(obj, names, action, frame):
 
 
 def main():
+    if not hasattr(bpy.types.Scene, "fbr_settings"):
+        addon.register()
     settings = bpy.context.scene.fbr_settings
     target = bpy.data.objects[settings.target_armature]
     source_file = next(

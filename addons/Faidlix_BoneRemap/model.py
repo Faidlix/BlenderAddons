@@ -382,6 +382,7 @@ class FBR_BoneMap(PropertyGroup):
 class FBR_Clip(PropertyGroup):
     enabled: BoolProperty(name="啟用", default=True)
     action_name: StringProperty(name="Action")
+    source_action_name: StringProperty(options={"HIDDEN"})
     custom_name: StringProperty(name="自訂名稱")
     frame_start: FloatProperty(name="開始", default=0.0)
     frame_end: FloatProperty(name="結束", default=0.0)

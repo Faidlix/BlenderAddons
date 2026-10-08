@@ -26,6 +26,7 @@ from .retarget import (
     output_name,
     pose_only_action,
     simplify_action,
+    source_action_for_clip,
 )
 
 
@@ -1085,18 +1086,19 @@ def _move_to_temporary_collection(scene, obj):
 
 def _cleanup_imported_sources(settings):
     context = bpy.context
+    stop_animation_preview(context)
     for source in settings.files:
         _end_axis_preview(context, source)
     object_names = {source.source_object for source in settings.files if source.source_object}
     action_names = {
-        clip.action_name
+        clip.source_action_name or clip.action_name
         for source in settings.files
         for clip in source.clips
         if clip.action_name
     }
     for object_name in object_names:
         obj = bpy.data.objects.get(object_name)
-        if obj is None:
+        if obj is None or not obj.get("_fbr_temp_source"):
             continue
         armature_data = obj.data if obj.type == "ARMATURE" else None
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -1104,13 +1106,19 @@ def _cleanup_imported_sources(settings):
             bpy.data.armatures.remove(armature_data)
     for action_name in action_names:
         action = bpy.data.actions.get(action_name)
-        if action is not None:
+        if (action is not None
+                and not action.get("_fbr_target_armature")
+                and action.users <= int(action.use_fake_user)):
             bpy.data.actions.remove(action)
     collection = bpy.data.collections.get(TEMP_COLLECTION_NAME)
     if collection is not None and not collection.objects:
         bpy.data.collections.remove(collection)
     settings.files.clear()
     settings.animation_rows.clear()
+    settings.retarget_completed_count = 0
+    settings.retarget_total_count = 0
+    settings.retarget_batch_id = ""
+    settings.retarget_plan_signature = ""
 
 
 def _target_object(settings):
@@ -1339,7 +1347,7 @@ def _start_animation_preview(context, source_file, play_animation=False):
     if not source_obj or not target_obj or not 0 <= clip_index < len(source_file.clips):
         return False, "找不到可預覽的來源、Target 或動畫"
     clip = source_file.clips[clip_index]
-    source_action = bpy.data.actions.get(clip.action_name)
+    source_action = source_action_for_clip(clip)
     if not source_action:
         return False, f"找不到 Action：{clip.action_name}"
     stop_animation_preview(context)
@@ -1703,6 +1711,36 @@ def _object_actions(obj):
     return actions
 
 
+def _reserve_source_action_names(settings, jobs):
+    """Free source Action names before exact-name target Actions are created."""
+    if settings.output_mode != "SEPARATE" or settings.naming_mode != "ACTION":
+        return
+    source_objects = {source.source_object for source in settings.files}
+    for source_file, clip, _mirrored in jobs:
+        action = source_action_for_clip(clip)
+        if action is None:
+            continue
+        if action.name != clip.action_name:
+            continue
+        for obj in bpy.data.objects:
+            if obj.name in source_objects:
+                continue
+            if action in _object_actions(obj):
+                raise RuntimeError(
+                    f"來源 Action「{action.name}」也被其他物件使用，無法安全改名"
+                )
+        old_name = action.name
+        linked_clips = [
+            candidate
+            for source in settings.files
+            for candidate in source.clips
+            if (candidate.source_action_name or candidate.action_name) == old_name
+        ]
+        action.name = f"__FBR_Source_{source_file.uid[:8]}_{old_name}"
+        for candidate in linked_clips:
+            candidate.source_action_name = action.name
+
+
 def _retarget_plan_signature(settings, target, jobs):
     """Identify the exact batch plan eligible for resuming completed jobs."""
     sources = []
@@ -1867,6 +1905,7 @@ def _source_entry(settings, filepath, obj, actions, suffix=""):
     for action in actions:
         clip = entry.clips.add()
         clip.action_name = action.name
+        clip.source_action_name = action.name
         clip.frame_start = action.frame_range[0]
         clip.frame_end = action.frame_range[1]
     for index in range(max(0, len(settings.files) - 1)):
@@ -1992,6 +2031,7 @@ class FBR_OT_import_files(Operator, ImportHelper):
                     bpy.data.objects.remove(obj, do_unlink=True)
             for action in new_actions:
                 if action.name in kept_actions:
+                    action["_fbr_imported_source"] = True
                     action.use_fake_user = True
                 else:
                     bpy.data.actions.remove(action)
@@ -2069,9 +2109,12 @@ class FBR_OT_remove_file(Operator):
         }
         _end_axis_preview(context, source)
         object_name = source.source_object
-        action_names = {clip.action_name for clip in source.clips if clip.action_name}
+        action_names = {
+            clip.source_action_name or clip.action_name
+            for clip in source.clips if clip.action_name
+        }
         retained_actions = {
-            clip.action_name
+            clip.source_action_name or clip.action_name
             for index, candidate in enumerate(settings.files)
             if index != self.file_index
             for clip in candidate.clips
@@ -2093,14 +2136,15 @@ class FBR_OT_remove_file(Operator):
             )
             candidate.reuse_mapping = replacement.uid if replacement else "SELF"
         obj = bpy.data.objects.get(object_name)
-        if obj:
+        if obj and obj.get("_fbr_temp_source"):
             armature = obj.data if obj.type == "ARMATURE" else None
             bpy.data.objects.remove(obj, do_unlink=True)
             if armature and armature.users == 0:
                 bpy.data.armatures.remove(armature)
         for action_name in action_names - retained_actions:
             action = bpy.data.actions.get(action_name)
-            if action and (action.users == 0 or (action.use_fake_user and action.users == 1)):
+            if (action and not action.get("_fbr_target_armature")
+                    and action.users <= int(action.use_fake_user)):
                 bpy.data.actions.remove(action)
         collection = bpy.data.collections.get(TEMP_COLLECTION_NAME)
         if collection and not collection.objects:
@@ -2604,7 +2648,7 @@ class FBR_OT_preview_animation(Operator):
 class FBR_OT_clear_target_animation(Operator):
     bl_idname = "fbr.clear_target_animation"
     bl_label = "刪除所有動畫"
-    bl_description = "清除主要骨架上的 Action 與 NLA 動畫，不刪除動畫資料塊"
+    bl_description = "清除主要骨架動畫，並刪除此外掛產生且未被其他物件使用的 Action"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -2612,7 +2656,15 @@ class FBR_OT_clear_target_animation(Operator):
         if not target:
             return {"CANCELLED"}
         stop_animation_preview(context)
+        generated = [
+            action for action in bpy.data.actions
+            if action.get("_fbr_target_armature") == target.name
+            and action.get("_fbr_batch_id")
+        ]
         target.animation_data_clear()
+        for action in generated:
+            if action.users <= int(action.use_fake_user):
+                bpy.data.actions.remove(action)
         settings = context.scene.fbr_settings
         settings.retarget_completed_count = 0
         settings.retarget_total_count = 0
@@ -3416,7 +3468,10 @@ class FBR_OT_retarget(Operator):
             action.use_fake_user = settings.fake_user
             start = clip.custom_start if clip.custom_start >= 0 else self._cursor
         else:
-            action = bpy.data.actions.new(output_name(settings, source_file, clip, mirrored))
+            name = output_name(settings, source_file, clip, mirrored)
+            if settings.naming_mode == "ACTION" and bpy.data.actions.get(name):
+                raise RuntimeError(f"目標 Action 名稱「{name}」已被其他資料使用")
+            action = bpy.data.actions.new(name)
             action.use_fake_user = settings.fake_user
             start = 1
         self._current_action = action
@@ -3479,6 +3534,11 @@ class FBR_OT_retarget(Operator):
         jobs = self._jobs(settings)
         if not jobs:
             self.report({"ERROR"}, "沒有啟用的動畫片段")
+            return {"CANCELLED"}
+        try:
+            _reserve_source_action_names(settings, jobs)
+        except RuntimeError as exc:
+            self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
         self._prepare_run(context, settings, target, jobs)
         if bpy.app.background:

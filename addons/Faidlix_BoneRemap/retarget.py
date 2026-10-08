@@ -89,6 +89,10 @@ def output_name(settings, source_file, clip, mirrored=False):
     return name
 
 
+def source_action_for_clip(clip):
+    return bpy.data.actions.get(getattr(clip, "source_action_name", "") or clip.action_name)
+
+
 def _frame_sequence(action, mode):
     if mode == "SOURCE":
         return action_keyframes(action)
@@ -367,7 +371,7 @@ def iter_bake_clip(
     mirrored=False,
 ):
     source_obj = bpy.data.objects.get(source_file.source_object)
-    source_action = bpy.data.actions.get(clip.action_name)
+    source_action = source_action_for_clip(clip)
     if not source_obj or not source_action:
         raise RuntimeError(f"找不到來源：{source_file.display_name} / {clip.action_name}")
     mapping_file = mapping_source(settings, source_file)

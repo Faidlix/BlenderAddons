@@ -815,8 +815,13 @@ def main():
     target.pose.bones["Hips"].location = (3.0, -2.0, 1.0)
     target.pose.bones["Arm.L"].rotation_mode = "XYZ"
     target.pose.bones["Arm.L"].rotation_euler = (0.2, 0.3, 0.4)
+    original_action = bpy.data.actions.new("OriginalTargetAction")
+    original_action.use_fake_user = True
+    generated_names = (output.name, batch_output.name)
     assert bpy.ops.fbr.clear_target_animation() == {"FINISHED"}
     assert target.animation_data is None
+    assert all(bpy.data.actions.get(name) is None for name in generated_names)
+    assert bpy.data.actions.get("OriginalTargetAction") == original_action
     identity = Matrix.Identity(4)
     assert all(
         pose_bone.matrix_basis == identity

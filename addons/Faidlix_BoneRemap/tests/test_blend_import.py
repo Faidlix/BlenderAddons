@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(ROOT))
 import Faidlix_BoneRemap as addon
 from Faidlix_BoneRemap.model import reuse_mapping_items
 from Faidlix_BoneRemap.operators import TEMP_COLLECTION_NAME
+from Faidlix_BoneRemap.retarget import source_action_for_clip
 from Faidlix_BoneRemap.ui import _reused_mapping_sources
 
 
@@ -45,6 +46,7 @@ def add_action(obj, name, distance):
 
 def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.context.preferences.filepaths.save_version = 0
     addon.register()
     source = create_rig("ImportedRig")
     walk = add_action(source, "Walk", 1.0)
@@ -54,6 +56,8 @@ def main():
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     target = create_rig("Main_Rig")
+    original = bpy.data.actions.new("OriginalAction")
+    original.use_fake_user = True
     settings = bpy.context.scene.fbr_settings
     settings.target_armature = target.name
     result = bpy.ops.fbr.import_files(
@@ -96,8 +100,23 @@ def main():
     for source_index, source_file in enumerate(settings.files):
         for clip in source_file.clips:
             clip.enabled = source_index == 0 and clip.action_name == "Walk"
+    settings.naming_mode = "ACTION"
     result = bpy.ops.fbr.retarget()
     assert result == {"FINISHED"}, result
+    source_clip = next(clip for clip in settings.files[0].clips if clip.action_name == "Walk")
+    source_action = source_action_for_clip(source_clip)
+    assert source_action and source_action.name.startswith("__FBR_Source_")
+    renamed_source_name = source_action.name
+    assert source_action.get("_fbr_imported_source")
+    assert bpy.data.actions.get("Walk") == target.animation_data.action
+    assert bpy.data.actions.get("Walk.002") is None
+    assert bpy.ops.fbr.retarget() == {"FINISHED"}
+    assert target.animation_data.action.name == "Walk"
+    assert bpy.ops.fbr.clear_target_animation() == {"FINISHED"}
+    assert bpy.data.actions.get("Walk") is None
+    assert bpy.data.actions.get("OriginalAction") == original
+    assert bpy.ops.fbr.retarget() == {"FINISHED"}
+    assert target.animation_data.action.name == "Walk"
     assert len(settings.files) == 2
     assert bpy.data.collections.get(TEMP_COLLECTION_NAME) is not None
     assert all(bpy.data.objects.get(name) is not None for name in imported_names)
@@ -110,6 +129,14 @@ def main():
     )
     assert bpy.ops.fbr.clear_files() == {"FINISHED"}
     assert len(settings.files) == 0
+    assert settings.retarget_completed_count == 0
+    assert settings.retarget_total_count == 0
+    assert not settings.retarget_batch_id
+    assert bpy.data.actions.get("OriginalAction") == original
+    assert bpy.data.actions.get("Walk") == target.animation_data.action
+    assert bpy.data.actions.get(renamed_source_name) is None
+    assert bpy.data.actions.get("Run") is None
+    assert bpy.data.actions.get("Walk.001") is None
     assert bpy.data.collections.get(TEMP_COLLECTION_NAME) is None
     assert all(bpy.data.objects.get(name) is None for name in imported_names)
     nested = os.path.join(SOURCE_TREE, "nested")

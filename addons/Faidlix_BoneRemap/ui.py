@@ -10,7 +10,7 @@ from .model import (
 from .operators import _mapping_axes_match, _object_actions
 
 
-ADDON_VERSION = (0, 6, 14)
+ADDON_VERSION = (0, 6, 15)
 
 
 def _source_file_index(settings, source_file):
@@ -810,24 +810,22 @@ class FBR_PT_main(Panel):
         check.enabled = not locked
         summary = check.row(align=True)
         if target and enabled:
+            total = settings.retarget_total_count or enabled
             summary.prop(
-                settings, "target_actions_expanded", text="",
+                settings, "target_actions_expanded",
+                text=f"({settings.retarget_completed_count}/{total})個動畫已處理",
                 icon="TRIA_DOWN" if settings.target_actions_expanded else "TRIA_RIGHT",
                 emboss=False,
-            )
-            total = settings.retarget_total_count or enabled
-            summary.label(
-                text=f"({settings.retarget_completed_count}/{total})個動畫已處理"
             )
         elif not target:
             summary.label(text="請選擇主要骨架", icon="ERROR")
         else:
             summary.prop(
-                settings, "target_actions_expanded", text="",
+                settings, "target_actions_expanded",
+                text="請加入並啟用動畫片段",
                 icon="TRIA_DOWN" if settings.target_actions_expanded else "TRIA_RIGHT",
                 emboss=False,
             )
-            summary.label(text="請加入並啟用動畫片段", icon="ERROR")
         summary.operator(
             "fbr.clear_target_animation", text="刪除所有動畫", icon="TRASH"
         )
