@@ -9,7 +9,8 @@
 - `operators.py` 將來源及目標 IK 約束設定納入批次續算簽章，IK 設定按鈕遇到既有 IK 時只進唯讀檢視，不重複建立；此模式與每格 Bake、只取來源 Key、每格 Bake 後精簡三種取樣方式可組合。
 - 已驗證：Blender 5.2.2 `FBR_HEADLESS_OK`；新建雙 IK 腳骨架上，來源 IK 控制骨驅動目標現有 IK，首末影格腳部位置誤差小於 `0.000001` Blender 單位，且目標骨數、IK 約束設定不變，模糊與外部控制器安全拒絕；`角色1008.blend` 新模式 Fairy_Dive 三影格左右腳位置誤差不超過 `0.003906` Blender 單位；原模式 1008 三段手腳回歸亦通過。測試均未儲存使用者 `.blend`。
 - 候選 0.6.16 ZIP 為 54195 bytes，SHA-256 `8b01831be37389d3e0b0308361e29633674d4565836e72ab089fa53e8f240109`；Blender extension validate、7 檔與原始碼逐檔比對、索引與 `README_DOWNLOAD_LINKS=PASS` 均通過。從該 ZIP 隔離安裝後，`FBR_INSTALLED_PACKAGE_OK`、雙 IK 骨架與 1008 新模式測試通過。背景 MCP 服務曾啟動，但 MCP 連線工具逾時，服務已停止；本次**僅以隔離 Blender CLI 驗證，不宣稱 MCP 通過**。
-- 待完成：GitHub 推送與遠端 ZIP 讀回、從 GitHub ZIP 再次隔離驗證及正式 Blender 安裝。前景側邊欄目視仍待驗證。
+- GitHub `main` 已推送提交 `1f91d7b7b3793b4fa7d530aaa09c77d3f45fd26c` 並讀回相同 SHA；從該提交下載的 ZIP 為 54195 bytes，SHA-256 與候選完全相同。全新隔離 Blender 自 GitHub ZIP 安裝後，雙 IK 骨架及 `角色1008.blend` 新模式回歸再次通過。
+- **正式安裝已驗證**：確認 Blender 無執行中程序，將正式 0.6.15 備份至 `C:/Users/faidl/Desktop/3DAI測試/BlenderAddons/backups/faidlix_bone_remap-0.6.15-before-0.6.16-20261008`，再由 GitHub ZIP 重裝至 `extensions/FaidlixBlenderAdd_ons/faidlix_bone_remap`。正式 manifest 是 0.6.16，7 個檔案與 GitHub ZIP 逐一相符；正式使用者設定背景載入 UI／updater `(0, 6, 16)`、場景屬性與預設模式成功。**前景側邊欄點擊與完整動畫目視仍待驗證。**
 
 ## 0.6.15 Action 命名、來源清空與摘要摺疊（2026-10-08）
 
