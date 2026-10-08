@@ -11,7 +11,7 @@
 - 已驗證：Blender 5.2.2 隔離背景 `FBR_HEADLESS_OK` 與 `FBR_MULTI_ACTION_IMPORT_OK`。後者覆蓋重名匯入、來源改名、目標用原名、續算不重複輸出、上下兩種清除按鈕的分工及原有 Action 保留。`角色1008.blend` 三段手腳動作取樣回歸亦通過。前景實際文字點擊仍待目視驗證。
 - 候選 ZIP `repository/faidlix_bone_remap-0.6.15.zip` 為 51741 bytes，SHA-256 `d122bd3b82075d871ff5f1eae37d1f38b75519d1aad300e87ae384e144558050`；Blender extension validate 及 `README_DOWNLOAD_LINKS=PASS` 通過。獨立背景 MCP 從候選 ZIP 安裝版讀回版本 `(0, 6, 15)`，並驗證來源改名、目標原名、兩種刪除分工及原有 Action 保留；測試服務已停止。這仍不能證明前景文字點擊。
 - 發布經提交 `d2b846a`、與另一位開發者的 FBX ZipExporter 1.7.3 提交合併後，以 `391522c6df303cdba15d34f238f3323bf0e45931` 推送並從 GitHub `main` 讀回。兩套件的 README／索引均保留最新版本；從該 GitHub 提交下載的 0.6.15 ZIP 大小及 SHA-256 與本機相同，全新隔離 Blender MCP 從 GitHub ZIP 安裝版再次通過功能驗證並已停止。
-- **正式安裝待辦**：檢查時使用者 Blender 正開啟 `C:/Users/faidl/Desktop/遊戲外包_小鬼別落單/角色/角色1008.blend`（PID 27012）；不可熱替換或強制關閉。待使用者儲存並關閉 Blender 後，先備份目前正式 0.6.14，再用已驗證的 GitHub 0.6.15 ZIP 安裝至 `FaidlixBlenderAdd_ons`，逐檔核對並背景載入。正式安裝尚未完成，不能把隔離安裝當成正式安裝。
+- **正式安裝已驗證**：使用者要求繼續後，確認 Blender 無執行中程序，將正式 0.6.14 備份至 `C:/Users/faidl/Desktop/3DAI測試/BlenderAddons/backups/faidlix_bone_remap-0.6.14-before-0.6.15-20261008`，再以已驗證的 GitHub 0.6.15 ZIP 重裝至 `extensions/FaidlixBlenderAdd_ons/faidlix_bone_remap`。正式目錄 manifest 為 0.6.15，七個套件檔案逐一與 ZIP 的 SHA-256 相符；正式使用者設定的背景 Blender 載入 UI／updater `(0, 6, 15)` 與場景屬性成功。**前景側邊欄文字點擊及完整動畫目視驗收仍待使用者確認。**
 
 ## 0.6.14 角色1008 左右手重定向修正（2026-10-08）
 
