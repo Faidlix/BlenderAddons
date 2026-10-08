@@ -360,9 +360,9 @@ def _fbr_ik_constraint(pose_bone):
     )
 
 
-def _existing_ik_for_mapping(target_obj, mapping):
-    """Find one same-armature IK for the mapped endpoint without changing it."""
-    endpoint = target_obj.pose.bones.get(mapping.target_bone)
+def _existing_ik_for_endpoint(target_obj, endpoint_name):
+    """Find one same-armature IK for an endpoint without changing it."""
+    endpoint = target_obj.pose.bones.get(endpoint_name)
     if not endpoint:
         return None
     candidates = []
@@ -394,8 +394,42 @@ def _existing_ik_for_mapping(target_obj, mapping):
             candidates = owner_candidates
             break
     if len(candidates) > 1:
-        raise RuntimeError(f"{mapping.target_bone} 找到多組 IK，請先明確選擇一組")
+        raise RuntimeError(f"{endpoint_name} 找到多組 IK，請先明確選擇一組")
     return candidates[0] if candidates else None
+
+
+def _existing_ik_for_mapping(target_obj, mapping):
+    return _existing_ik_for_endpoint(target_obj, mapping.target_bone)
+
+
+def source_has_ik(source_obj, mappings):
+    """Whether a mapped source endpoint has a usable same-armature IK."""
+    if not source_obj or source_obj.type != "ARMATURE":
+        return False
+    for mapping in mappings:
+        try:
+            if _existing_ik_for_endpoint(source_obj, mapping.source_bone):
+                return True
+        except RuntimeError:
+            continue
+    return False
+
+
+def _evaluated_source_basis(source_obj, source_pose):
+    """Bake evaluated constraints into a local bone transform for FK transfer."""
+    return source_obj.convert_space(
+        pose_bone=source_pose, matrix=source_pose.matrix,
+        from_space="POSE", to_space="LOCAL",
+    )
+
+
+def _source_pole_direction(evaluated_source, target_obj, binding):
+    owner, _constraint, _control, pole = binding
+    if pole is None:
+        return None
+    direction = evaluated_source.matrix_world.to_3x3() @ (pole.head - owner.head)
+    direction = target_obj.matrix_world.inverted_safe().to_3x3() @ direction
+    return direction.normalized() if direction.length_squared > 1.0e-10 else None
 
 
 def _ik_endpoint_priority(mapping, owner_name):
@@ -403,6 +437,40 @@ def _ik_endpoint_priority(mapping, owner_name):
     if any(part in name for part in ("foot", "hand", "wrist", "ankle")):
         return 3
     return 2 if mapping.target_bone != owner_name else 1
+
+
+def existing_ik_for_row(target_obj, mappings, mapping):
+    """Resolve a chain member to its mapped endpoint, not its solver bone.
+
+    Blender stores an IK constraint on the lower limb for a hand/foot chain.
+    That does not make the lower-limb mapping a separate IK endpoint.
+    """
+    by_constraint = {}
+    for candidate in mappings:
+        if not candidate.target_bone:
+            continue
+        try:
+            binding = _existing_ik_for_mapping(target_obj, candidate)
+        except RuntimeError:
+            if candidate.as_pointer() == mapping.as_pointer():
+                raise
+            continue
+        if not binding:
+            continue
+        owner, constraint, _control, _pole = binding
+        identity = constraint.as_pointer()
+        previous = by_constraint.get(identity)
+        if previous is None or _ik_endpoint_priority(
+            candidate, owner.name,
+        ) > _ik_endpoint_priority(previous[0], owner.name):
+            by_constraint[identity] = (candidate, binding)
+    for driver, binding in by_constraint.values():
+        owner, constraint, _control, _pole = binding
+        if mapping.target_bone in _ik_chain_names(
+            target_obj, driver, owner.name, constraint.chain_count,
+        ):
+            return driver, binding, driver.as_pointer() != mapping.as_pointer()
+    return None, None, False
 
 
 def _source_fk_matrix(pose_bone, cache):
@@ -443,6 +511,13 @@ def iter_bake_clip(
     out_start,
     mirrored=False,
 ):
+    # Pose matrices stay at rest while an armature is in Edit Mode.  The
+    # properties may still accept keyframes, making a bake look successful
+    # while all IK controls remain stationary (for example in 1008_1.blend).
+    if target_obj.mode == "EDIT":
+        if context.view_layer.objects.active != target_obj:
+            raise RuntimeError("Target 正處於編輯模式；請先切回物件或姿勢模式")
+        bpy.ops.object.mode_set(mode="OBJECT")
     source_obj = bpy.data.objects.get(source_file.source_object)
     source_action = source_action_for_clip(clip)
     if not source_obj or not source_action:
@@ -469,6 +544,30 @@ def iter_bake_clip(
                 existing_ik[identity] = (mapping, binding)
         if not existing_ik:
             raise RuntimeError("Target 沒有可沿用的同骨架 IK；請選姿勢 Bake 或先設定 IK")
+
+    source_ik = {}
+    source_ik_chain_names = set()
+    if settings.use_source_ik and existing_ik:
+        for mapping, _binding in existing_ik.values():
+            source_name = mapping.source_bone
+            if mirrored:
+                counterpart = flip_bone_name(source_name)
+                if counterpart in source_obj.pose.bones:
+                    source_name = counterpart
+            try:
+                binding = _existing_ik_for_endpoint(source_obj, source_name)
+            except RuntimeError:
+                binding = None
+            if binding:
+                source_ik[mapping.as_pointer()] = binding
+                owner, constraint, _control, _pole = binding
+                source_ik_chain_names.add(source_name)
+                bone = owner
+                for _ in range(max(1, constraint.chain_count)):
+                    if bone is None:
+                        break
+                    source_ik_chain_names.add(bone.name)
+                    bone = bone.parent
 
     source_obj.animation_data_create()
     target_obj.animation_data_create()
@@ -579,7 +678,16 @@ def iter_bake_clip(
                 if not source_pose or not target_pose:
                     continue
 
-                basis = source_pose.matrix_basis.copy()
+                # Without source-IK transfer, use the fully evaluated pose:
+                # matrix_basis alone omits the motion produced by constraints.
+                use_source_binding = (
+                    settings.ik_bake_mode == "EXISTING"
+                    and source_name in source_ik_chain_names
+                )
+                basis = (
+                    source_pose.matrix_basis.copy() if use_source_binding
+                    else _evaluated_source_basis(evaluated_source, source_pose)
+                )
                 if mirrored:
                     basis = _reflect_basis(basis)
                 location, source_rotation, scale = basis.decompose()
@@ -661,7 +769,11 @@ def iter_bake_clip(
                         counterpart = flip_bone_name(source_name)
                         if counterpart in evaluated_source.pose.bones:
                             source_name = counterpart
-                    source_bend = _source_ik_bend_direction(
+                    source_binding = source_ik.get(mapping.as_pointer())
+                    source_bend = (
+                        _source_pole_direction(evaluated_source, target_obj, source_binding)
+                        if source_binding else None
+                    ) or _source_ik_bend_direction(
                         evaluated_source, target_obj, source_name
                     )
                     from .operators import _character_basis
@@ -681,7 +793,7 @@ def iter_bake_clip(
                     if direction is not None:
                         previous_pole_directions[mapping.as_pointer()] = direction
                 desired_matrix = endpoint.matrix.copy()
-                if settings.ik_bake_mode == "EXISTING":
+                if settings.ik_bake_mode == "EXISTING" and mapping.as_pointer() in source_ik:
                     source_name = mapping.source_bone
                     if mirrored:
                         counterpart = flip_bone_name(source_name)

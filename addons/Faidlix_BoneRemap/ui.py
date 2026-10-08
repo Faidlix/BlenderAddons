@@ -7,11 +7,11 @@ from .model import (
     rebuild_animation_rows,
     reuse_mapping_items,
 )
-from .operators import _mapping_axes_match, _object_actions
-from .retarget import _existing_ik_for_mapping
+from .operators import _IK_EDIT_STATE, _mapping_axes_match, _object_actions
+from .retarget import existing_ik_for_row, mapping_source, source_has_ik
 
 
-ADDON_VERSION = (0, 6, 16)
+ADDON_VERSION = (0, 6, 17)
 
 
 def _source_file_index(settings, source_file):
@@ -332,16 +332,19 @@ def _draw_mapping_row(context, layout, source_file, item, index):
     else:
         clear_slot.label(text="")
     existing = None
+    linked = False
     existing_error = False
-    if target and item.target_bone and not item.ik_enabled:
+    if target and item.target_bone:
         try:
-            existing = _existing_ik_for_mapping(target, item)
+            _driver, existing, linked = existing_ik_for_row(target, source_file.mappings, item)
         except RuntimeError:
             existing_error = True
     ik = ik_slot.operator(
         "fbr.ik_settings",
-        text="IK 已設定" if item.ik_enabled else (
-            "IK 需確認" if existing_error else ("IK 已存在" if existing else "設定 IK")
+        text="受 IK 連動" if linked and not item.ik_enabled else (
+            "IK 已設定" if item.ik_enabled else (
+                "IK 需確認" if existing_error else ("IK 已存在" if existing else "設定 IK")
+            )
         ),
         depress=item.ik_enabled or existing is not None,
     )
@@ -412,27 +415,41 @@ def _draw_ik_settings(layout, file_index, source_file):
     editor.label(text=f"IK 設定：{active.source_bone} → {active.target_bone}", icon="CONSTRAINT_BONE")
     if source_file.ik_existing_view:
         target = bpy.data.objects.get(bpy.context.scene.fbr_settings.target_armature)
-        try:
-            existing = _existing_ik_for_mapping(target, active) if target else None
-        except RuntimeError as exc:
-            editor.label(text=str(exc), icon="ERROR")
-            existing = None
-        if existing:
-            owner, constraint, control, pole = existing
-            editor.label(text=f"沿用現有 IK：{owner.name} / {constraint.name}")
-            editor.label(text=f"控制骨：{control.name}；Pole：{pole.name if pole else '無'}")
-            editor.label(text=f"關聯骨頭數：{constraint.chain_count}；迭代：{constraint.iterations}")
-            editor.label(text=f"影響：{constraint.influence:.2f}；Pole 角度：{constraint.pole_angle:.3f} rad")
-            editor.label(text=(
-                f"骨尾：{'是' if constraint.use_tail else '否'}；"
-                f"旋轉：{'是' if constraint.use_rotation else '否'}；"
-                f"拉伸：{'是' if constraint.use_stretch else '否'}"
-            ))
-            editor.label(text="現有 IK 設定唯讀；沿用模式不新增或改寫約束")
-        close = editor.operator("fbr.ik_settings", text="關閉")
-        close.file_index = file_index
-        close.mapping_index = source_file.active_mapping_index
-        close.action = "OK"
+        backup = _IK_EDIT_STATE.get(source_file.uid, {}).get("existing")
+        owner = target.pose.bones.get(backup[0]) if target and backup else None
+        constraint = owner.constraints.get(backup[1]) if owner else None
+        if constraint:
+            editor.label(text=f"現有 IK：{owner.name} / {constraint.name}")
+            editor.prop_search(constraint, "subtarget", target.data, "bones", text="控制骨")
+            editor.prop(constraint, "pole_target", text="Pole 骨架")
+            editor.prop_search(constraint, "pole_subtarget", target.data, "bones", text="Pole")
+            solver = editor.row(align=True)
+            solver.prop(constraint, "chain_count", text="關聯骨頭數")
+            solver.prop(constraint, "iterations", text="迭代次數")
+            solver.prop(constraint, "influence", text="影響")
+            pole_row = editor.row(align=True)
+            pole_row.prop(constraint, "pole_angle", text="Pole 角度")
+            options = editor.row(align=True)
+            options.prop(constraint, "use_tail", text="使用骨尾", toggle=True)
+            options.prop(constraint, "use_rotation", text="使用旋轉", toggle=True)
+            options.prop(constraint, "use_stretch", text="允許拉伸", toggle=True)
+            buttons = editor.row(align=True)
+            delete = buttons.operator("fbr.delete_ik", text="刪除 IK", icon="TRASH")
+            delete.file_index = file_index
+            delete.mapping_index = source_file.active_mapping_index
+            cancel = buttons.operator("fbr.ik_settings", text="取消")
+            cancel.file_index = file_index
+            cancel.mapping_index = source_file.active_mapping_index
+            cancel.action = "CANCEL"
+            okay = buttons.operator("fbr.ik_settings", text="確認")
+            okay.file_index = file_index
+            okay.mapping_index = source_file.active_mapping_index
+            okay.action = "OK"
+        else:
+            close = editor.operator("fbr.ik_settings", text="關閉")
+            close.file_index = file_index
+            close.mapping_index = source_file.active_mapping_index
+            close.action = "OK"
         return
     if active.ik_enabled:
         for choices in (("BOX", "SPHERE"), ("CIRCLE", "SQUARE")):
@@ -835,8 +852,20 @@ class FBR_PT_main(Panel):
         key_modes = output_box.row(align=True)
         key_modes.prop(settings, "key_mode", expand=True)
         ik_modes = output_box.row(align=True)
-        ik_modes.label(text="IK 處理")
-        ik_modes.prop(settings, "ik_bake_mode", expand=True)
+        ik_modes.operator(
+            "fbr.toggle_copy_to_ik", text="拷貝到 IK",
+            depress=settings.ik_bake_mode == "EXISTING", icon="CONSTRAINT_BONE",
+        )
+        has_source_ik = any(
+            source_has_ik(
+                bpy.data.objects.get(source.source_object),
+                mapping_source(settings, source).mappings,
+            )
+            for source in settings.files
+            if any(clip.enabled for clip in source.clips)
+        )
+        if has_source_ik:
+            ik_modes.prop(settings, "use_source_ik", toggle=True)
         if settings.key_mode == "SIMPLIFY":
             tolerance = output_box.row(align=True)
             tolerance.prop(settings, "rotation_tolerance")
@@ -863,6 +892,9 @@ class FBR_PT_main(Panel):
                 icon="TRIA_DOWN" if settings.target_actions_expanded else "TRIA_RIGHT",
                 emboss=False,
             )
+        run = summary.row(align=True)
+        run.enabled = bool(target and enabled and editing_index < 0 and not settings.retarget_running)
+        run.operator("fbr.retarget", text="開始批次重定向", icon="PLAY")
         summary.operator(
             "fbr.clear_target_animation", text="刪除所有動畫", icon="TRASH"
         )
@@ -874,11 +906,6 @@ class FBR_PT_main(Panel):
                 type="BAR",
                 text=f"背景處理：{settings.retarget_status} （Esc 取消）",
             )
-        else:
-            run = layout.row()
-            run.scale_y = 1.3
-            run.enabled = bool(target and enabled and editing_index < 0)
-            run.operator("fbr.retarget", text="開始批次重定向", icon="PLAY")
         if target and settings.target_actions_expanded:
             actions = _object_actions(target)
             action_list = layout.box()

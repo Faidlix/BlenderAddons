@@ -2,6 +2,13 @@
 
 更新日期：2026-10-08。此檔區分 GitHub 發布、隔離安裝與正式 Blender 安裝；三者不可混為一談。
 
+## 0.6.17 IK 編輯與來源模式（2026-10-08）
+
+- IK 鏈內的 LowerLeg 顯示「受 IK 連動」，點擊改為開啟 Foot 的 IK 設定；現有 IK 可修改控制骨、Pole、鏈長、迭代、影響與角度，取消會還原，刪除既有約束時不重複建立 IK。非本外掛控制骨不會隨約束刪除。
+- 「姿勢 Bake」為未按「拷貝到 IK」時的預設行為；「使用來源 IK」獨立顯示於有可對應來源 IK 的情況。關閉來源 IK 時讀取完整解算姿勢，啟用時沿用對應來源 IK 的控制與 Pole 資訊，缺少對應則回退到姿勢。來源 Action 改用 `Org_` 前綴，批次按鈕與刪除按鈕排在摘要同一行，刪除在後。
+- `角色1008_1.blend` 以唯讀背景測試：檔案原本停在 Edit Mode，烘焙現在會先切到 Object Mode 以便求解。從來源 `Fairy_Dive` 烘焙到 Target 現有 IK 後，左右腳在來源影格 0、9、19 的最大位置誤差為 `0.003906` Blender 單位，控制骨有非零位置 Key；原始 `.blend` 未儲存或修改。
+- 候選 ZIP `repository/faidlix_bone_remap-0.6.17.zip` 為 56424 bytes，SHA-256 `cc034cd4a92d01ede97827e9f7a5dc8bb01aae3e28883d9e765809f6805abddf`；Blender extension validate、`FBR_HEADLESS_OK`、`FBR_MULTI_ACTION_IMPORT_OK`、`FBR_EXISTING_IK_OK`、`FBR_INSTALLED_PACKAGE_OK`、候選包隔離安裝後的 `1008_1` 測試，以及 `README_DOWNLOAD_LINKS=PASS` 均通過。正式推送與安裝狀態須另行讀回確認。
+
 ## 0.6.16 沿用目標既有 IK（2026-10-08）
 
 - `model.py`／`ui.py` 在原三種 Key 烘焙取樣按鈕之外，獨立加入「姿勢 Bake／沿用目標 IK」選項；預設保留原流程。映射列辨識現有 IK，設定區可唯讀查看其控制骨、Pole、鏈長、迭代、影響與其他參數，關閉仍還原原選取狀態。

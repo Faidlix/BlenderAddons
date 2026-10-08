@@ -19,6 +19,7 @@ from .model import (
 from .retarget import (
     _clear_target_pose,
     _existing_ik_for_mapping,
+    existing_ik_for_row,
     assign_action_and_slot,
     build_automatic_mapping,
     bake_clip,
@@ -1721,7 +1722,11 @@ def _reserve_source_action_names(settings, jobs):
         action = source_action_for_clip(clip)
         if action is None:
             continue
-        if action.name != clip.action_name:
+        desired_name = f"Org_{clip.action_name}"
+        if action.name == desired_name:
+            continue
+        if (action.name != clip.action_name
+                and not action.name.startswith("__FBR_Source_")):
             continue
         for obj in bpy.data.objects:
             if obj.name in source_objects:
@@ -1737,7 +1742,7 @@ def _reserve_source_action_names(settings, jobs):
             for candidate in source.clips
             if (candidate.source_action_name or candidate.action_name) == old_name
         ]
-        action.name = f"__FBR_Source_{source_file.uid[:8]}_{old_name}"
+        action.name = desired_name
         for candidate in linked_clips:
             candidate.source_action_name = action.name
 
@@ -1798,7 +1803,7 @@ def _retarget_plan_signature(settings, target, jobs):
         target.name, armature_signature(target), settings.output_mode,
         settings.naming_mode, settings.merged_action_name,
         settings.merged_start, settings.merged_gap, settings.key_mode,
-        settings.ik_bake_mode,
+        settings.ik_bake_mode, settings.use_source_ik,
         settings.rotation_tolerance, settings.location_tolerance,
         settings.extract_root_motion, settings.auto_scale,
         _ik_constraint_signature(target),
@@ -2868,6 +2873,22 @@ class FBR_OT_ik_settings(Operator):
         if not 0 <= mapping_index < len(source.mappings):
             return {"CANCELLED"}
         mapping = source.mappings[mapping_index]
+        if self.action == "START" and not mapping.ik_enabled:
+            target = _target_object(context.scene.fbr_settings)
+            if target and mapping.target_bone:
+                try:
+                    driver, _binding, linked = existing_ik_for_row(
+                        target, source.mappings, mapping,
+                    )
+                except RuntimeError as exc:
+                    self.report({"ERROR"}, str(exc))
+                    return {"CANCELLED"}
+                if linked and driver:
+                    mapping_index = next(
+                        index for index, item in enumerate(source.mappings)
+                        if item.as_pointer() == driver.as_pointer()
+                    )
+                    mapping = driver
         pair_name = flip_bone_name(mapping.source_bone)
         pair = next(
             (item for item in source.mappings if item.source_bone == pair_name),
@@ -2913,6 +2934,15 @@ class FBR_OT_ik_settings(Operator):
                     return {"CANCELLED"}
             if existing:
                 source.ik_existing_view = True
+                owner, constraint, _control, _pole = existing
+                _IK_EDIT_STATE[source.uid]["existing"] = (
+                    owner.name, constraint.name,
+                    {prop: getattr(constraint, prop) for prop in (
+                        "subtarget", "pole_target", "pole_subtarget", "chain_count",
+                        "iterations", "influence", "pole_angle", "use_tail",
+                        "use_rotation", "use_stretch",
+                    )},
+                )
                 _set_active_object_mode(context, owner_obj, "POSE")
                 _tag_view3d_redraw(context)
                 return {"FINISHED"}
@@ -2935,7 +2965,17 @@ class FBR_OT_ik_settings(Operator):
             if pair:
                 _delete_ik_mapping(context, pair)
         elif self.action == "CANCEL":
-            if not source.ik_existing_view:
+            if source.ik_existing_view:
+                backup = _IK_EDIT_STATE.get(source.uid, {}).get("existing")
+                if backup:
+                    owner_name, constraint_name, values = backup
+                    target = _target_object(context.scene.fbr_settings)
+                    owner = target.pose.bones.get(owner_name) if target else None
+                    constraint = owner.constraints.get(constraint_name) if owner else None
+                    if constraint:
+                        for prop, value in values.items():
+                            setattr(constraint, prop, value)
+            else:
                 _delete_ik_mapping(context, mapping)
                 if pair:
                     _delete_ik_mapping(context, pair)
@@ -2987,6 +3027,28 @@ class FBR_OT_delete_ik(Operator):
         if not 0 <= index < len(source.mappings):
             return {"CANCELLED"}
         mapping = source.mappings[index]
+        if source.ik_existing_view:
+            target = _target_object(context.scene.fbr_settings)
+            backup = _IK_EDIT_STATE.get(source.uid, {}).get("existing")
+            owner = target.pose.bones.get(backup[0]) if target and backup else None
+            constraint = owner.constraints.get(backup[1]) if owner else None
+            if constraint:
+                if constraint.name.startswith(IK_CONSTRAINT_NAME):
+                    control = target.pose.bones.get(constraint.subtarget)
+                    pole = target.pose.bones.get(constraint.pole_subtarget)
+                    mapping.ik_enabled = True
+                    mapping.ik_control_bone = control.name if control else ""
+                    mapping.ik_pole_bone = pole.name if pole else ""
+                    _delete_ik_mapping(context, mapping)
+                else:
+                    owner.constraints.remove(constraint)
+                    context.view_layer.update()
+            _IK_EDIT_STATE.pop(source.uid, None)
+            source.ik_editing = False
+            source.ik_existing_view = False
+            _restore_ik_selection(context, source.uid)
+            _tag_view3d_redraw(context)
+            return {"FINISHED"}
         _delete_ik_mapping(context, mapping)
         pair_name = flip_bone_name(mapping.source_bone)
         if pair_name != mapping.source_bone:
@@ -2998,6 +3060,7 @@ class FBR_OT_delete_ik(Operator):
                 _delete_ik_mapping(context, pair)
         _IK_EDIT_STATE.pop(source.uid, None)
         source.ik_editing = False
+        source.ik_existing_view = False
         _restore_ik_selection(context, source.uid)
         _tag_view3d_redraw(context)
         return {"FINISHED"}
@@ -3353,6 +3416,20 @@ class FBR_OT_mirror_mapping(Operator):
         return {"FINISHED"}
 
 
+class FBR_OT_toggle_copy_to_ik(Operator):
+    bl_idname = "fbr.toggle_copy_to_ik"
+    bl_label = "拷貝到 IK"
+    bl_description = "將動畫寫入目標現有 IK 控制骨；關閉時烘焙最終姿勢"
+    bl_options = {"INTERNAL", "UNDO"}
+
+    def execute(self, context):
+        settings = context.scene.fbr_settings
+        settings.ik_bake_mode = (
+            "POSE" if settings.ik_bake_mode == "EXISTING" else "EXISTING"
+        )
+        return {"FINISHED"}
+
+
 class FBR_OT_retarget(Operator):
     bl_idname = "fbr.retarget"
     bl_label = "開始批次重定向"
@@ -3647,5 +3724,6 @@ CLASSES = (
     FBR_OT_auto_map,
     FBR_OT_set_reuse_mapping,
     FBR_OT_mirror_mapping,
+    FBR_OT_toggle_copy_to_ik,
     FBR_OT_retarget,
 )

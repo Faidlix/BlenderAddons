@@ -105,7 +105,7 @@ def main():
     assert result == {"FINISHED"}, result
     source_clip = next(clip for clip in settings.files[0].clips if clip.action_name == "Walk")
     source_action = source_action_for_clip(source_clip)
-    assert source_action and source_action.name.startswith("__FBR_Source_")
+    assert source_action and source_action.name.startswith("Org_")
     renamed_source_name = source_action.name
     assert source_action.get("_fbr_imported_source")
     assert bpy.data.actions.get("Walk") == target.animation_data.action

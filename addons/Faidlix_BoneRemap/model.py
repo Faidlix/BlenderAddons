@@ -602,10 +602,15 @@ class FBR_Settings(PropertyGroup):
     ik_bake_mode: EnumProperty(
         name="IK 處理",
         items=(
-            ("POSE", "姿勢 Bake", "沿用目前的姿勢烘焙流程"),
-            ("EXISTING", "沿用目標 IK", "使用目標骨架已有的 IK 控制骨與 Pole，不新增 IK"),
+            ("POSE", "姿勢 Bake", "將來源的最終姿勢烘焙到目標骨骼"),
+            ("EXISTING", "拷貝到 IK", "將結果寫入目標骨架現有的 IK 控制骨與 Pole"),
         ),
         default="POSE",
+    )
+    use_source_ik: BoolProperty(
+        name="使用來源 IK",
+        description="來源與目標 IK 對應時使用來源控制器與 Pole 資訊；否則使用來源最終烘焙姿勢",
+        default=False,
     )
     rotation_tolerance: FloatProperty(
         name="旋轉誤差",

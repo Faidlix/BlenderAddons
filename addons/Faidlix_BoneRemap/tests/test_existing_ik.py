@@ -14,6 +14,8 @@ else:
     addon = importlib.import_module("Faidlix_BoneRemap")
 iter_action_fcurves = addon.model.iter_action_fcurves
 _existing_ik_for_mapping = addon.retarget._existing_ik_for_mapping
+existing_ik_for_row = addon.retarget.existing_ik_for_row
+source_has_ik = addon.retarget.source_has_ik
 assign_action_and_slot = addon.retarget.assign_action_and_slot
 bake_clip = addon.retarget.bake_clip
 
@@ -72,7 +74,15 @@ def main():
             mapping.transfer_location = True
     foot_mapping = entry.mappings[3]
     assert _existing_ik_for_mapping(target, foot_mapping)[1] == target_ik
+    driver, binding, linked = existing_ik_for_row(target, entry.mappings, entry.mappings[2])
+    assert driver == foot_mapping and binding[1] == target_ik and linked
+    assert source_has_ik(source, entry.mappings)
     before_bones = tuple(target.data.bones.keys())
+    assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=2, action="START") == {"FINISHED"}
+    assert entry.active_mapping_index == 3 and entry.ik_existing_view
+    target_ik.iterations = 123
+    assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=3, action="CANCEL") == {"FINISHED"}
+    assert target_ik.iterations == 500
     assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=3, action="START") == {"FINISHED"}
     assert entry.ik_existing_view and not foot_mapping.ik_enabled
     assert tuple(target.data.bones.keys()) == before_bones
@@ -120,6 +130,13 @@ def main():
     assert (positions[1][0] - positions[10][0]).length > 0.05
     assert (positions[1][1] - positions[10][1]).length > 0.05
     print("FBR_EXISTING_IK_ERRORS", positions[1][2], positions[10][2])
+    settings.use_source_ik = True
+    source_ik_output = bpy.data.actions.new("Retarget Source And Target IK")
+    bake_clip(bpy.context, settings, entry, clip, target, source_ik_output, 1)
+    assert any(
+        curve.data_path == 'pose.bones["IK_Control"].location'
+        for curve in iter_action_fcurves(source_ik_output)
+    )
     duplicate = target.pose.bones["Lower"].constraints.new("IK")
     duplicate.name = "Ambiguous IK"
     duplicate.target, duplicate.subtarget = target, "IK_Control"
@@ -147,6 +164,10 @@ def main():
         raise AssertionError("External IK editor should fail safely")
     assert tuple(target.data.bones.keys()) == before_bones
     target_ik.target = target
+    assert bpy.ops.fbr.ik_settings(file_index=0, mapping_index=2, action="START") == {"FINISHED"}
+    assert bpy.ops.fbr.delete_ik(file_index=0, mapping_index=3) == {"FINISHED"}
+    assert not target.pose.bones["Lower"].constraints
+    assert tuple(target.data.bones.keys()) == before_bones
     print("FBR_EXISTING_IK_OK")
 
 
