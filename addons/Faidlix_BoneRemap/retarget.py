@@ -149,12 +149,17 @@ def _basis_correction(
     target_bone = target_obj.data.bones.get(target_name)
     if not source_bone or not target_bone:
         return None
+    if source_bone.parent and target_bone.parent:
+        # Pose basis rotations act in each bone's armature-space rest axes.
+        # Comparing parent-relative rest matrices can invert one mirrored
+        # limb when the source and target shoulder/hip rest axes differ.
+        source_rest = source_bone.matrix_local.to_quaternion()
+        target_rest = target_bone.matrix_local.to_quaternion()
+        return target_rest.inverted() @ source_rest
     source_rest = _rest_rotation(source_obj, source_name)
     target_rest = _rest_rotation(target_obj, target_name)
     if not source_rest or not target_rest:
         return None
-    if source_bone.parent and target_bone.parent:
-        return target_rest.inverted() @ source_rest
     return target_rest.inverted() @ global_correction @ source_rest
 
 
@@ -605,6 +610,23 @@ def iter_bake_clip(
                         data_path="location",
                         frame=target_frame,
                         group=pole.name,
+                    )
+            # The solver rotates the lower limb to reach the IK control.
+            # Preserve the mapped wrist/toe endpoint orientation after that
+            # solve; otherwise the endpoint inherits an unintended forearm
+            # or shin rotation even when its position is correct.
+            for mapping, endpoint, _owner, _control, _pole, constraint in ik_mappings:
+                if constraint.mute or _fbr_ik_constraint(endpoint):
+                    continue
+                desired_matrix = desired_ik_transforms[mapping.as_pointer()][0]
+                endpoint.rotation_mode = "QUATERNION"
+                endpoint.matrix = desired_matrix
+                context.view_layer.update()
+                for data_path in ("location", "rotation_quaternion", "scale"):
+                    endpoint.keyframe_insert(
+                        data_path=data_path,
+                        frame=target_frame,
+                        group=endpoint.name,
                     )
             yield frame_index + 1
         out_action.use_fake_user = settings.fake_user
