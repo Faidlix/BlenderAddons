@@ -10,7 +10,7 @@ from .model import (
 from .operators import _mapping_axes_match, _object_actions
 
 
-ADDON_VERSION = (0, 6, 13)
+ADDON_VERSION = (0, 6, 14)
 
 
 def _source_file_index(settings, source_file):
