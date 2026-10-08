@@ -11,7 +11,7 @@ from .operators import _IK_EDIT_STATE, _mapping_axes_match, _object_actions
 from .retarget import existing_ik_for_row, mapping_source, source_has_ik
 
 
-ADDON_VERSION = (0, 6, 17)
+ADDON_VERSION = (0, 6, 18)
 
 
 def _source_file_index(settings, source_file):
@@ -117,7 +117,8 @@ def _draw_forward_axis_buttons(layout, source, file_index, role):
     row = layout.row(align=True)
     row.label(text="來源前方" if role == "SOURCE" else "Target 前方")
     buttons = row.row(align=True)
-    for axis, label in (("AUTO", "自動"), ("+X", "+X"), ("-X", "-X"), ("+Y", "+Y"), ("-Y", "-Y")):
+    for axis, label in (("AUTO", "自動"), ("+X", "+X"), ("-X", "-X"),
+                        ("+Y", "+Y"), ("-Y", "-Y"), ("+Z", "+Z"), ("-Z", "-Z")):
         button = buttons.operator(
             "fbr.set_forward_axis",
             text=label,

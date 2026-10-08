@@ -247,7 +247,30 @@ def _ik_bend_direction(upper_head, joint, tip):
     return bend.normalized()
 
 
+def _source_chain_disconnected(source_obj, endpoint_name, max_gap_ratio=0.5):
+    """Reject a bend plane built from bones that are not anatomical joints.
+
+    Some imported FBX rigs retain parent links while their rest head/tail
+    positions are far apart. In that case the source's apparent knee/elbow
+    points in an arbitrary direction. The already mapped target FK pose is a
+    safer pole reference than a line between those disconnected source bones.
+    Small intentional joint offsets are still accepted.
+    """
+    endpoint = source_obj.data.bones.get(endpoint_name)
+    lower = endpoint.parent if endpoint else None
+    upper = lower.parent if lower else None
+    if not upper:
+        return False
+    for parent, child in ((upper, lower), (lower, endpoint)):
+        limit = max(parent.length, child.length, 1.0e-6) * max_gap_ratio
+        if (parent.tail_local - child.head_local).length > limit:
+            return True
+    return False
+
+
 def _source_ik_bend_direction(evaluated_source, target_obj, source_name):
+    if _source_chain_disconnected(evaluated_source, source_name):
+        return None
     endpoint = evaluated_source.pose.bones.get(source_name)
     lower = endpoint.parent if endpoint else None
     upper = lower.parent if lower else None
@@ -408,7 +431,10 @@ def source_has_ik(source_obj, mappings):
         return False
     for mapping in mappings:
         try:
-            if _existing_ik_for_endpoint(source_obj, mapping.source_bone):
+            if (
+                not _source_chain_disconnected(source_obj, mapping.source_bone)
+                and _existing_ik_for_endpoint(source_obj, mapping.source_bone)
+            ):
                 return True
         except RuntimeError:
             continue
@@ -558,7 +584,7 @@ def iter_bake_clip(
                 binding = _existing_ik_for_endpoint(source_obj, source_name)
             except RuntimeError:
                 binding = None
-            if binding:
+            if binding and not _source_chain_disconnected(source_obj, source_name):
                 source_ik[mapping.as_pointer()] = binding
                 owner, constraint, _control, _pole = binding
                 source_ik_chain_names.add(source_name)

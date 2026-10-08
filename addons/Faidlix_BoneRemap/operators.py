@@ -1563,6 +1563,8 @@ def _axis_vector(identifier):
         "-X": Vector((-1.0, 0.0, 0.0)),
         "+Y": Vector((0.0, 1.0, 0.0)),
         "-Y": Vector((0.0, -1.0, 0.0)),
+        "+Z": Vector((0.0, 0.0, 1.0)),
+        "-Z": Vector((0.0, 0.0, -1.0)),
     }.get(identifier)
 
 
@@ -1633,7 +1635,9 @@ def _character_basis(obj, forward_axis="AUTO"):
     if right.length < 1.0e-6:
         right = Vector((1.0, 0.0, 0.0))
     right.normalize()
-    if anatomical_right is not None and right.dot(anatomical_right) < 0.0:
+    if forward_axis == "AUTO" and anatomical_right is not None and right.dot(anatomical_right) < 0.0:
+        # An explicitly selected facing axis must not be silently inverted
+        # when a source rig's left/right labels or rest positions disagree.
         forward.negate()
         right.negate()
     forward = right.cross(up).normalized()
@@ -3249,7 +3253,8 @@ class FBR_OT_set_forward_axis(Operator):
     role: EnumProperty(items=(("SOURCE", "來源", ""), ("TARGET", "Target", "")))
     axis: EnumProperty(
         items=(("AUTO", "自動", ""), ("+X", "+X", ""), ("-X", "-X", ""),
-               ("+Y", "+Y", ""), ("-Y", "-Y", "")),
+               ("+Y", "+Y", ""), ("-Y", "-Y", ""), ("+Z", "+Z", ""),
+               ("-Z", "-Z", "")),
     )
 
     def execute(self, context):
