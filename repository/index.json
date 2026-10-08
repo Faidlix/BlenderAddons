@@ -80,16 +80,16 @@
       "id": "faidlix_fbx_zip_exporter",
       "name": "Faidlix_Fbx ZipExporter",
       "tagline": "Export FBX and package only connected material textures",
-      "version": "1.7.2",
+      "version": "1.7.3",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:MIT"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_fbx_zip_exporter-1.7.2.zip",
-      "archive_size": 10751,
-      "archive_hash": "sha256:02c588d19968ac3c38b239127251cbe6b640dccca0d2bd336f4b3fdf39012c43"
+      "archive_url": "./faidlix_fbx_zip_exporter-1.7.3.zip",
+      "archive_size": 10742,
+      "archive_hash": "sha256:a9de76f159b36dcc37f28035fa8784bbed71751769e0d5052a5fd30d26657a74"
     },
     {
       "schema_version": "1.0.0",
