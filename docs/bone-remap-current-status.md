@@ -8,7 +8,9 @@
 - 1008 原始休息姿勢的 IK／Pole 控制骨左右對稱；對 `Fairy_Dive` 比較開／關 X 鏡像後，烘焙曲線數值完全相同。因此目前左右動畫偏移並非 X 鏡像開關造成。舊演算法在影格 10 的右手位置誤差約 0.393 Blender 單位，且誤差從右上臂方向開始。
 - `retarget.py` 子骨軸向轉換改以各骨的 armature-space rest rotation 比較，避免肩／髖父骨不同軸向使鏡像側被反轉；IK 求解後補下手腕／腳趾端點的旋轉等 Key，避免端點沿用前臂／小腿的錯誤方向。
 - 新增 `tests/test_1008_retarget.py`，使用 1008 的 `Fairy_Dive`、`Fairy_Run`、`Fairy_CoverEars`，開／關 IK 比較來源與目標的左右手腳在起、中、終影格的位置和方向。Blender 5.2.2 背景測試通過：IK 手部最大位置誤差約 0.0271 Blender 單位、最大方向誤差 2.168°；腳部最大位置誤差約 0.00391 Blender 單位。這是取樣測試，尚未取代前景完整動畫目視驗收。
-- 本版只納入上述修正；工作樹另有未獲發布授權的「更新後需重啟」草稿，不混入 0.6.14 套件。候選 ZIP 為 51026 bytes，SHA-256 `0f4a81e9bde86c0f349b9c63e4b2ab5c60e855e95fbef674a1733839a0c57d12`，manifest validate 已通過。發布、GitHub 下載讀回與正式安裝結果須另行核實，不可由此條視為已完成。
+- 本版只納入上述修正；另一工作樹的「更新後需重啟」草稿不混入 0.6.14 套件。ZIP 為 51026 bytes，SHA-256 `0f4a81e9bde86c0f349b9c63e4b2ab5c60e855e95fbef674a1733839a0c57d12`，manifest validate 已通過。
+- 發布提交 `fa8c15f0d4abef3d837c3031228eef7a488c381a` 已推送並以 `git ls-remote` 確認 GitHub `main`；從該提交下載的 ZIP 為 51026 bytes，SHA-256 與本機相同。全新隔離 Blender 5.2.2 從 GitHub ZIP 安裝、讀回版本 `(0, 6, 14)`，並在角色1008重新通過三段 IK／無 IK 測試。
+- 正式安裝前查無 Blender 執行程序；正式 0.6.13 備份至 `C:/Users/faidl/Desktop/3DAI測試/BlenderAddons/backups/faidlix_bone_remap-0.6.13-before-0.6.14-20261008`，再從同一 GitHub ZIP 重裝至 `extensions/FaidlixBlenderAdd_ons/faidlix_bone_remap`。正式目錄 manifest 為 0.6.14，七個套件檔案與 ZIP 逐一相符；正式使用者設定的背景 Blender 可載入該路徑，UI／updater 版本及場景屬性確認成功。**前景完整動畫目視驗收仍待使用者確認。**
 
 ## 0.6.13 IK 親子層級與鏡像（2026-10-08）
 
