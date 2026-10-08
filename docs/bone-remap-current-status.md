@@ -8,8 +8,10 @@
 - `model.py` 加入片段的實際來源 Action 名稱欄位；`operators.py` 在「每段獨立 Action／只用 Action 名稱」運算前，將匯入來源 Action 改為唯一的 `__FBR_Source_...` 名稱，保留片段原名供目標 Action 使用。預覽、Bake 與移除來源均以實際來源名稱查找；同一批次重按不重複改名。若目標原名已被其他資料佔用，明確報錯，不覆蓋既有 Action。
 - 上方「全部清空動畫檔」只清除匯入的來源骨架、來源 Action 與匯入清單，保留原有 Action 及批次產生的目標 Action；下方「刪除所有動畫」解除目標掛載，並清除此外掛產生且未被其他物件使用的目標 Action 資料塊，原有 Action 資料塊保留。單獨來源檔移除同樣使用實際來源 Action 名稱。
 - `ui.py` 的「(已處理/總數)個動畫已處理」改成整段文字和箭頭共用一個可點擊摺疊控制；右側刪除按鈕保持獨立。
-- 已驗證：Blender 5.2.2 隔離背景 `FBR_HEADLESS_OK` 與 `FBR_MULTI_ACTION_IMPORT_OK`。後者覆蓋重名匯入、來源改名、目標用原名、續算不重複輸出、上下兩種清除按鈕的分工及原有 Action 保留。`角色1008.blend` 三段手腳動作取樣回歸亦通過。前景實際文字點擊、正式安裝與 GitHub 發布狀態在本節後續更新前均屬待驗證。
+- 已驗證：Blender 5.2.2 隔離背景 `FBR_HEADLESS_OK` 與 `FBR_MULTI_ACTION_IMPORT_OK`。後者覆蓋重名匯入、來源改名、目標用原名、續算不重複輸出、上下兩種清除按鈕的分工及原有 Action 保留。`角色1008.blend` 三段手腳動作取樣回歸亦通過。前景實際文字點擊仍待目視驗證。
 - 候選 ZIP `repository/faidlix_bone_remap-0.6.15.zip` 為 51741 bytes，SHA-256 `d122bd3b82075d871ff5f1eae37d1f38b75519d1aad300e87ae384e144558050`；Blender extension validate 及 `README_DOWNLOAD_LINKS=PASS` 通過。獨立背景 MCP 從候選 ZIP 安裝版讀回版本 `(0, 6, 15)`，並驗證來源改名、目標原名、兩種刪除分工及原有 Action 保留；測試服務已停止。這仍不能證明前景文字點擊。
+- 發布經提交 `d2b846a`、與另一位開發者的 FBX ZipExporter 1.7.3 提交合併後，以 `391522c6df303cdba15d34f238f3323bf0e45931` 推送並從 GitHub `main` 讀回。兩套件的 README／索引均保留最新版本；從該 GitHub 提交下載的 0.6.15 ZIP 大小及 SHA-256 與本機相同，全新隔離 Blender MCP 從 GitHub ZIP 安裝版再次通過功能驗證並已停止。
+- **正式安裝待辦**：檢查時使用者 Blender 正開啟 `C:/Users/faidl/Desktop/遊戲外包_小鬼別落單/角色/角色1008.blend`（PID 27012）；不可熱替換或強制關閉。待使用者儲存並關閉 Blender 後，先備份目前正式 0.6.14，再用已驗證的 GitHub 0.6.15 ZIP 安裝至 `FaidlixBlenderAdd_ons`，逐檔核對並背景載入。正式安裝尚未完成，不能把隔離安裝當成正式安裝。
 
 ## 0.6.14 角色1008 左右手重定向修正（2026-10-08）
 
