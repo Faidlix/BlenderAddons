@@ -195,7 +195,9 @@ class NativeProcessor:
             p.select_control_point = p.select_left_handle = p.select_right_handle = True
         context = self.context
         window = context.window
-        area = context.area or next(a for a in window.screen.areas if a.type == 'VIEW_3D')
+        area = context.area or next((a for a in window.screen.areas
+                                     if a.type in {'VIEW_3D', 'GRAPH_EDITOR', 'DOPESHEET_EDITOR'}),
+                                    window.screen.areas[0])
         old_scene, old_type = window.scene, area.type
         old_ui_type = area.ui_type
         props = {}

@@ -1,4 +1,4 @@
-# Faidlix_BatchCleanKey 1.1.0
+# Faidlix_BatchCleanKey 1.1.1
 
 Blender 5.2+ 獨立 Extension。Pose Mode 選取骨骼後，在 3D View、Dope Sheet、Action Editor 或 Graph Editor 的 N 側邊欄 → Faidlix → Faidlix_BatchCleanKey → 批次處理 Action Keys。
 

@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core
 
-ADDON_VERSION = '1.1.0'
+ADDON_VERSION = '1.1.1'
 _sync_signature = None
 
 
