@@ -103,6 +103,11 @@ progress = next(steps)
 assert progress[0] == 1 and progress[1] == 5
 steps.close()
 assert [(c.data_path, core.snapshot(c)) for c in bag.fcurves] == snapshot
+steps = core.process_steps(bpy.context, obj, ['Hand.L'], [act], 'DELETE')
+while '寫回中' not in next(steps)[2]:
+    pass
+steps.close()
+assert [(c.data_path, core.snapshot(c)) for c in bag.fcurves] == snapshot
 steps = core.process_steps(bpy.context, obj, ['Hand.L'], [act], 'CLEAN')
 next(steps)
 steps.close()

@@ -59,6 +59,12 @@ steps = core.rotation_steps(bpy.context,obj,['Rotate'],actions,'XYZ',.25)
 assert next(steps)[0] == 1
 steps.close()
 assert digest() == before and bone.rotation_mode == 'QUATERNION'
+# Cancellation is also safe once the destination write has begun.
+steps = core.rotation_steps(bpy.context,obj,['Rotate'],actions,'XYZ',.25)
+while '寫回中' not in next(steps)[2]:
+    pass
+steps.close()
+assert digest() == before and bone.rotation_mode == 'QUATERNION'
 times = [2.25+i*.25 for i in range(15)]
 expected = [[Quaternion([bag.fcurves.find(bone.path_from_id()+'.rotation_quaternion',index=i).evaluate(t)
                         for i in range(4)]).normalized() for t in times] for bag in bags]

@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core
 
-ADDON_VERSION = '1.2.0'
+ADDON_VERSION = '1.2.1'
 _sync_signature = None
 _refreshing = False
 
@@ -88,6 +88,8 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     error: FloatProperty(name='最大誤差', default=0.01, min=0, precision=5)
     last_result: StringProperty()
     running: BoolProperty(default=False)
+    pending: BoolProperty(default=False)
+    cancel_requested: BoolProperty(default=False)
     progress: FloatProperty(min=0, max=1, subtype='FACTOR')
     progress_text: StringProperty()
     rotation_job: BoolProperty(default=False)
@@ -261,6 +263,40 @@ def draw_progress(layout, state):
         layout.label(text='Esc 取消；完成後才寫回動畫')
 
 
+class BCK_OT_Cancel(bpy.types.Operator):
+    bl_idname = 'faidlix_batch_clean_key.cancel'
+    bl_label = '取消批次處理'
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        context.window_manager.faidlix_batch_clean_key.cancel_requested = True
+        return {'FINISHED'}
+
+
+def launch_batch(context):
+    """Finish the parent dialog before installing the worker's modal handler."""
+    state = context.window_manager.faidlix_batch_clean_key
+    if state.pending or state.running:
+        return {'CANCELLED'}
+    window, area = context.window, context.area
+    state.pending = True
+    def start():
+        current = bpy.context.window_manager.faidlix_batch_clean_key
+        current.pending = False
+        try:
+            if window not in bpy.context.window_manager.windows[:] or area not in window.screen.areas[:]:
+                raise ValueError('原編輯器已關閉，請重新啟動批次處理')
+            region = next(r for r in area.regions if r.type == 'WINDOW')
+            with bpy.context.temp_override(window=window, area=area, region=region):
+                bpy.ops.faidlix_batch_clean_key.run('INVOKE_DEFAULT')
+        except Exception as exc:
+            current.last_result = f'未完成：{exc}'
+            redraw(bpy.context)
+        return None
+    bpy.app.timers.register(start, first_interval=0.05)
+    return {'FINISHED'}
+
+
 class BCK_OT_Batch(bpy.types.Operator):
     bl_idname = 'faidlix_batch_clean_key.batch'
     bl_label = 'Faidlix_BatchCleanKey'
@@ -268,7 +304,8 @@ class BCK_OT_Batch(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         return bool(rig(context) and context.object.mode == 'POSE' and
-                    not context.window_manager.faidlix_batch_clean_key.running)
+                    not context.window_manager.faidlix_batch_clean_key.running and
+                    not context.window_manager.faidlix_batch_clean_key.pending)
 
     def invoke(self, context, event):
         populate(context)
@@ -307,7 +344,7 @@ class BCK_OT_Batch(bpy.types.Operator):
         context.window_manager.faidlix_batch_clean_key.rotation_job = False
         if bpy.app.background:
             return run_sync(self, context)
-        return bpy.ops.faidlix_batch_clean_key.run('INVOKE_DEFAULT')
+        return launch_batch(context)
 
 
 def batch_args(context):
@@ -362,15 +399,17 @@ class BCK_OT_Run(bpy.types.Operator):
     bl_options = {'UNDO', 'BLOCKING'}
 
     def invoke(self, context, event):
+        self._timer = self._draw_handle = None
         try:
             self._steps = processing_steps(context)
             # Validation happens before locking UI.
             state = context.window_manager.faidlix_batch_clean_key
             if state.running:
                 return {'CANCELLED'}
-            state.running, state.progress = True, 0
+            state.running, state.progress, state.cancel_requested = True, 0, False
             state.progress_text = '準備處理…'
-            self._timer = context.window_manager.event_timer_add(0.03, window=context.window)
+            self._last_tick = 0
+            self._timer = context.window_manager.event_timer_add(0.05, window=context.window)
             context.window_manager.modal_handler_add(self)
             context.window_manager.progress_begin(0, 1)
             self._area = context.area
@@ -380,6 +419,11 @@ class BCK_OT_Run(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         except Exception as exc:
             self.report({'ERROR'}, str(exc))
+            try:
+                if hasattr(self, '_steps'):
+                    self._steps.close()
+            finally:
+                self.finish(context)
             return {'CANCELLED'}
 
     def draw_overlay(self):
@@ -406,37 +450,63 @@ class BCK_OT_Run(bpy.types.Operator):
         blf.color(0, 1,1,1,1)
         blf.position(0, x, y+52, 0)
         blf.draw(0, f'批次處理 {state.progress:.0%} ｜ Esc 取消')
+        rect(x+width-72, y+43, 72, 28, (0.45,0.12,0.12,1))
+        blf.position(0, x+width-61, y+52, 0)
+        blf.draw(0, '取消')
         blf.position(0, x, y, 0)
         blf.draw(0, state.progress_text)
         gpu.state.blend_set('NONE')
 
     def finish(self, context):
-        self._space_type.draw_handler_remove(self._draw_handle, 'WINDOW')
-        context.window_manager.event_timer_remove(self._timer)
-        context.window_manager.progress_end()
-        state = context.window_manager.faidlix_batch_clean_key
-        state.running = False
-        refresh(context)
-        redraw(context)
+        try:
+            if self._draw_handle is not None:
+                self._space_type.draw_handler_remove(self._draw_handle, 'WINDOW')
+        finally:
+            try:
+                if self._timer is not None:
+                    context.window_manager.event_timer_remove(self._timer)
+            finally:
+                context.window_manager.progress_end()
+                state = context.window_manager.faidlix_batch_clean_key
+                state.running = state.pending = state.cancel_requested = False
+                refresh(context)
+                redraw(context)
 
     def modal(self, context, event):
         state = context.window_manager.faidlix_batch_clean_key
-        if event.type == 'ESC':
-            self._steps.close()
-            state.last_result = '已取消，原動畫保留'
-            self.finish(context)
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            region = next(r for r in self._area.regions if r.type == 'WINDOW')
+            width = min(560, max(240, region.width - 60))
+            x, y = (region.width-width)/2, max(20, region.height-115)
+            mx, my = event.mouse_x-region.x, event.mouse_y-region.y
+            if x+width-72 <= mx <= x+width and y+43 <= my <= y+71:
+                state.cancel_requested = True
+        if event.type == 'ESC' or state.cancel_requested:
+            try:
+                self._steps.close()
+                state.last_result = '已取消，原動畫保留'
+            finally:
+                self.finish(context)
             return {'CANCELLED'}
         if event.type != 'TIMER':
             return {'RUNNING_MODAL'}
+        # Other editor timers and queued timer events must not monopolize the UI.
+        now = time.perf_counter()
+        if now - self._last_tick < 0.04:
+            return {'RUNNING_MODAL'}
+        self._last_tick = now
         try:
-            deadline = time.perf_counter() + 0.012
+            deadline = time.perf_counter() + 0.008
             while True:
                 done, total, name = next(self._steps)
-                state.progress = min(0.99, done / max(1, total))
-                state.progress_text = f'{name} ｜ {done}/{total} 通道'
-                context.window_manager.progress_update(state.progress)
                 if time.perf_counter() >= deadline:
                     break
+            # Publish once per tick, rather than issuing thousands of RNA/UI
+            # updates per second and building a timer/keyboard event backlog.
+            state.progress = min(0.99, done / max(1, total))
+            unit = '取樣' if state.rotation_job else '通道'
+            state.progress_text = f'{name} ｜ {done}/{total} {unit}'
+            context.window_manager.progress_update(state.progress)
         except StopIteration as done:
             state.progress = 1
             state.last_result = result_text(done.value)
@@ -444,10 +514,12 @@ class BCK_OT_Run(bpy.types.Operator):
             self.finish(context)
             return {'FINISHED'}
         except Exception as exc:
-            self._steps.close()
-            state.last_result = f'未完成：{exc}'
-            self.report({'ERROR'}, str(exc))
-            self.finish(context)
+            try:
+                self._steps.close()
+                state.last_result = f'未完成：{exc}'
+                self.report({'ERROR'}, str(exc))
+            finally:
+                self.finish(context)
             return {'CANCELLED'}
         redraw(context)
         return {'RUNNING_MODAL'}
@@ -495,7 +567,7 @@ class BCK_OT_Rotation(bpy.types.Operator):
 
     def execute(self, context):
         context.window_manager.faidlix_batch_clean_key.rotation_job = True
-        return run_sync(self, context) if bpy.app.background else bpy.ops.faidlix_batch_clean_key.run('INVOKE_DEFAULT')
+        return run_sync(self, context) if bpy.app.background else launch_batch(context)
 
 
 class BCK_OT_Loop(bpy.types.Operator):
@@ -661,7 +733,7 @@ class _Panel:
         layout = self.layout
         draw_progress(layout, state)
         col = layout.column()
-        col.enabled = not state.running
+        col.enabled = not state.running and not state.pending
         if self.bl_space_type == 'VIEW_3D':
             col.operator('faidlix_batch_clean_key.sync_ranges', icon='PREVIEW_RANGE')
             row = col.row(align=True)
@@ -703,7 +775,7 @@ class BCK_PT_Graph(_Panel, bpy.types.Panel):
 CLASSES = (BCK_PG_Action, BCK_PG_Bone, BCK_PG_State, BCK_OT_Select, BCK_OT_SelectAll,
            BCK_UL_Bones, BCK_UL_Actions, BCK_UL_Browser, BCK_OT_Batch, BCK_OT_Run,
            BCK_OT_Switch, BCK_OT_New, BCK_OT_Delete, BCK_OT_Duplicate, BCK_OT_Flip,
-           BCK_OT_Ranges, BCK_OT_Rotation, BCK_OT_Loop, BCK_PT_View3D, BCK_PT_DopeSheet, BCK_PT_Graph)
+           BCK_OT_Ranges, BCK_OT_Rotation, BCK_OT_Loop, BCK_OT_Cancel, BCK_PT_View3D, BCK_PT_DopeSheet, BCK_PT_Graph)
 
 
 def register():

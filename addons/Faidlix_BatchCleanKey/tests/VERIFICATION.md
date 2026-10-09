@@ -31,3 +31,10 @@ The user's working blend file is never used as a test fixture.
 - 隔離 GUI：旋轉 modal 完成、Undo、Redo、Esc 取消通過；彈窗及進度截圖已檢視。原先大場景測試沒有產出完成標記，縮小隔離 fixture 後重測通過；不將未完成測試視為成功。
 - 原生 Action 名稱欄位單擊事件確認切換 Action 並同步場景 1–20 範圍。雙擊改名使用 Blender UIList 原生名稱欄位；event_simulate 僅支援 PRESS／RELEASE／NOTHING，不能直接送 DOUBLE_CLICK，未宣稱實體雙擊已自動驗證。循環按鈕在複製前，實際點擊可開啟設定彈窗。
 - 循環操作使用實際按鈕開啟並確認後，原生 Undo 還原頭尾控制柄通過；無手動補推操作後的 Undo 步驟。
+
+# 1.2.1
+
+- 新增 `test_cancel_gui.py`，使用獨立 `--factory-startup --enable-event-simulate` GUI，實際開啟／確認旋轉彈窗；12 Actions × 12 骨骼，總共 142704 筆取樣。在 75% 送 Esc 後下一次檢查（約 0.023 秒）已停止，曲線摘要與旋轉模式一致，浮層消失。
+- 同樣 fixture 在 99% 寫回中點擊浮層取消按鈕，下一次檢查（約 0.023 秒）已停止，新增目標曲線回復，原曲線及模式一致。重測可設定 `CANCEL_PHASE=COMMIT`、`CANCEL_INPUT=CLICK`。
+- 原版完整彈窗 fixture 在 90 秒尚未達取消門檻，故不將該次視為 Esc 重現成功。改版取消與寫回回復經實際輸入驗證。
+- headless／management／rotation 測試全部通過，新增 Delete 與旋轉寫回中 generator.close 的回復檢查。GUI 旋轉正常完成、Undo、Redo、Esc 取消再次通過。

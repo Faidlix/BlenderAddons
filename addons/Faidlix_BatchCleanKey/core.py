@@ -272,10 +272,13 @@ def rotation_steps(context, obj, names, actions, target, step=1.0):
                 if channels[0].group:
                     curve.group = channels[0].group
                 curve.keyframe_points.add(len(samples))
-                for point, (frame, values, interp) in zip(curve.keyframe_points, samples):
+                for sample_index, (point, (frame, values, interp)) in enumerate(zip(curve.keyframe_points, samples)):
                     point.co = frame, values[index]
                     point.interpolation = interp
+                    if (sample_index + 1) % 128 == 0:
+                        yield total, total, action.name + '（寫回中）'
                 curve.update()
+                yield total, total, action.name + '（寫回中）'
         for action, name, bag, channels, path, samples in staged:
             for curve in channels:
                 record = (bag, curve.data_path, curve.array_index, snapshot(curve), curve.extrapolation,
@@ -284,6 +287,7 @@ def rotation_steps(context, obj, names, actions, target, step=1.0):
                            for k in ('color_mode', 'color', 'auto_smoothing', 'hide', 'select')})
                 bag.fcurves.remove(curve)
                 removed.append(record)
+            yield total, total, action.name + '（寫回中）'
         for name, (mode, euler, quat) in bones.items():
             bone = obj.pose.bones[name]
             rotation = quat.normalized() if mode == 'QUATERNION' else Euler(euler, mode).to_quaternion()
@@ -295,7 +299,7 @@ def rotation_steps(context, obj, names, actions, target, step=1.0):
         context.scene.frame_set(context.scene.frame_current, subframe=context.scene.frame_subframe)
         for action in actions:
             action.update_tag()
-    except Exception:
+    except (Exception, GeneratorExit):
         for bag, curve in reversed(created):
             bag.fcurves.remove(curve)
         for bag, path, index, points, extrapolation, group, attributes in removed:
@@ -309,6 +313,7 @@ def rotation_steps(context, obj, names, actions, target, step=1.0):
         for name, (mode, euler, quat) in bones.items():
             bone = obj.pose.bones[name]
             bone.rotation_mode, bone.rotation_euler, bone.rotation_quaternion = mode, euler, quat
+        context.scene.frame_set(context.scene.frame_current, subframe=context.scene.frame_subframe)
         raise
     return {'actions': len({j[0] for j in jobs}), 'bones': len(bones), 'samples': total}
 
@@ -372,16 +377,23 @@ def snapshot(curve):
              else getattr(p, k) for k in KEY_FIELDS} for p in curve.keyframe_points]
 
 
-def write_points(curve, points):
+def write_points_steps(curve, points):
     curve.keyframe_points.clear()
     curve.keyframe_points.add(len(points))
-    for p, values in zip(curve.keyframe_points, points):
+    for index, (p, values) in enumerate(zip(curve.keyframe_points, points)):
         for key, value in values.items():
             if key not in ('handle_left', 'handle_right'):
                 setattr(p, key, value)
         p.handle_left = values['handle_left']
         p.handle_right = values['handle_right']
+        if (index + 1) % 128 == 0:
+            yield None
     curve.update()
+
+
+def write_points(curve, points):
+    for _ in write_points_steps(curve, points):
+        pass
 
 
 def choose(items, index, anchor, ctrl=False, shift=False):
@@ -507,11 +519,14 @@ def process_steps(context, obj, names, actions, operation, threshold=0.001,
     try:
         for curve, before, after, action in plans:
             committed.append((curve, before))
-            write_points(curve, after)
+            for _ in write_points_steps(curve, after):
+                yield len(jobs), len(jobs), action.name + '（寫回中）'
             action.update_tag()
-    except Exception:
+            yield len(jobs), len(jobs), action.name + '（寫回中）'
+    except (Exception, GeneratorExit):
         for curve, before in committed:
             write_points(curve, before)
+        context.scene.frame_set(context.scene.frame_current, subframe=context.scene.frame_subframe)
         raise
     context.view_layer.update()
     return {'actions': len(changed_actions), 'curves': len(plans),
