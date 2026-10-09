@@ -1,5 +1,7 @@
 """Native curve operations staged in an isolated temporary scene before commit."""
 import bpy
+import json
+import re
 
 
 def selected_bones(context):
@@ -41,6 +43,99 @@ def target_curves(action, obj, names):
                               if any(f.data_path.startswith(p + '.') or
                                      f.data_path.startswith(p + '[') for p in prefixes))
     return curves
+
+
+def action_curves(action):
+    for layer in action.layers:
+        for strip in layer.strips:
+            if strip.type == 'KEYFRAME':
+                for bag in strip.channelbags:
+                    yield from bag.fcurves
+
+
+def actual_range(action):
+    frames = [p.co.x for c in action_curves(action)
+              for points in (c.keyframe_points, c.sampled_points) for p in points]
+    return (min(frames), max(frames)) if frames else None
+
+
+def sync_ranges(actions):
+    changed = skipped = 0
+    for action in actions:
+        bounds = actual_range(action)
+        if bounds is None or not action.is_editable:
+            skipped += 1
+            continue
+        action.use_frame_range = True
+        # Expand first so Blender's coupled start/end setters cannot clamp bounds.
+        action.frame_end = max(action.frame_end, bounds[1])
+        action.frame_start = bounds[0]
+        action.frame_end = bounds[1]
+        changed += 1
+    return changed, skipped
+
+
+def assign_action(context, obj, action):
+    if not obj.is_editable:
+        raise ValueError('目前骨架為唯讀')
+    slot = slot_for(action, obj)
+    if not action.slots and action.is_editable:
+        slot = action.slots.new('OBJECT', obj.name)
+    if not slot:
+        raise ValueError('Action 的 Slot 無法明確對應目前骨架')
+    ad = obj.animation_data_create()
+    ad.action = action
+    ad.action_slot = slot
+    obj.update_tag(refresh={'TIME'})
+    context.scene.frame_set(context.scene.frame_current, subframe=context.scene.frame_subframe)
+
+
+def mirror_action(action, obj):
+    """Mirror local pose channels with Blender Paste Flipped's X-axis convention.
+
+    Preserve key times/interpolation/handles; never resample or touch other slots.
+    """
+    if not action.is_editable:
+        raise ValueError('Action 為唯讀，請選擇建立翻轉副本')
+    if not slot_for(action, obj):
+        raise ValueError('Action 的 Slot 無法明確對應目前骨架')
+    plans, skipped = [], 0
+    for curve in target_curves(action, obj, [b.name for b in obj.pose.bones]):
+        match = re.match(r'^pose\.bones\[("(?:\\.|[^"\\])*")\](.*)$', curve.data_path)
+        if not match:
+            continue
+        name, suffix = json.loads(match[1]), match[2]
+        flipped = bpy.utils.flip_name(name)
+        if flipped not in obj.pose.bones:
+            skipped += 1
+            continue
+        sign = -1 if ((suffix == '.location' and curve.array_index == 0) or
+                      (suffix == '.rotation_euler' and curve.array_index in (1, 2)) or
+                      (suffix in ('.rotation_quaternion', '.rotation_axis_angle') and curve.array_index in (2, 3)) or
+                      suffix in ('.bbone_curveinx', '.bbone_curveoutx', '.bbone_rollin', '.bbone_rollout')) else 1
+        if sign == -1 and (curve.modifiers or curve.sampled_points):
+            raise ValueError('含修飾器或取樣曲線的翻轉通道需先烘焙為 Key')
+        before = snapshot(curve)
+        after = [dict(p) for p in before]
+        if sign == -1:
+            for p in after:
+                for attr in ('co', 'handle_left', 'handle_right'):
+                    p[attr] = (p[attr][0], -p[attr][1])
+        path = 'pose.bones["' + bpy.utils.escape_identifier(flipped) + '"]' + suffix
+        plans.append((curve, curve.data_path, path, before, after))
+    committed = []
+    try:
+        for curve, old_path, path, before, after in plans:
+            committed.append((curve, old_path, before))
+            curve.data_path = path
+            write_points(curve, after)
+        action.update_tag()
+    except Exception:
+        for curve, old_path, before in committed:
+            curve.data_path = old_path
+            write_points(curve, before)
+        raise
+    return len(plans), skipped
 
 
 KEY_FIELDS = ('co', 'handle_left', 'handle_right', 'handle_left_type',
@@ -123,9 +218,9 @@ class NativeProcessor:
                                        active_object=self.obj, object=self.obj,
                                        selected_objects=[self.obj], selected_editable_objects=[self.obj]):
                 if operation == 'CLEAN':
-                    result = bpy.ops.graph.clean(threshold=threshold, channels=False)
+                    result = bpy.ops.graph.clean('EXEC_DEFAULT', False, threshold=threshold, channels=False)
                 else:
-                    result = bpy.ops.graph.decimate(mode=mode, factor=ratio, remove_error_margin=error)
+                    result = bpy.ops.graph.decimate('EXEC_DEFAULT', False, mode=mode, factor=ratio, remove_error_margin=error)
                 if result != {'FINISHED'}:
                     raise RuntimeError('Blender 原生運算未完成')
             output = snapshot(self.curve)
@@ -150,35 +245,35 @@ class NativeProcessor:
         bpy.data.scenes.remove(self.scene)
 
 
-def process(context, obj, names, actions, operation, threshold=0.001,
-            mode='RATIO', ratio=0.5, error=0.01):
+def process_steps(context, obj, names, actions, operation, threshold=0.001,
+                  mode='RATIO', ratio=0.5, error=0.01):
     if operation not in {'DELETE', 'CLEAN', 'DECIMATE'}:
         raise ValueError('Unknown operation')
     plans, skipped, changed_actions = [], 0, set()
+    jobs = [(a, c) for a in actions if a.is_editable for c in target_curves(a, obj, names)]
+    skipped = sum(not a.is_editable for a in actions)
     processor = None
     try:
-        for action in actions:
-            if not action.is_editable:
+        for index, (action, curve) in enumerate(jobs):
+            if curve.lock or not curve.keyframe_points:
                 skipped += 1
+                yield (index + 1, len(jobs), action.name)
                 continue
-            for curve in target_curves(action, obj, names):
-                if curve.lock or not curve.keyframe_points:
+            before = snapshot(curve)
+            if operation == 'DELETE':
+                after = []
+            else:
+                if operation == 'DECIMATE' and any(p['interpolation'] not in {'BEZIER', 'LINEAR'} for p in before):
                     skipped += 1
+                    yield (index + 1, len(jobs), action.name)
                     continue
-                before = snapshot(curve)
-                if operation == 'DELETE':
-                    after = []
-                else:
-                    # Blender decimation supports Bezier and Linear curves only.
-                    if operation == 'DECIMATE' and any(p['interpolation'] not in {'BEZIER', 'LINEAR'} for p in before):
-                        skipped += 1
-                        continue
-                    if processor is None:
-                        processor = NativeProcessor(context)
-                    after = processor.run(before, operation, threshold, mode, ratio, error)
-                if before != after:
-                    plans.append((curve, before, after, action))
-                    changed_actions.add(action.name)
+                if processor is None:
+                    processor = NativeProcessor(context)
+                after = processor.run(before, operation, threshold, mode, ratio, error)
+            if before != after:
+                plans.append((curve, before, after, action))
+                changed_actions.add(action.name)
+            yield (index + 1, len(jobs), action.name)
     finally:
         if processor:
             processor.close()
@@ -196,3 +291,13 @@ def process(context, obj, names, actions, operation, threshold=0.001,
     context.view_layer.update()
     return {'actions': len(changed_actions), 'curves': len(plans),
             'removed': sum(len(before) - len(after) for _, before, after, _ in plans), 'skipped': skipped}
+
+
+def process(context, obj, names, actions, operation, threshold=0.001,
+            mode='RATIO', ratio=0.5, error=0.01):
+    steps = process_steps(context, obj, names, actions, operation, threshold, mode, ratio, error)
+    while True:
+        try:
+            next(steps)
+        except StopIteration as done:
+            return done.value

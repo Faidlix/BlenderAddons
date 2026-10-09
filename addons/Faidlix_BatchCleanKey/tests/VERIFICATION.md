@@ -1,4 +1,4 @@
-# 1.0.0 verification
+# 1.1.0 verification
 
 Blender 5.2.2 LTS, factory-startup isolated processes, 2026-10-09.
 
@@ -13,3 +13,13 @@ Blender 5.2.2 LTS, factory-startup isolated processes, 2026-10-09.
 - Plain row button receives an actual simulated click. Modifier callbacks tested with explicit event objects because Blender synthetic UI clicks did not propagate modifier state to the button's invocation event; physical Ctrl/Shift input has not been automated.
 
 The user's working blend file is never used as a test fixture.
+
+1.1.0 additions:
+- Bidirectional pose-bone checkbox selection and per-Action key counts pass.
+- Action switch/current highlight, new/delete, independent duplicate and mirrored copy pass.
+- Euler/Quaternion/Axis-Angle curve mirror signs, center bones, missing-pair preservation and double-flip identity pass.
+- Actual fractional frame ranges update without changing keys; empty Actions skip.
+- Generator progress and cancellation preserve sources and remove scratch data.
+- Isolated foreground modal Clean across 25 Actions / 1000 curves passes native Undo/Redo, without manual after-operation undo push.
+- Expanded bone/Action scroll lists and visible progress overlay screenshots inspected.
+- Real synthetic Esc event cancels the modal operation, restores scratch data and preserves original keys.
