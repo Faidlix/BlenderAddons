@@ -1,5 +1,7 @@
 # Faidlix Manager
 
+1.1.6：登錄 Faidlix_BatchCleanKey，支援已安裝套件的全部更新。
+
 Manager 是 Faidlix Blender 外掛共通功能的唯一實作位置。目前包含固定在側邊欄頂端、無標題且不可摺疊的「全部更新」控制列，以及更新佇列、進度與完成狀態。
 
 更新來源比對會忽略 `?cache=...` 等查詢參數，並優先使用 Manager 實際安裝所在的 repository module，避免重複或空白來源讓按鈕錯誤消失。

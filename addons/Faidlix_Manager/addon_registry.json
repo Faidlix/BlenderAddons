@@ -50,6 +50,12 @@
       "update_order": 70
     },
     {
+      "package_id": "faidlix_batch_clean_key",
+      "display_name": "Faidlix_BatchCleanKey",
+      "common_features": ["update_all"],
+      "update_order": 80
+    },
+    {
       "package_id": "faidlix_manager",
       "display_name": "Faidlix Manager",
       "common_features": ["update_all"],

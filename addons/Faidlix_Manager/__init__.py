@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix Manager",
     "author": "Faidlix",
-    "version": (1, 1, 5),
+    "version": (1, 1, 6),
     "blender": (5, 2, 0),
     "location": "3D View > Sidebar > Faidlix",
     "description": "Update installed Faidlix extensions together",
@@ -18,7 +18,7 @@ import bpy
 from bpy.types import Operator, Panel
 
 
-ADDON_VERSION = (1, 1, 5)
+ADDON_VERSION = (1, 1, 6)
 PACKAGE_ID = "faidlix_manager"
 REGISTRY_FILENAME = "addon_registry.json"
 REPOSITORY_URL = (

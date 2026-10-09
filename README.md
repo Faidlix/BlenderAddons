@@ -15,10 +15,12 @@ Blender Repository URL：
 - [Faidlix BakeMap 2.3.11](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_bakemap-2.3.11.zip)：材質資訊烘焙。
 - [Faidlix Bone Remap 0.6.18](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_bone_remap-0.6.18.zip)：批次骨架動畫重定向。
 - [Faidlix_Fbx ZipExporter 1.7.3](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_fbx_zip_exporter-1.7.3.zip)：輸出 FBX 並封裝模型實際使用的貼圖。
-- [Faidlix Manager 1.1.5](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_manager-1.1.5.zip)：選配的共通功能與固定於側邊欄頂端的「全部更新」控制列。
+- [Faidlix Manager 1.1.6](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_manager-1.1.6.zip)：選配的共通功能與固定於側邊欄頂端的「全部更新」控制列。
 - [Faidlix_Outliner 0.2.17](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_outliner-0.2.17.zip)：階層選取與批次顯示控制。
 - [Faidlix Paint 0.4.8](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_paint-0.4.8.zip)：整層、遮罩與 UV 島填色。
 - [Faidlix_Weight 1.3.0](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_weight-1.3.0.zip)：選取點權重鏡射與左右名稱對應。
+
+- [Faidlix_BatchCleanKey 1.0.0](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_batch_clean_key-1.0.0.zip)：依選定骨骼，跨 Action 批次刪除、清理與縮減 Key。
 
 安裝 Manager 不是使用其他外掛的前提。Manager 只會更新已安裝的 Faidlix 套件，不會自動安裝其他外掛。
 
