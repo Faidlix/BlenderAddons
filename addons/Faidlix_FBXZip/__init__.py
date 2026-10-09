@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 2),
+    "version": (1, 8, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -31,7 +31,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 2)
+ADDON_VERSION = (1, 8, 3)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -639,12 +639,19 @@ def _setup_action_strips(objects, items):
                     'action_slot': getattr(animation_data, "action_slot", None),
                     'tweak': tweak,
                     'track_mutes': [(track, track.mute) for track in animation_data.nla_tracks],
+                    'strip_names': [
+                        (strip, strip.name)
+                        for track in animation_data.nla_tracks
+                        for strip in track.strips
+                    ],
                     'tracks': [],
                 }
                 states.append(state)
                 animation_data.action = None
                 for track in animation_data.nla_tracks:
                     track.mute = True
+                for index, (strip, _name) in enumerate(state['strip_names']):
+                    strip.name = f"__FAIDLIX_ORIGINAL_STRIP__{index:03d}"
             track = target.animation_data.nla_tracks.new()
             track.name = f"__FAIDLIX_FBXZIP_TEMP__{len(state['tracks']):03d}"
             state['tracks'].append(track)
@@ -671,6 +678,8 @@ def _restore_action_strips(states):
         for track in reversed(state['tracks']):
             if track in animation_data.nla_tracks[:]:
                 animation_data.nla_tracks.remove(track)
+        for strip, name in state['strip_names']:
+            strip.name = name
         for existing, muted in state['track_mutes']:
             if existing in animation_data.nla_tracks[:]:
                 existing.mute = muted

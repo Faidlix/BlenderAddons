@@ -12,11 +12,13 @@ import zipfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root.parent))
-addon = importlib.import_module('Faidlix_FBXZip')
+addon_parent = os.environ.get('FBXZIP_ADDON_PARENT', str(root.parent))
+addon_module = os.environ.get('FBXZIP_ADDON_MODULE', 'Faidlix_FBXZip')
+sys.path.insert(0, addon_parent)
+addon = importlib.import_module(addon_module)
 addon.register()
-assert addon.bl_info['version'] == (1, 8, 2)
-assert addon.ADDON_VERSION == (1, 8, 2)
+assert addon.bl_info['version'] == (1, 8, 3)
+assert addon.ADDON_VERSION == (1, 8, 3)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
@@ -145,7 +147,7 @@ armature.animation_data.action = original_action
 bpy.ops.object.mode_set(mode='OBJECT')
 existing_track = armature.animation_data.nla_tracks.new()
 existing_track.name = 'ExistingTrack'
-existing_track.strips.new('ExistingStrip', 1, actions[1])
+existing_track.strips.new('Fairy_Run', 1, actions[1])
 existing_track.mute = False
 addon._refresh_action_items(bpy.context.window_manager, [armature], preserve=False)
 assert {item.action_name for item in bpy.context.window_manager.fbxzip_action_items} == {'Fairy_Idle', 'Fairy_Run'}
@@ -189,6 +191,7 @@ assert armature.animation_data.action == original_action
 assert len(armature.animation_data.nla_tracks) == 1
 assert armature.animation_data.nla_tracks[0].name == 'ExistingTrack'
 assert armature.animation_data.nla_tracks[0].mute is False
+assert armature.animation_data.nla_tracks[0].strips[0].name == 'Fairy_Run'
 
 for item in bpy.context.window_manager.fbxzip_action_items:
     item.include = True
