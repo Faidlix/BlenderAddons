@@ -39,6 +39,9 @@ obj.animation_data.action = act
 obj.animation_data.action_slot = slot
 state = addon.populate(bpy.context)
 assert len(state.bones) == 4
+state.browser.clear()
+ui.refresh(bpy.context)
+assert len(state.browser) == len(bpy.data.actions), 'Upgrade must initialize browser from preserved state'
 left = next(b for b in state.bones if b.name == 'Hand.L')
 right = next(b for b in state.bones if b.name == 'Hand.R')
 assert left.selected and not right.selected

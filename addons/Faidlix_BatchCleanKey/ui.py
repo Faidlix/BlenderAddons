@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core
 
-ADDON_VERSION = '1.1.1'
+ADDON_VERSION = '1.1.2'
 _sync_signature = None
 
 
@@ -102,7 +102,8 @@ def refresh(context, reset=False):
             item = state.bones.add()
             item.name, item.armature = name, obj
     actions = sorted(bpy.data.actions, key=lambda a: a.name.casefold())
-    changed_actions = [i.action for i in state.actions] != actions
+    changed_actions = ([i.action for i in state.actions] != actions or
+                       [i.action for i in state.browser] != actions)
     if changed_actions or reset:
         selected = {i.action for i in state.actions if i.selected}
         state.actions.clear()
