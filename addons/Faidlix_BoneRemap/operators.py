@@ -678,6 +678,31 @@ def _ik_constraint(pose_bone):
     )
 
 
+def _straight_mirror_pole_angle(owner_obj, endpoint_name):
+    """Choose opposite pole angles only for a genuinely mirrored straight pair."""
+    counterpart_name = flip_bone_name(endpoint_name)
+    side = _ik_side(endpoint_name)
+    if not side or counterpart_name == endpoint_name:
+        return None
+    endpoint = owner_obj.data.bones.get(endpoint_name)
+    counterpart = owner_obj.data.bones.get(counterpart_name)
+    if not endpoint or not counterpart or not endpoint.parent or not counterpart.parent:
+        return None
+    lower = endpoint.parent
+    other_lower = counterpart.parent
+    tolerance = max(lower.length, other_lower.length, 0.01) * 0.02
+    for point, opposite in (
+        (lower.head_local, other_lower.head_local),
+        (lower.tail_local, other_lower.tail_local),
+        (endpoint.tail_local, counterpart.tail_local),
+    ):
+        mirrored = opposite.copy()
+        mirrored.x *= -1
+        if (point - mirrored).length > tolerance:
+            return None
+    return 0.0 if side == "L" else math.pi
+
+
 def _calibrate_ik_pole_angle(context, owner_obj, endpoint_name, mapping, constraint):
     """Fit this chain's pole angle to its own FK rest bend, not its side name."""
     if (not constraint.pole_target or not mapping.ik_pole_bone
@@ -694,7 +719,11 @@ def _calibrate_ik_pole_angle(context, owner_obj, endpoint_name, mapping, constra
     bend = lower.head_local - upper.head_local
     bend -= axis * bend.dot(axis) / axis.length_squared
     if bend.length_squared < axis.length_squared * 1.0e-8:
-        # A straight rest chain gives no reliable left/right bend reference.
+        # A straight rest chain gives no bend reference. A truly mirrored pair
+        # still needs opposing pole angles; leave asymmetric rigs untouched.
+        mirrored_angle = _straight_mirror_pole_angle(owner_obj, endpoint_name)
+        if mirrored_angle is not None:
+            constraint.pole_angle = mirrored_angle
         return
     control = owner_obj.pose.bones.get(mapping.ik_control_bone)
     pole = owner_obj.pose.bones.get(mapping.ik_pole_bone)

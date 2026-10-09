@@ -11,7 +11,7 @@ from .operators import _IK_EDIT_STATE, _mapping_axes_match, _object_actions
 from .retarget import existing_ik_for_row, mapping_source, source_has_ik
 
 
-ADDON_VERSION = (0, 6, 18)
+ADDON_VERSION = (0, 6, 19)
 
 
 def _source_file_index(settings, source_file):
