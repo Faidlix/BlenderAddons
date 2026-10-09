@@ -14,7 +14,7 @@ Blender Repository URL：
 - [Faidlix Texture Marge 1.5.8](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/blander_texture_marge-1.5.8.zip)：貼圖通道合併與材質串接。
 - [Faidlix BakeMap 2.3.11](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_bakemap-2.3.11.zip)：材質資訊烘焙。
 - [Faidlix Bone Remap 0.6.18](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_bone_remap-0.6.18.zip)：批次骨架動畫重定向。
-- [Faidlix_Fbx ZipExporter 1.8.0](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_fbx_zip_exporter-1.8.0.zip)：選擇 Actions 與材質貼圖後輸出 FBX ZIP。
+- [Faidlix_Fbx ZipExporter 1.8.1](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_fbx_zip_exporter-1.8.1.zip)：選擇 Actions 與材質貼圖後輸出 FBX ZIP。
 - [Faidlix Manager 1.1.6](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_manager-1.1.6.zip)：選配的共通功能與固定於側邊欄頂端的「全部更新」控制列。
 - [Faidlix_Outliner 0.2.17](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_outliner-0.2.17.zip)：階層選取與批次顯示控制。
 - [Faidlix Paint 0.4.8](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_paint-0.4.8.zip)：整層、遮罩與 UV 島填色。

@@ -15,8 +15,8 @@ root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root.parent))
 addon = importlib.import_module('Faidlix_FBXZip')
 addon.register()
-assert addon.bl_info['version'] == (1, 8, 0)
-assert addon.ADDON_VERSION == (1, 8, 0)
+assert addon.bl_info['version'] == (1, 8, 1)
+assert addon.ADDON_VERSION == (1, 8, 1)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
@@ -149,11 +149,10 @@ existing_track.mute = False
 addon._refresh_action_items(bpy.context.window_manager, [armature], preserve=False)
 assert {item.action_name for item in bpy.context.window_manager.fbxzip_action_items} == {'Fairy_Idle', 'Fairy_Run'}
 for item in bpy.context.window_manager.fbxzip_action_items:
-    item.include = item.action_name == 'Fairy_Idle'
-    if item.include:
-        item.export_name = 'Fairy_Idle'
+    item.include = True
+    item.export_name = item.action_name
 with tempfile.TemporaryDirectory(prefix='fbxzip_action_') as folder:
-    package = Path(folder)/'actions.zip'
+    package = Path(folder)/'actions_all.zip'
     result = bpy.ops.export_scene.fbx_zip(
         filepath=str(package),
         use_selection=True,
@@ -164,9 +163,26 @@ with tempfile.TemporaryDirectory(prefix='fbxzip_action_') as folder:
     )
     assert result == {'FINISHED'}, result
     with zipfile.ZipFile(package) as archive:
-        fbx_bytes = archive.read('actions.fbx')
+        fbx_bytes = archive.read('actions_all.fbx')
         assert b'Fairy_Idle' in fbx_bytes
+        assert b'Fairy_Run' in fbx_bytes
         assert b'ActionRig|Fairy_Idle' not in fbx_bytes
+        assert b'ActionRig|Fairy_Run' not in fbx_bytes
+    for item in bpy.context.window_manager.fbxzip_action_items:
+        item.include = item.action_name == 'Fairy_Idle'
+    selected_package = Path(folder)/'actions_selected.zip'
+    result = bpy.ops.export_scene.fbx_zip(
+        filepath=str(selected_package),
+        use_selection=True,
+        object_types={'ARMATURE'},
+        package_textures=False,
+        bake_anim=True,
+        select_actions=True,
+    )
+    assert result == {'FINISHED'}, result
+    with zipfile.ZipFile(selected_package) as archive:
+        fbx_bytes = archive.read('actions_selected.fbx')
+        assert b'Fairy_Idle' in fbx_bytes
         assert b'Fairy_Run' not in fbx_bytes
 assert armature.animation_data.action == original_action
 assert len(armature.animation_data.nla_tracks) == 1

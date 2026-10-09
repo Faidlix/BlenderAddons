@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 0),
+    "version": (1, 8, 1),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -30,7 +30,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 0)
+ADDON_VERSION = (1, 8, 1)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -611,45 +611,49 @@ def _image_metadata(image):
 
 def _setup_action_strips(objects, items):
     states = []
-    for item in items:
-        if not item.include:
-            continue
-        action = bpy.data.actions.get(item.action_name)
-        target, slot = _action_target(action, objects) if action else (None, None)
-        if not action or not target:
-            continue
-        state = next((entry for entry in states if entry['object'] == target), None)
-        if state is None:
-            created = target.animation_data is None
-            animation_data = target.animation_data_create()
-            tweak = getattr(animation_data, "use_tweak_mode", False)
-            if getattr(animation_data, "is_property_readonly", lambda _name: False)('action') and tweak:
-                animation_data.use_tweak_mode = False
-            state = {
-                'object': target,
-                'created': created,
-                'action': animation_data.action,
-                'action_slot': getattr(animation_data, "action_slot", None),
-                'tweak': tweak,
-                'track_mutes': [(track, track.mute) for track in animation_data.nla_tracks],
-                'track': None,
-            }
-            animation_data.action = None
-            for track in animation_data.nla_tracks:
-                track.mute = True
-            track = animation_data.nla_tracks.new()
-            track.name = "__FAIDLIX_FBXZIP_TEMP__"
-            state['track'] = track
-            states.append(state)
-        start = int(action.frame_range[0])
-        strip = state['track'].strips.new(item.export_name, start, action)
-        strip.name = item.export_name
-        if slot is not True and hasattr(strip, "action_slot"):
-            try:
-                strip.action_slot = slot
-            except (TypeError, ValueError, AttributeError):
-                pass
-    return states
+    try:
+        for item in items:
+            if not item.include:
+                continue
+            action = bpy.data.actions.get(item.action_name)
+            target, slot = _action_target(action, objects) if action else (None, None)
+            if not action or not target:
+                continue
+            state = next((entry for entry in states if entry['object'] == target), None)
+            if state is None:
+                created = target.animation_data is None
+                animation_data = target.animation_data_create()
+                tweak = getattr(animation_data, "use_tweak_mode", False)
+                if getattr(animation_data, "is_property_readonly", lambda _name: False)('action') and tweak:
+                    animation_data.use_tweak_mode = False
+                state = {
+                    'object': target,
+                    'created': created,
+                    'action': animation_data.action,
+                    'action_slot': getattr(animation_data, "action_slot", None),
+                    'tweak': tweak,
+                    'track_mutes': [(track, track.mute) for track in animation_data.nla_tracks],
+                    'tracks': [],
+                }
+                states.append(state)
+                animation_data.action = None
+                for track in animation_data.nla_tracks:
+                    track.mute = True
+            track = target.animation_data.nla_tracks.new()
+            track.name = f"__FAIDLIX_FBXZIP_TEMP__{len(state['tracks']):03d}"
+            state['tracks'].append(track)
+            start = int(action.frame_range[0])
+            strip = track.strips.new(item.export_name, start, action)
+            strip.name = item.export_name
+            if slot is not True and hasattr(strip, "action_slot"):
+                try:
+                    strip.action_slot = slot
+                except (TypeError, ValueError, AttributeError):
+                    pass
+        return states
+    except Exception:
+        _restore_action_strips(states)
+        raise
 
 
 def _restore_action_strips(states):
@@ -658,9 +662,9 @@ def _restore_action_strips(states):
         animation_data = obj.animation_data
         if not animation_data:
             continue
-        track = state['track']
-        if track and track in animation_data.nla_tracks[:]:
-            animation_data.nla_tracks.remove(track)
+        for track in reversed(state['tracks']):
+            if track in animation_data.nla_tracks[:]:
+                animation_data.nla_tracks.remove(track)
         for existing, muted in state['track_mutes']:
             if existing in animation_data.nla_tracks[:]:
                 existing.mute = muted
