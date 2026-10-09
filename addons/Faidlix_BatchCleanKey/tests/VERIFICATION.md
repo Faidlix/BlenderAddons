@@ -46,3 +46,13 @@ The user's working blend file is never used as a test fixture.
 - 合併批次彈窗的大量取樣取消回歸：142704 筆取樣於 75% 送 Esc，下一次檢查約 0.017 秒已停止，原曲線摘要與模式一致，未殘留浮層或暫存資料。
 - 完全沒有動畫資料的來源空曲線不再造成旋轉誤阻擋。真正具有 Key 且鎖定／停用／修飾器／Sampled 的旋轉曲線仍需先整理；錯誤包含具體通道原因。
 - 循環新增烘焙／解鎖副本：locked／mute／modifier／sampled 曲線處理、共同頭尾、來源不變及取消刪除副本通過；GUI 彈窗自動提供副本、顯示進度並可 Esc 取消。副本明確啟用原本停用的曲線，來源停用狀態保留。
+
+# 1.3.1
+
+- 自動旋轉測試涵蓋補選相容 Action、Cycles／鎖定／停用烘焙、空目標取代、取樣／寫回取消、Quaternion 等價取樣、其他通道保留、Action 名稱和目前使用者／NLA strip 重映射。
+- 自動處理採原生 Action 副本：處理失敗或取消不更改原資料；Driver／不明確 Slot／多層等無法安全處理的情況預先取消。全部完成才替換原 Action，使用者連結與名称保留，資料 ID 改變。
+- 隔離 GUI 實際輸入通過：提示窗取消、自動補選並烘焙 Cycles、進度中 Esc 取消、完成後原生 Undo／Redo。提示窗截圖已檢視。額外覆蓋 Sampled／缺少分量處理與 Driver 預先取消。
+
+1.3.1 final scope: rotation controls are inline beneath Batch Keys, no selection or confirmation dialog. Automatic processing covers all source rotation Actions and all bones of the current armature; successful mode changes are global. `test_automatic_gui.py` verifies unselected bones/Actions, inline invocation, all Actions, Cycles baking, Esc rollback and native Undo/Redo. Earlier confirmation-window tests describe the superseded intermediate design.
+
+`test_mirror.py`: compare evaluated bone pose matrices against armature-space reflection using asymmetric bone rolls, the user Hips basis, parent chains, root IK controls, mixed Euler/Quaternion, modifiers; double reflection recovers original matrices. Source is preserved and cancellation discards staging. `test_mirror_gui.py` verifies native dialog, modal progress, Esc, Undo/Redo. Read-only export of the user's 79-bone Turn_Right data passed an isolated FK reflection comparison (max matrix error < 1e-6); this fixture does not include the user's live constraints or mesh.

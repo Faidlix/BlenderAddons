@@ -1,4 +1,10 @@
-# Faidlix_BatchCleanKey 1.3.0
+# Faidlix_BatchCleanKey 1.3.1
+
+1.3.1：在「批次處理 Action Keys」下方直接顯示旋轉轉換方向、烘焙間隔與「處理所有骨骼與 Action」。自動使用目前骨架的所有骨骼和相關 Action，無須勾選骨骼或 Action，不開轉換／確認彈窗。統一 Quaternion（WXYZ）與 XYZ Euler，完成後編輯介面的骨骼旋轉模式同步更新。
+
+鎖定／停用、Cycles 等修飾器、Sampled、缺少分量、非 Constant 外插與重複目標通道自動處理：在原生副本烘焙整個動作範圍、解除鎖定、啟用停用曲線、用目前骨骼值補缺少分量、以來源取代目標旋轉。零長度 Quaternion 改用單位旋轉。成功後才替換相關 Action，保留名称、其他通道、Slot、使用者及 NLA 連結；Action 資料 ID 會改變。停用曲線啟用及補缺少分量可能改變原本未播放的動作。Driver、Slot 不明確或多層動畫無法安全換算時，顯示取消原因並保留原資料。處理進度、Esc 取消及 Ctrl+Z 復原皆可用。
+
+左右翻轉改以骨架空間 X 軸鏡像，依每根骨骼的靜止矩陣和父子關係換算，修正髖部局部軸不同、左右骨骼 Roll 不同時的錯誤。配對沿用 Blender 左右命名規則；找不到對側的骨骼保留。預設產生 `_Flipped` 副本，也可修改原 Action；保留原 Key 的時間並加入間隔取樣，結果使用 Linear，較小間隔提升子影格精度。位置、旋轉與縮放烘焙至結果，其他骨骼屬性依左右名稱交換；約束與 Driver 維持骨架上的設定。無法以 TRS 表達的剪切或多層／Slot 歧義會取消。翻轉也顯示進度，支援 Esc 與 Undo／Redo。
 
 1.3.0 將 Delete／Clean／Decimate／旋轉轉換整合至同一個批次彈窗，骨骼提供全選／取消全選。Delete 預設完整重設勾選骨骼的位置、Euler／Quaternion／Axis Angle 與縮放，可取消勾選重設；不移除約束、自訂屬性或更改旋轉模式。旋轉轉換忽略完全沒有動畫資料的來源空曲線，並提供「補選相容 Action」；成功後同步所有勾選骨骼的旋轉模式，包括没有 Key 的骨骼。實際鎖定、停用、修飾器、取樣或不完整旋轉資料會指出 Action／骨骼／分量和原因，需先整理／烘焙。
 
@@ -17,10 +23,6 @@
 若含鎖定／停用、修飾器或 Sampled 曲線，循環彈窗預選「建立烘焙／解鎖循環副本」，可設定取樣間隔，產生並切換至 `_Loop` 新 Action。來源不修改，副本烘焙曲線計算值、移除修飾器、解除鎖定並啟用停用曲線；啟用停用曲線可能改變原本不播放的動作。此模式顯示進度並支援 Esc 取消，取消時移除副本。也可取消勾選，手動整理後修改原 Action。多層／Slot 不明確仍需先整理。整個操作可 Ctrl+Z 復原。
 
 Action 切換清單使用 Blender 原生可編輯名稱欄位：單擊選取並切換 Action，雙擊名稱進入改名。選取時依最新實際 Key／取樣曲線範圍同步時間軸 Start／End；小數起訖向外取整，空 Action 為 1–1。不改變目前影格。
-
-新增「批次轉換旋轉 Key」彈窗，沿用骨骼與 Action 多選，可將 Quaternion（WXYZ）與 XYZ Euler 雙向換算。保留原始 Key 的影格位置，並按烘焙間隔補取樣；預設每 1 影格。取樣點的局部旋轉相同，點間採 Linear（全來源通道 Constant 時保留 Constant），因此點間動畫為近似；較小間隔可提高子影格精度。Euler 使用相容角度保持連續，Quaternion 使用同半球符號避免跳轉。
-
-轉換會切換骨骼的全域旋轉模式。未勾選 Action 若仍有所選骨骼的來源旋轉曲線，會提示一併勾選並中止，不擅自修改未選 Action。來源需完整 4／3 通道；唯讀、Slot 不明確、多層、Driver、鎖定／停用、修飾器、Sampled 曲線、非 Constant 外插或已有目標旋轉通道會中止，請先整理或烘焙。只修改所選骨骼的旋轉通道，保留其他骨骼、位置、縮放與其他 Slot。共享 Action 仍影響其所有使用者。進度、Esc 取消、全部成功才寫回及 Ctrl+Z 復原與原批次工具相同。
 
 Blender 5.2+ 獨立 Extension。Pose Mode 選取骨骼後，在 3D View、Dope Sheet、Action Editor 或 Graph Editor 的 N 側邊欄 → Faidlix → Faidlix_BatchCleanKey → 批次處理 Action Keys。
 

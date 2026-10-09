@@ -2,6 +2,7 @@
 import bpy
 import json
 import re
+BONE_PREFIX = re.compile(r'^(pose\.bones\["(?:\\.|[^"\\])*"\])(?=[.\[])')
 
 
 def reset_pose(obj, names):
@@ -39,7 +40,7 @@ def slot_for(action, obj):
 
 
 def target_curves(action, obj, names):
-    prefixes = tuple('pose.bones["' + bpy.utils.escape_identifier(n) + '"]' for n in names)
+    prefixes = {'pose.bones["' + bpy.utils.escape_identifier(n) + '"]' for n in names}
     slot = slot_for(action, obj)
     if not slot:
         return []
@@ -51,8 +52,7 @@ def target_curves(action, obj, names):
             bag = strip.channelbag(slot)
             if bag:
                 curves.extend(f for f in bag.fcurves
-                              if any(f.data_path.startswith(p + '.') or
-                                     f.data_path.startswith(p + '[') for p in prefixes))
+                              if (match := BONE_PREFIX.match(f.data_path)) and match[1] in prefixes)
     return curves
 
 
@@ -86,6 +86,32 @@ def sync_ranges(actions):
     return changed, skipped
 
 
+def sync_action_modes(obj, action):
+    """Select each bone's keyed representation without rewriting other Actions."""
+    if not action or obj.type != 'ARMATURE' or not obj.is_editable:
+        return False
+    keyed = {}
+    for c in target_curves(action,obj,[b.name for b in obj.pose.bones]):
+        if not rotation_has_data(c):
+            continue
+        m=re.match(r'^pose\.bones\[("(?:\\.|[^"\\])*")\]\.rotation_(quaternion|euler|axis_angle)$',c.data_path)
+        if m:
+            keyed.setdefault(json.loads(m[1]),set()).add(m[2])
+    changed=False
+    for name,kinds in keyed.items():
+        if len(kinds)!=1:
+            continue
+        bone=obj.pose.bones[name]
+        kind=next(iter(kinds))
+        mode={'quaternion':'QUATERNION','axis_angle':'AXIS_ANGLE'}.get(kind)
+        if mode is None:
+            mode=action.get('_bck_euler_orders',{}).get(name,'XYZ')
+        if bone.rotation_mode!=mode:
+            bone.rotation_mode=mode
+            changed=True
+    return changed
+
+
 def assign_action(context, obj, action):
     if not obj.is_editable:
         raise ValueError('目前骨架為唯讀')
@@ -97,6 +123,7 @@ def assign_action(context, obj, action):
     ad = obj.animation_data_create()
     ad.action = action
     ad.action_slot = slot
+    sync_action_modes(obj, action)
     obj.update_tag(refresh={'TIME'})
     context.scene.frame_set(context.scene.frame_current, subframe=context.scene.frame_subframe)
 
@@ -277,7 +304,7 @@ def rotation_dependencies(obj, names, actions, target):
             any(c.data_path in paths and rotation_has_data(c) for c in target_curves(a, obj, names))]
 
 
-def rotation_steps(context, obj, names, actions, target, step=1.0):
+def rotation_steps(context, obj, names, actions, target, step=1.0, check_dependencies=True):
     """Bake evaluated local rotation channels; stage before an atomic commit.
 
     Samples include original subframe keys. Between samples conversion is an
@@ -295,11 +322,11 @@ def rotation_steps(context, obj, names, actions, target, step=1.0):
     if not names or not actions or not obj.is_editable:
         raise ValueError('請選取可編輯的骨架、骨骼與 Action')
     paths = {n: obj.pose.bones[n].path_from_id() + '.' + source for n in names}
-    for action in bpy.data.actions:
+    for action in bpy.data.actions if check_dependencies else []:
         if action.slots and not slot_for(action, obj) and any(c.data_path in paths.values() and rotation_has_data(c) for c in action_curves(action)):
             raise ValueError(action.name + '：來源旋轉 Slot 不明確，請先整理 Slot')
     # Changing a pose bone's mode affects every Action, including NLA users.
-    blockers = [a.name for a in rotation_dependencies(obj, names, actions, target)]
+    blockers = [a.name for a in rotation_dependencies(obj, names, actions, target)] if check_dependencies else []
     if blockers:
         raise ValueError('請一併勾選仍有來源旋轉 Key 的 Action：' + ', '.join(blockers[:8]))
     if obj.animation_data and any(d.data_path in paths.values() or
