@@ -23,3 +23,11 @@ The user's working blend file is never used as a test fixture.
 - Isolated foreground modal Clean across 25 Actions / 1000 curves passes native Undo/Redo, without manual after-operation undo push.
 - Expanded bone/Action scroll lists and visible progress overlay screenshots inspected.
 - Real synthetic Esc event cancels the modal operation, restores scratch data and preserves original keys.
+
+# 1.2.0
+
+- Blender 5.2.2 隔離 CLI：原本 headless、management 與新 rotation 測試通過。旋轉雙向換算比對全部取樣點的 Quaternion，另測試未選 Action 相容性阻擋、取消不寫回、注入提交失敗回復、時間軸向外取整及瀏覽清單選取切換。
+- 循環測試：共同最早／最晚影格、短曲線補 Key、頭尾值與斜率相同、內部 Key 保留及鎖定曲線整體中止。
+- 隔離 GUI：旋轉 modal 完成、Undo、Redo、Esc 取消通過；彈窗及進度截圖已檢視。原先大場景測試沒有產出完成標記，縮小隔離 fixture 後重測通過；不將未完成測試視為成功。
+- 原生 Action 名稱欄位單擊事件確認切換 Action 並同步場景 1–20 範圍。雙擊改名使用 Blender UIList 原生名稱欄位；event_simulate 僅支援 PRESS／RELEASE／NOTHING，不能直接送 DOUBLE_CLICK，未宣稱實體雙擊已自動驗證。循環按鈕在複製前，實際點擊可開啟設定彈窗。
+- 循環操作使用實際按鈕開啟並確認後，原生 Undo 還原頭尾控制柄通過；無手動補推操作後的 Undo 步驟。

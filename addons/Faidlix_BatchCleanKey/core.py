@@ -90,6 +90,229 @@ def assign_action(context, obj, action):
     context.scene.frame_set(context.scene.frame_current, subframe=context.scene.frame_subframe)
 
 
+def sync_scene_range(scene, action):
+    import math
+    bounds = tuple(action.frame_range) if action.use_frame_range else actual_range(action)
+    if bounds is None:
+        bounds = (1, 1)
+    start, end = math.floor(bounds[0]), math.ceil(bounds[1])
+    scene.frame_end = max(scene.frame_end, end)
+    scene.frame_start = start
+    scene.frame_end = end
+
+
+def loop_curves(action, obj):
+    slot = slot_for(action, obj)
+    if not action.is_editable or not slot:
+        raise ValueError('Action 為唯讀或 Slot 不明確')
+    bags = [strip.channelbag(slot) for layer in action.layers for strip in layer.strips
+            if strip.type == 'KEYFRAME' and strip.channelbag(slot)]
+    if len(bags) != 1:
+        raise ValueError('多層 Action 請先烘焙')
+    curves = [c for c in bags[0].fcurves if c.keyframe_points or c.sampled_points]
+    if not curves:
+        raise ValueError('Action 沒有 Key')
+    if any(c.lock or c.mute or c.modifiers or c.sampled_points for c in curves):
+        raise ValueError('Action 含鎖定、停用、修飾器或取樣曲線，請先烘焙／解鎖')
+    frames = [p.co.x for c in curves for p in c.keyframe_points]
+    return curves, min(frames), max(frames)
+
+
+def make_loop(action, obj, smooth=True):
+    """Close every curve in the rig slot over their union range, atomically."""
+    curves, start, end = loop_curves(action, obj)
+    if end <= start:
+        raise ValueError('循環至少需要兩個不同影格')
+    plans, added = [], 0
+    for curve in curves:
+        before = snapshot(curve)
+        points = [dict(p) for p in before]
+        value = curve.evaluate(start)
+        for frame in (start, end):
+            if not any(p['co'][0] == frame for p in points):
+                point = dict(before[0] if frame == start else before[-1])
+                point['co'] = (frame, curve.evaluate(frame))
+                point['handle_left'] = point['handle_right'] = point['co']
+                points.append(point)
+                added += 1
+        points.sort(key=lambda p: p['co'][0])
+        first, last = points[0], points[-1]
+        slope = 0.0
+        if smooth and before[0]['co'][0] == start and len(before) > 1:
+            if first['interpolation'] == 'BEZIER':
+                dx = first['handle_right'][0] - start
+                slope = (first['handle_right'][1] - value) / dx if abs(dx) > 1e-6 else 0
+            elif first['interpolation'] == 'LINEAR':
+                slope = (before[1]['co'][1] - value) / (before[1]['co'][0] - start)
+        for point in (first, last):
+            point['co'] = (point['co'][0], value)
+        if smooth:
+            # Adjacent segment lengths avoid crossing a neighbouring control point.
+            for point, span in ((first, points[1]['co'][0]-start),
+                                (last, end-points[-2]['co'][0])):
+                frame = point['co'][0]
+                distance = span / 3
+                point['handle_left_type'] = point['handle_right_type'] = 'FREE'
+                point['handle_left'] = (frame-distance, value-slope*distance)
+                point['handle_right'] = (frame+distance, value+slope*distance)
+                point['interpolation'] = 'BEZIER'
+            # The outgoing interpolation belongs to the penultimate point.
+            if points[-2] is not first:
+                points[-2]['interpolation'] = 'BEZIER'
+        else:
+            for point in (first, last):
+                point['handle_left_type'] = point['handle_right_type'] = 'AUTO_CLAMPED'
+        plans.append((curve, before, points))
+    applied = []
+    try:
+        for curve, before, points in plans:
+            applied.append((curve, before))
+            write_points(curve, points)
+    except Exception:
+        for curve, before in applied:
+            write_points(curve, before)
+        raise
+    action.update_tag()
+    return len(curves), added, start, end
+
+
+def rotation_steps(context, obj, names, actions, target, step=1.0):
+    """Bake evaluated local rotation channels; stage before an atomic commit.
+
+    Samples include original subframe keys. Between samples conversion is an
+    approximation: use a smaller step for fast rotations or subframe rendering.
+    """
+    import math
+    from mathutils import Euler, Quaternion
+    if target not in {'XYZ', 'QUATERNION'} or not math.isfinite(step) or step < 0.01:
+        raise ValueError('旋轉模式或取樣間隔無效')
+    source = 'rotation_quaternion' if target == 'XYZ' else 'rotation_euler'
+    dest = 'rotation_euler' if target == 'XYZ' else 'rotation_quaternion'
+    size = 4 if target == 'XYZ' else 3
+    names, actions = list(dict.fromkeys(names)), list(dict.fromkeys(actions))
+    if not names or not actions or not obj.is_editable:
+        raise ValueError('請選取可編輯的骨架、骨骼與 Action')
+    paths = {n: obj.pose.bones[n].path_from_id() + '.' + source for n in names}
+    for action in bpy.data.actions:
+        if action.slots and not slot_for(action, obj) and any(c.data_path in paths.values() for c in action_curves(action)):
+            raise ValueError(action.name + '：來源旋轉 Slot 不明確，請先整理 Slot')
+    # Changing a pose bone's mode affects every Action, including NLA users.
+    blockers = [a.name for a in bpy.data.actions if a not in actions and
+                any(c.data_path in paths.values() for c in target_curves(a, obj, names))]
+    if blockers:
+        raise ValueError('請一併勾選仍有來源旋轉 Key 的 Action：' + ', '.join(blockers[:8]))
+    if obj.animation_data and any(d.data_path in paths.values() or
+            d.data_path in {obj.pose.bones[n].path_from_id() + '.' + dest for n in names}
+            for d in obj.animation_data.drivers):
+        raise ValueError('所選骨骼有旋轉 Driver，請先烘焙')
+    jobs = []
+    for action in actions:
+        curves = target_curves(action, obj, names)
+        if not action.is_editable or (action.slots and not slot_for(action, obj)):
+            raise ValueError(action.name + '：唯讀或 Slot 不明確')
+        bags = [strip.channelbag(slot_for(action, obj)) for layer in action.layers
+                for strip in layer.strips if strip.type == 'KEYFRAME' and slot_for(action, obj)]
+        for name, path in paths.items():
+            channels = [c for c in curves if c.data_path == path]
+            if not channels:
+                continue
+            if len(bags) != 1 or not bags[0]:
+                raise ValueError(action.name + '：多層旋轉需先烘焙')
+            if len(channels) != size or {c.array_index for c in channels} != set(range(size)):
+                raise ValueError(action.name + ' / ' + name + '：旋轉通道不完整，請先補齊 Key')
+            if any(c.lock or c.mute or c.modifiers or c.sampled_points or not c.keyframe_points or
+                   c.extrapolation != 'CONSTANT' for c in channels):
+                raise ValueError(action.name + '：旋轉含鎖定、停用、修飾器或取樣資料，請先烘焙／解鎖')
+            if obj.pose.bones[name].rotation_mode not in {'XYZ', 'QUATERNION'}:
+                raise ValueError(name + '：目前只支援 XYZ Euler')
+            destpath = obj.pose.bones[name].path_from_id() + '.' + dest
+            if any(c.data_path == destpath for c in curves):
+                raise ValueError(action.name + '：已有目標旋轉通道，請先移除重複通道')
+            times = {float(p.co.x) for c in channels for p in c.keyframe_points}
+            first, last = min(times), max(times)
+            count = math.ceil((last - first) / step)
+            if count > 200000:
+                raise ValueError('取樣數過多，請增加間隔')
+            times.update(first + i * step for i in range(count) if first + i * step < last)
+            jobs.append((action, name, bags[0], sorted(channels, key=lambda c: c.array_index), destpath, sorted(times)))
+    if not jobs:
+        raise ValueError('所選 Action／骨骼沒有來源旋轉 Key')
+    total = sum(len(j[-1]) for j in jobs)
+    done, staged = 0, []
+    for action, name, bag, channels, path, times in jobs:
+        samples, previous = [], None
+        for frame in times:
+            values = [c.evaluate(frame) for c in channels]
+            quat = Quaternion(values) if target == 'XYZ' else Euler(values, 'XYZ').to_quaternion()
+            if quat.magnitude < 1e-8:
+                raise ValueError(action.name + '：零長度 Quaternion')
+            quat.normalize()
+            if target == 'XYZ':
+                value = quat.to_euler('XYZ', previous) if previous else quat.to_euler('XYZ')
+            else:
+                if previous and quat.dot(previous) < 0:
+                    quat.negate()
+                value = quat
+            previous = value.copy()
+            constant = all(next((p.interpolation == 'CONSTANT' for p in reversed(c.keyframe_points)
+                                 if p.co.x <= frame), False) for c in channels)
+            samples.append((frame, tuple(value), 'CONSTANT' if constant else 'LINEAR'))
+            done += 1
+            yield done, total, action.name
+        staged.append((action, name, bag, channels, path, samples))
+    created, removed = [], []
+    bones = {name: (obj.pose.bones[name].rotation_mode,
+                   obj.pose.bones[name].rotation_euler.copy(),
+                   obj.pose.bones[name].rotation_quaternion.copy()) for name in {j[1] for j in jobs}}
+    try:
+        for action, name, bag, channels, path, samples in staged:
+            for index in range(3 if target == 'XYZ' else 4):
+                curve = bag.fcurves.new(path, index=index)
+                created.append((bag, curve))
+                if channels[0].group:
+                    curve.group = channels[0].group
+                curve.keyframe_points.add(len(samples))
+                for point, (frame, values, interp) in zip(curve.keyframe_points, samples):
+                    point.co = frame, values[index]
+                    point.interpolation = interp
+                curve.update()
+        for action, name, bag, channels, path, samples in staged:
+            for curve in channels:
+                record = (bag, curve.data_path, curve.array_index, snapshot(curve), curve.extrapolation,
+                          curve.group.name if curve.group else None,
+                          {k: tuple(curve.color) if k == 'color' else getattr(curve, k)
+                           for k in ('color_mode', 'color', 'auto_smoothing', 'hide', 'select')})
+                bag.fcurves.remove(curve)
+                removed.append(record)
+        for name, (mode, euler, quat) in bones.items():
+            bone = obj.pose.bones[name]
+            rotation = quat.normalized() if mode == 'QUATERNION' else Euler(euler, mode).to_quaternion()
+            bone.rotation_mode = target
+            if target == 'XYZ':
+                bone.rotation_euler = rotation.to_euler('XYZ')
+            else:
+                bone.rotation_quaternion = rotation
+        context.scene.frame_set(context.scene.frame_current, subframe=context.scene.frame_subframe)
+        for action in actions:
+            action.update_tag()
+    except Exception:
+        for bag, curve in reversed(created):
+            bag.fcurves.remove(curve)
+        for bag, path, index, points, extrapolation, group, attributes in removed:
+            curve = bag.fcurves.new(path, index=index)
+            curve.extrapolation = extrapolation
+            for key, value in attributes.items():
+                setattr(curve, key, value)
+            if group:
+                curve.group = bag.groups.get(group) or bag.groups.new(group)
+            write_points(curve, points)
+        for name, (mode, euler, quat) in bones.items():
+            bone = obj.pose.bones[name]
+            bone.rotation_mode, bone.rotation_euler, bone.rotation_quaternion = mode, euler, quat
+        raise
+    return {'actions': len({j[0] for j in jobs}), 'bones': len(bones), 'samples': total}
+
+
 def mirror_action(action, obj):
     """Mirror local pose channels with Blender Paste Flipped's X-axis convention.
 

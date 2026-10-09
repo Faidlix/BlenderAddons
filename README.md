@@ -20,7 +20,7 @@ Blender Repository URL：
 - [Faidlix Paint 0.4.8](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_paint-0.4.8.zip)：整層、遮罩與 UV 島填色。
 - [Faidlix_Weight 1.3.0](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_weight-1.3.0.zip)：選取點權重鏡射與左右名稱對應。
 
-- [Faidlix_BatchCleanKey 1.1.2](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_batch_clean_key-1.1.2.zip)：依選定骨骼，跨 Action 批次刪除、清理與縮減 Key。
+- [Faidlix_BatchCleanKey 1.2.0](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_batch_clean_key-1.2.0.zip)：依選定骨骼，跨 Action 批次刪除、清理與縮減 Key。
 
 安裝 Manager 不是使用其他外掛的前提。Manager 只會更新已安裝的 Faidlix 套件，不會自動安裝其他外掛。
 

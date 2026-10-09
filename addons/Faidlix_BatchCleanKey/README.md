@@ -1,4 +1,12 @@
-# Faidlix_BatchCleanKey 1.1.2
+# Faidlix_BatchCleanKey 1.2.0
+
+每列 Action 在複製按鈕前新增循環按鈕。彈窗確認後，以目前骨架 Slot 中所有有 Key 曲線的最早／最晚影格為共同範圍，較短曲線補上頭尾 Key，尾端值接回開頭。預設銜接斜率，採開頭斜率設定頭尾 Free 控制柄，並將接縫鄰接段設為 Bezier；可取消勾選以只對齊頭尾值。保留範圍內 Key 的位置與值；接縫附近動作可能改變。多層、鎖定／停用、修飾器或 Sampled 曲線需先整理／烘焙。整個操作可 Ctrl+Z 復原。
+
+Action 切換清單使用 Blender 原生可編輯名稱欄位：單擊選取並切換 Action，雙擊名稱進入改名。選取時同步場景時間軸 Start／End，優先採 Action 的手動範圍，否則採實際 Key／取樣曲線範圍；小數起訖向外取整，空 Action 為 1–1。不改變目前影格。
+
+新增「批次轉換旋轉 Key」彈窗，沿用骨骼與 Action 多選，可將 Quaternion（WXYZ）與 XYZ Euler 雙向換算。保留原始 Key 的影格位置，並按烘焙間隔補取樣；預設每 1 影格。取樣點的局部旋轉相同，點間採 Linear（全來源通道 Constant 時保留 Constant），因此點間動畫為近似；較小間隔可提高子影格精度。Euler 使用相容角度保持連續，Quaternion 使用同半球符號避免跳轉。
+
+轉換會切換骨骼的全域旋轉模式。未勾選 Action 若仍有所選骨骼的來源旋轉曲線，會提示一併勾選並中止，不擅自修改未選 Action。來源需完整 4／3 通道；唯讀、Slot 不明確、多層、Driver、鎖定／停用、修飾器、Sampled 曲線、非 Constant 外插或已有目標旋轉通道會中止，請先整理或烘焙。只修改所選骨骼的旋轉通道，保留其他骨骼、位置、縮放與其他 Slot。共享 Action 仍影響其所有使用者。進度、Esc 取消、全部成功才寫回及 Ctrl+Z 復原與原批次工具相同。
 
 Blender 5.2+ 獨立 Extension。Pose Mode 選取骨骼後，在 3D View、Dope Sheet、Action Editor 或 Graph Editor 的 N 側邊欄 → Faidlix → Faidlix_BatchCleanKey → 批次處理 Action Keys。
 
