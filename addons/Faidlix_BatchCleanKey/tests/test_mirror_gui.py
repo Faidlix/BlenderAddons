@@ -19,6 +19,7 @@ region=next(r for r in area.regions if r.type=='WINDOW')
 area.spaces.active.show_region_ui=True
 region_ui=next(r for r in area.regions if r.type=='UI')
 OUT=ROOT/'validation'; stage=0; started=time.monotonic()
+keyed_only=os.environ.get('BCK_TEST_KEYED_MODE')=='1'
 def event(kind):
  bpy.context.window.event_simulate(type=kind,value='PRESS')
  bpy.context.window.event_simulate(type=kind,value='RELEASE')
@@ -31,16 +32,18 @@ def test():
    if stage==0:
     bpy.ops.ed.undo_push(message='Mirror fixture')
     bpy.ops.screen.screenshot(filepath=str(OUT/'v131-sidebar.png'))
-    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1)
+    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1,keyed_only=keyed_only)
     stage=1
-   elif stage==1: event('RET'); stage=2
+   elif stage==1:
+    bpy.ops.screen.screenshot(filepath=str(OUT/'mirror-keyed-dialog.png'))
+    event('RET'); stage=2
    elif stage==2:
     if not state.running: return .02
     event('ESC'); stage=3
    elif stage==3:
     if state.running or state.pending: return .02
     assert digest()==before and len(bpy.data.actions)==count,state.last_result
-    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1)
+    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1,keyed_only=keyed_only)
     stage=4
    elif stage==4: event('RET'); stage=5
    elif stage==5:

@@ -99,6 +99,7 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     flip_action: PointerProperty(type=bpy.types.Action)
     flip_mode: StringProperty(default='COPY')
     flip_step: IntProperty(default=1,min=1)
+    flip_keyed_only: BoolProperty(default=False)
     loop_job: BoolProperty(default=False)
     loop_action: PointerProperty(type=bpy.types.Action)
     loop_smooth: BoolProperty(default=True)
@@ -422,7 +423,7 @@ def result_text(result):
 def processing_steps(context):
     state=context.window_manager.faidlix_batch_clean_key
     if state.flip_job:
-        return mirror.steps(context,rig(context),state.flip_action,state.flip_mode,state.flip_step)
+        return mirror.steps(context,rig(context),state.flip_action,state.flip_mode,state.flip_step,state.flip_keyed_only)
     state = context.window_manager.faidlix_batch_clean_key
     if state.loop_job:
         action, obj = state.loop_action, rig(context)
@@ -778,6 +779,8 @@ class BCK_OT_Flip(bpy.types.Operator):
     bl_options = {'UNDO'}
     action_name: StringProperty()
     sample_step: IntProperty(name='烘焙間隔（影格）',default=1,min=1,max=100)
+    keyed_only: BoolProperty(name='只翻轉有下 Key 的部分',default=False,
+        description='只交換有動畫資料的骨骼通道；不新增未打 Key 的位置、旋轉或縮放分量')
     mode: EnumProperty(items=[('COPY', '建立翻轉副本', '保留原 Action'),
                               ('IN_PLACE', '修改原 Action', '原 Action 的所有使用者都會受到影響')], default='COPY')
 
@@ -788,6 +791,9 @@ class BCK_OT_Flip(bpy.types.Operator):
         self.layout.label(text=self.action_name)
         self.layout.prop(self, 'mode', expand=True)
         self.layout.prop(self, 'sample_step')
+        self.layout.prop(self, 'keyed_only')
+        if self.keyed_only:
+            self.layout.label(text='僅交換有 Key 的分量；未打 Key 的分量保留目前姿勢')
         self.layout.label(text='以骨架 X 軸翻轉，依 Blender 左右骨骼名稱配對')
         self.layout.label(text='依骨骼靜止軸向換算；保留原 Key 時間並加入間隔取樣')
 
@@ -798,6 +804,7 @@ class BCK_OT_Flip(bpy.types.Operator):
         state=context.window_manager.faidlix_batch_clean_key
         state.flip_job=True; state.loop_job=False; state.rotation_job=False
         state.flip_action=source; state.flip_mode=self.mode; state.flip_step=self.sample_step
+        state.flip_keyed_only=self.keyed_only
         return run_sync(self,context) if bpy.app.background else launch_batch(context)
 
 

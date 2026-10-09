@@ -9,7 +9,7 @@ from . import core
 TRS={'location','rotation_euler','rotation_quaternion','rotation_axis_angle','scale'}
 
 
-def steps(context,obj,source,mode='COPY',step=1):
+def steps(context,obj,source,mode='COPY',step=1,keyed_only=False):
     if not source or not obj or not obj.is_editable or step<.01 or not math.isfinite(step):
         raise ValueError('骨架、Action 或取樣間隔無效')
     slot=core.slot_for(source,obj)
@@ -39,7 +39,10 @@ def steps(context,obj,source,mode='COPY',step=1):
     pairs={b.name:bpy.utils.flip_name(b.name) for b in bones
            if bpy.utils.flip_name(b.name) in obj.data.bones}
     active={name for name,prop,index in keyed if core.rotation_has_data(keyed[name,prop,index])}
-    affected=set(pairs) if any(n in pairs for n in active) else set()
+    keyed_mask={(pairs[n],p,i) for (n,p,i),c in keyed.items()
+                if n in pairs and core.rotation_has_data(c)}
+    output_props={n:{p for d,p,i in keyed_mask if d==n} for n in pairs}
+    affected={n for n,p,i in keyed_mask} if keyed_only else (set(pairs) if any(n in pairs for n in active) else set())
     if not affected: raise ValueError('沒有可配對的骨骼變換 Key')
     modes={}
     for b in bones:
@@ -52,6 +55,8 @@ def steps(context,obj,source,mode='COPY',step=1):
     reflect=Matrix.Diagonal((-1,1,1,1))
     corrections={n:obj.data.bones[n].matrix_local.inverted() @ reflect @ obj.data.bones[d].matrix_local for n,d in pairs.items()}
     values={n:[] for n in affected}; previous={}
+    # Missing channels retain the rig's current values, rather than an identity pose.
+    defaults={b.name:{p:tuple(getattr(b,p)) for p in TRS} for b in obj.pose.bones}
     total=len(frames)*len(bones)+len(frames)*len(affected)*10; done=0
     def components(name,prop,defaults,frame):
         return [keyed[name,prop,i].evaluate(frame) if (name,prop,i) in keyed and not keyed[name,prop,i].mute and core.rotation_has_data(keyed[name,prop,i]) else v for i,v in enumerate(defaults)]
@@ -61,16 +66,16 @@ def steps(context,obj,source,mode='COPY',step=1):
             pose={}
             for b in bones:
                 n=b.name; rm=modes[n]
-                loc=Vector(components(n,'location',(0,0,0),frame))
-                scale=Vector(components(n,'scale',(1,1,1),frame))
+                loc=Vector(components(n,'location',defaults[n]['location'],frame))
+                scale=Vector(components(n,'scale',defaults[n]['scale'],frame))
                 if rm=='QUATERNION':
-                    q=Quaternion(components(n,'rotation_quaternion',(1,0,0,0),frame))
+                    q=Quaternion(components(n,'rotation_quaternion',defaults[n]['rotation_quaternion'],frame))
                     if q.magnitude<1e-8: q=Quaternion()
                     q.normalize()
                 elif rm=='AXIS_ANGLE':
-                    a=components(n,'rotation_axis_angle',(0,0,1,0),frame)
+                    a=components(n,'rotation_axis_angle',defaults[n]['rotation_axis_angle'],frame)
                     axis=Vector(a[1:]); q=Quaternion(axis.normalized() if axis.length else Vector((0,1,0)),a[0])
-                else: q=Euler(components(n,'rotation_euler',(0,0,0),frame),rm).to_quaternion()
+                else: q=Euler(components(n,'rotation_euler',defaults[n]['rotation_euler'],frame),rm).to_quaternion()
                 pose[n]=b.convert_local_to_pose(Matrix.LocRotScale(loc,q,scale),b.matrix_local,
                     parent_matrix=pose[b.parent.name] if b.parent else Matrix.Identity(4),
                     parent_matrix_local=b.parent.matrix_local if b.parent else Matrix.Identity(4))
@@ -98,6 +103,16 @@ def steps(context,obj,source,mode='COPY',step=1):
                     prop='rotation_euler'
                 if hasattr(rotation,'copy'): previous[n]=rotation.copy()
                 sample={'location':tuple(loc),prop:tuple(rotation),'scale':tuple(scale)}
+                if keyed_only:
+                    # Legacy Actions may contain more than one rotation representation.
+                    # Write every keyed representation without introducing unkeyed ones.
+                    if 'rotation_quaternion' in output_props[n]:
+                        sample['rotation_quaternion']=tuple(q)
+                    if 'rotation_euler' in output_props[n]:
+                        order=rm if rm not in {'QUATERNION','AXIS_ANGLE'} else 'XYZ'
+                        sample['rotation_euler']=tuple(q.to_euler(order)) if prop!='rotation_euler' else tuple(rotation)
+                    if 'rotation_axis_angle' in output_props[n]:
+                        axis,angle=q.to_axis_angle(); sample['rotation_axis_angle']=(angle,*axis)
                 if not all(math.isfinite(v) for vs in sample.values() for v in vs): raise ValueError('翻轉產生非有限數值')
                 values[n].append(sample)
         copied=source.copy(); copied.name='__BCK_Mirror__'+source.name
@@ -108,15 +123,20 @@ def steps(context,obj,source,mode='COPY',step=1):
             if not m: continue
             n,suffix=json.loads(m[1]),m[2]
             if n not in pairs: continue
-            if suffix[1:] in TRS and n in affected: bag.fcurves.remove(c)
-            elif suffix[1:] not in TRS:
+            if suffix[1:] in TRS:
+                if ((not keyed_only and n in affected) or
+                    (keyed_only and ((n,suffix[1:],c.array_index) in keyed_mask or
+                     ((n,suffix[1:],c.array_index) in keyed and core.rotation_has_data(c))))):
+                    bag.fcurves.remove(c)
+            elif not keyed_only or core.rotation_has_data(c):
                 c.data_path=obj.pose.bones[pairs[n]].path_from_id()+suffix
         orders={}
         for n,samples in values.items():
             rm=modes[pairs[n]]
-            if rm not in {'QUATERNION','AXIS_ANGLE'}: orders[n]=rm
+            if rm not in {'QUATERNION','AXIS_ANGLE'} and (not keyed_only or 'rotation_euler' in output_props[n]): orders[n]=rm
             for prop,vs in samples[0].items():
                 for i in range(len(vs)):
+                    if keyed_only and (n,prop,i) not in keyed_mask: continue
                     c=bag.fcurves.new(obj.pose.bones[n].path_from_id()+'.'+prop,index=i)
                     c.group=bag.groups.get(n) or bag.groups.new(n)
                     c.keyframe_points.add(len(frames))
