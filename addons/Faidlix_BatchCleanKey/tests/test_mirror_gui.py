@@ -8,6 +8,8 @@ bpy.context.preferences.view.show_splash=False
 bpy.context.preferences.filepaths.use_auto_save_temporary_files=False
 obj=bpy.context.object; source=bpy.data.actions['RestAwareMirror']
 addon.core.assign_action(bpy.context,obj,source)
+c=next(c for c in addon.core.action_curves(source) if c.data_path.endswith('.location'))
+c.keyframe_points.insert(500,c.evaluate(5))
 def digest():
  a=bpy.data.actions['RestAwareMirror']
  return repr([(c.data_path,c.array_index,[m.type for m in c.modifiers],addon.core.snapshot(c)) for c in addon.core.action_curves(a)])
@@ -29,7 +31,7 @@ def test():
    if stage==0:
     bpy.ops.ed.undo_push(message='Mirror fixture')
     bpy.ops.screen.screenshot(filepath=str(OUT/'v131-sidebar.png'))
-    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=.01)
+    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1)
     stage=1
    elif stage==1: event('RET'); stage=2
    elif stage==2:
@@ -38,7 +40,7 @@ def test():
    elif stage==3:
     if state.running or state.pending: return .02
     assert digest()==before and len(bpy.data.actions)==count,state.last_result
-    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=.25)
+    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1)
     stage=4
    elif stage==4: event('RET'); stage=5
    elif stage==5:

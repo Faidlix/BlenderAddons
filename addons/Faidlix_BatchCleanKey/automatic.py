@@ -69,18 +69,19 @@ def rotation_steps(context,obj,names,actions,target,step=1):
             yield 0,1,original.name+'（準備副本）'
             slot=core.slot_for(copied,obj)
             bag=next(s.channelbag(slot) for l in copied.layers for s in l.strips if s.type=='KEYFRAME' and s.channelbag(slot))
-            bounds=core.actual_range(original)
             for name in names:
                 prefix=obj.pose.bones[name].path_from_id()+'.'
                 channels=[c for c in bag.fcurves if c.data_path==prefix+source]
                 if not any(core.rotation_has_data(c) for c in channels): continue
-                times={float(p.co.x) for c in channels for points in (c.keyframe_points,c.sampled_points) for p in points}
-                if bounds: times.update(bounds)
+                times={float(p.co.x) for c in channels for p in c.keyframe_points}
+                if not times:
+                    sampled={float(p.co.x) for c in channels for p in c.sampled_points}
+                    if sampled:
+                        first,last=min(sampled),max(sampled)
+                        times={first,last}
+                        times.update(first+i*step for i in range(math.ceil((last-first)/step)) if first+i*step<last)
                 if not times: times.add(float(context.scene.frame_current))
-                first,last=min(times),max(times)
-                count=math.ceil((last-first)/step)
-                if count>200000: raise ValueError('取樣過多，請增加間隔')
-                times.update(first+i*step for i in range(count) if first+i*step<last)
+                if len(times)>200000: raise ValueError('來源影格過多，取消處理')
                 defaults=tuple(obj.pose.bones[name].rotation_quaternion if target=='XYZ' else obj.pose.bones[name].rotation_euler)
                 jobs.append((copied,bag,prefix,channels,sorted(times),defaults))
                 yield 0,1,original.name+'（準備取樣）'
@@ -95,7 +96,7 @@ def rotation_steps(context,obj,names,actions,target,step=1):
                 yield done,total,copied.name.replace('__BCK_Auto__','')+'（自動烘焙）'
             group_name=channels[0].group.name if channels and channels[0].group else None
             for c in list(bag.fcurves):
-                if c.data_path in {prefix+source,prefix+dest}: bag.fcurves.remove(c)
+                if c.data_path in {prefix+p for p in ('rotation_quaternion','rotation_euler','rotation_axis_angle')}: bag.fcurves.remove(c)
             for i in range(size):
                 c=bag.fcurves.new(prefix+source,index=i)
                 if group_name: c.group=bag.groups.get(group_name) or bag.groups.new(group_name)
@@ -105,7 +106,7 @@ def rotation_steps(context,obj,names,actions,target,step=1):
                     if j%128==0: yield done,total,copied.name+'（準備轉換）'
                 c.update()
             done+=len(times)
-        worker=core.rotation_steps(context,obj,names,[c for _,c,_ in copies],target,step,check_dependencies=False)
+        worker=core.rotation_steps(context,obj,names,[c for _,c,_ in copies],target,step,check_dependencies=False,original_only=True)
         while True:
             try:
                 d,t,label=next(worker)

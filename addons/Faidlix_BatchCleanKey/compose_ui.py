@@ -5,7 +5,7 @@ import bpy
 import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
-from bpy.props import StringProperty, FloatProperty, BoolProperty, EnumProperty, PointerProperty
+from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty, PointerProperty
 from . import core, compose
 
 SESSION = None
@@ -27,12 +27,12 @@ class Session:
         bounds = core.actual_range(self.main)
         if bounds is None:
             raise ValueError('目前 Action 沒有 Key')
-        self.tracks = [[compose.Clip.from_action(self.main)], []]
+        self.tracks = [[compose.Clip.from_action(self.main,whole_frames=True)], []]
         candidates = [a for a in bpy.data.actions if a != self.main and core.actual_range(a) and core.slot_for(a, self.obj)]
         if candidates:
-            self.tracks[1].append(compose.Clip.from_action(candidates[0], bounds[0]))
-        self.start, self.end, self.frame = *bounds, bounds[0]
-        self.name, self.step, self.transition = self.main.name+'_Combined', 1.0, 0.0
+            self.tracks[1].append(compose.Clip.from_action(candidates[0], math.floor(bounds[0]),whole_frames=True))
+        self.start, self.end, self.frame = math.floor(bounds[0]),math.ceil(bounds[1]),math.floor(bounds[0])
+        self.name, self.step, self.transition = self.main.name+'_Combined', 1, 0
         self.custom = self.children = self.popup = False
         self.selected = {b.name for b in self.obj.pose.bones if b.select}
         self.collapsed, self.search, self.scroll = set(), '', 0
@@ -140,18 +140,18 @@ class BCK_OT_CombineSettings(bpy.types.Operator):
     bl_idname = 'faidlix_batch_clean_key.combine_settings'
     bl_label = '組合 Action 設定'
     name: StringProperty(name='新 Action 名稱')
-    start: FloatProperty(name='輸出開頭')
-    end: FloatProperty(name='輸出結尾')
-    step: FloatProperty(name='取樣間隔', default=1, min=.01)
-    transition: FloatProperty(name='交接影格', default=0, min=0)
+    start: IntProperty(name='輸出開頭')
+    end: IntProperty(name='輸出結尾')
+    step: IntProperty(name='取樣間隔', default=1, min=1)
+    transition: IntProperty(name='交接影格', default=0, min=0)
     custom: BoolProperty(name='包含骨骼自訂屬性')
     children: BoolProperty(name='勾選時包含子骨骼')
     search: StringProperty(name='搜尋骨骼')
     action: StringProperty(name='區塊 Action')
-    source_start: FloatProperty(name='來源開頭')
-    source_end: FloatProperty(name='來源結尾')
-    position: FloatProperty(name='區塊開頭')
-    duration: FloatProperty(name='區塊長度', min=.001)
+    source_start: IntProperty(name='來源開頭')
+    source_end: IntProperty(name='來源結尾')
+    position: IntProperty(name='區塊開頭')
+    duration: IntProperty(name='區塊長度', default=1,min=1)
     mode: EnumProperty(name='長度模式', items=[('TRIM', '裁切', '保持播放速度'), ('RETIME', '變速', '縮放播放速度')], default='TRIM')
 
     def invoke(self, context, event):
@@ -160,13 +160,13 @@ class BCK_OT_CombineSettings(bpy.types.Operator):
             return {'CANCELLED'}
         s.play, s.popup = None, True
         for name in ('name', 'start', 'end', 'step', 'transition', 'custom', 'children', 'search'):
-            setattr(self, name, getattr(s, name))
+            setattr(self, name, round(getattr(s,name)) if name in {'start','end','step','transition'} else getattr(s, name))
         track, index = s.active
         clip = s.tracks[track][index] if index < len(s.tracks[track]) else None
         self.action = clip.action.name if clip else ''
         if clip:
-            self.source_start, self.source_end = clip.source_start, clip.source_end
-            self.position, self.duration, self.mode = clip.start, clip.duration, clip.mode
+            self.source_start, self.source_end = round(clip.source_start),round(clip.source_end)
+            self.position, self.duration, self.mode = round(clip.start),max(1,round(clip.duration)),clip.mode
         return context.window_manager.invoke_props_dialog(self, width=620)
 
     def draw(self, context):
@@ -202,15 +202,16 @@ class BCK_OT_CombineSettings(bpy.types.Operator):
                 bounds = core.actual_range(action)
                 if not bounds:
                     raise ValueError('區塊 Action 沒有 Key')
+                bounds=(math.floor(bounds[0]),math.ceil(bounds[1]))
                 if index < len(s.tracks[track]) and s.tracks[track][index].action == action:
                     first, last = max(bounds[0], self.source_start), min(bounds[1], self.source_end)
                     if last < first:
                         raise ValueError('來源結尾必須大於或等於開頭')
                     clip = compose.Clip(action, first, last, self.position,
-                                        max(.001, last-first) if self.mode == 'TRIM' else self.duration, self.mode)
+                                        max(1, last-first) if self.mode == 'TRIM' else self.duration, self.mode)
                     s.tracks[track][index] = clip
                 else:
-                    clip = compose.Clip.from_action(action, self.position)
+                    clip = compose.Clip.from_action(action, self.position,whole_frames=True)
                     if index < len(s.tracks[track]):
                         s.tracks[track][index] = clip
                     else:
@@ -470,7 +471,7 @@ class BCK_OT_CombineEditor(bpy.types.Operator):
             scale = ui_scale()
             x,y = event.mouse_region_x/scale,event.mouse_region_y/scale
             x0,x1,low,span = s.mapping
-            frame = low+(x-x0)/max(x1-x0,1)*span
+            frame = round(low+(x-x0)/max(x1-x0,1)*span)
             if event.type in {'WHEELUPMOUSE','WHEELDOWNMOUSE'} and x >= context.region.width/scale-280:
                 s.scroll = max(0,s.scroll+(-1 if event.type=='WHEELUPMOUSE' else 1)*3)
                 context.area.tag_redraw(); return {'RUNNING_MODAL'}
@@ -485,7 +486,7 @@ class BCK_OT_CombineEditor(bpy.types.Operator):
                     if kind == 'MOVE':
                         clip.start = initial + frame-origin
                     else:
-                        clip.resize(kind,frame)
+                        clip.resize(kind,frame,whole_frames=True)
                 s.preview(); context.area.tag_redraw(); return {'RUNNING_MODAL'}
             if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
                 hit = next((h for h in reversed(s.hits) if h[0]<=x<=h[0]+h[2] and h[1]<=y<=h[1]+h[3]),None)

@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror
 
-ADDON_VERSION = '1.3.1'
+ADDON_VERSION = '1.3.2'
 _sync_signature = None
 _refreshing = False
 
@@ -98,14 +98,14 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     flip_job: BoolProperty(default=False)
     flip_action: PointerProperty(type=bpy.types.Action)
     flip_mode: StringProperty(default='COPY')
-    flip_step: FloatProperty(default=1,min=.01)
+    flip_step: IntProperty(default=1,min=1)
     loop_job: BoolProperty(default=False)
     loop_action: PointerProperty(type=bpy.types.Action)
     loop_smooth: BoolProperty(default=True)
-    loop_step: FloatProperty(default=1, min=.01)
+    loop_step: IntProperty(default=1, min=1)
     rotation_target: EnumProperty(name='轉換方向', items=[('XYZ', 'Quaternion → XYZ Euler', ''),
                     ('QUATERNION', 'XYZ Euler → Quaternion', '')])
-    sample_step: FloatProperty(name='烘焙間隔（影格）', default=1, min=0.01, max=100, precision=2)
+    sample_step: IntProperty(name='烘焙間隔（影格）', default=1, min=1, max=100)
 
 
 def update_counts(state):
@@ -664,7 +664,7 @@ class BCK_OT_Loop(bpy.types.Operator):
     action_name: StringProperty()
     smooth: BoolProperty(name='銜接頭尾斜率', default=True)
     bake_copy: BoolProperty(name='建立烘焙／解鎖循環副本', default=False)
-    sample_step: FloatProperty(name='烘焙間隔',default=1,min=.01)
+    sample_step: IntProperty(name='烘焙間隔',default=1,min=1)
 
     def invoke(self, context, event):
         try:
@@ -777,7 +777,7 @@ class BCK_OT_Flip(bpy.types.Operator):
     bl_label = '左右翻轉 Action'
     bl_options = {'UNDO'}
     action_name: StringProperty()
-    sample_step: FloatProperty(name='烘焙間隔（影格）',default=1,min=.01,max=100)
+    sample_step: IntProperty(name='烘焙間隔（影格）',default=1,min=1,max=100)
     mode: EnumProperty(items=[('COPY', '建立翻轉副本', '保留原 Action'),
                               ('IN_PLACE', '修改原 Action', '原 Action 的所有使用者都會受到影響')], default='COPY')
 
@@ -842,6 +842,7 @@ class _Panel:
         box.label(text='統一轉換旋轉座標')
         box.prop(state,'rotation_target',expand=True)
         box.prop(state,'sample_step')
+        box.label(text='保留原旋轉 Key 影格；間隔只用於取樣曲線')
         box.operator('faidlix_batch_clean_key.rotation',text='處理所有骨骼與 Action',icon='FILE_REFRESH')
         if state.last_result:
             layout.label(text=state.last_result)

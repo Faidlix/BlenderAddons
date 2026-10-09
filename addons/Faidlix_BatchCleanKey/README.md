@@ -1,4 +1,8 @@
-# Faidlix_BatchCleanKey 1.3.1
+# Faidlix_BatchCleanKey 1.3.2
+
+1.3.2：旋轉轉換保留每根骨骼來源旋轉 Key 的影格聯集，不再加入固定間隔或位置／縮放通道的起訖影格。先清除該骨骼原有 Quaternion、Euler、Axis Angle 通道，再建立唯一目標旋轉通道，避免舊 Key 重疊；位置、縮放及其他 Slot 保留。結果採 Bezier 與 Auto Clamped 控制柄，原 Key 時刻旋轉一致，時刻間由 Bezier 插值；只有完全沒有 Key 的 Sampled 曲線才使用烘焙間隔取樣。
+
+所有影格輸入改為整數：旋轉、循環和翻轉的間隔最小 1；組合的輸出起訖、來源裁切、區塊位置／長度、交接影格亦為整數，拖曳、縮放和複製對齊整數影格。長度最小 1，交接可為 0，位置可為負數；既有動畫中的子影格 Key 不移動。
 
 1.3.1：在「批次處理 Action Keys」下方直接顯示旋轉轉換方向、烘焙間隔與「處理所有骨骼與 Action」。自動使用目前骨架的所有骨骼和相關 Action，無須勾選骨骼或 Action，不開轉換／確認彈窗。統一 Quaternion（WXYZ）與 XYZ Euler，完成後編輯介面的骨骼旋轉模式同步更新。
 

@@ -304,7 +304,7 @@ def rotation_dependencies(obj, names, actions, target):
             any(c.data_path in paths and rotation_has_data(c) for c in target_curves(a, obj, names))]
 
 
-def rotation_steps(context, obj, names, actions, target, step=1.0, check_dependencies=True):
+def rotation_steps(context, obj, names, actions, target, step=1.0, check_dependencies=True, original_only=False):
     """Bake evaluated local rotation channels; stage before an atomic commit.
 
     Samples include original subframe keys. Between samples conversion is an
@@ -368,9 +368,10 @@ def rotation_steps(context, obj, names, actions, target, step=1.0, check_depende
             times = {float(p.co.x) for c in channels for p in c.keyframe_points}
             first, last = min(times), max(times)
             count = math.ceil((last - first) / step)
-            if count > 200000:
+            if not original_only and count > 200000:
                 raise ValueError('取樣數過多，請增加間隔')
-            times.update(first + i * step for i in range(count) if first + i * step < last)
+            if not original_only:
+                times.update(first + i * step for i in range(count) if first + i * step < last)
             jobs.append((action, name, bags[0], sorted(channels, key=lambda c: c.array_index), destpath, sorted(times)))
     if not jobs:
         raise ValueError('所選 Action／骨骼沒有來源旋轉 Key')
@@ -391,9 +392,9 @@ def rotation_steps(context, obj, names, actions, target, step=1.0, check_depende
                     quat.negate()
                 value = quat
             previous = value.copy()
-            constant = all(next((p.interpolation == 'CONSTANT' for p in reversed(c.keyframe_points)
+            constant = False if original_only else all(next((p.interpolation == 'CONSTANT' for p in reversed(c.keyframe_points)
                                  if p.co.x <= frame), False) for c in channels)
-            samples.append((frame, tuple(value), 'CONSTANT' if constant else 'LINEAR'))
+            samples.append((frame, tuple(value), 'BEZIER' if original_only else 'CONSTANT' if constant else 'LINEAR'))
             done += 1
             yield done, total, action.name
         staged.append((action, name, bag, channels, path, samples))
@@ -412,6 +413,8 @@ def rotation_steps(context, obj, names, actions, target, step=1.0, check_depende
                 for sample_index, (point, (frame, values, interp)) in enumerate(zip(curve.keyframe_points, samples)):
                     point.co = frame, values[index]
                     point.interpolation = interp
+                    if original_only:
+                        point.handle_left_type = point.handle_right_type = 'AUTO_CLAMPED'
                     if (sample_index + 1) % 128 == 0:
                         yield total, total, action.name + '（寫回中）'
                 curve.update()

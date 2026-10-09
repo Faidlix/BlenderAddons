@@ -107,7 +107,7 @@ def test():
    elif stage==6:
     a=next(a for a in s.preview_window.screen.areas if a.type=='VIEW_3D'); r=next(r for r in a.regions if r.type=='WINDOW')
     h=min(390,max(260,r.height/addon.compose_ui.ui_scale()*.52))
-    s.name='GUI_Combined'; s.step=.01
+    s.name='GUI_Combined'; s.step=1; s.end=3000
     click(s,370,h-55); stage=7
    elif stage==7:
     assert s and s.worker,'Processing must show progress'
@@ -116,6 +116,7 @@ def test():
    elif stage==7.2:
     assert s and not s.worker and not bpy.data.actions.get('GUI_Combined'),'Esc baking cancellation'
     s.step=1
+    s.end=30
     a=next(a for a in s.preview_window.screen.areas if a.type=='VIEW_3D'); r=next(r for r in a.regions if r.type=='WINDOW')
     h=min(390,max(260,r.height/addon.compose_ui.ui_scale()*.52))
     click(s,370,h-55); stage=7.4

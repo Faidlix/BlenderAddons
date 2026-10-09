@@ -144,16 +144,16 @@
       "id": "faidlix_batch_clean_key",
       "name": "Faidlix_BatchCleanKey",
       "tagline": "Batch clean, delete or decimate keys for selected bones",
-      "version": "1.3.1",
+      "version": "1.3.2",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:GPL-3.0-or-later"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_batch_clean_key-1.3.1.zip",
-      "archive_size": 40303,
-      "archive_hash": "sha256:99743680383ccd8bf64748a14ae136c2e77e65c37a74c3e2b25d51c1991ada1d"
+      "archive_url": "./faidlix_batch_clean_key-1.3.2.zip",
+      "archive_size": 40830,
+      "archive_hash": "sha256:ad2666304728879c7cdf82f9313010c121872f1816a9da1f7fef3e3b68ef5184"
     },
     {
       "schema_version": "1.0.0",

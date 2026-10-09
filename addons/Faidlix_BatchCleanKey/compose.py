@@ -16,12 +16,15 @@ class Clip:
     mode: str = 'TRIM'
 
     @classmethod
-    def from_action(cls, action, start=None):
+    def from_action(cls, action, start=None, whole_frames=False):
         bounds = core.actual_range(action)
         if bounds is None:
             raise ValueError('Action 沒有動畫 Key：' + action.name)
+        if whole_frames:
+            bounds = (math.floor(bounds[0]), math.ceil(bounds[1]))
+            start = round(start) if start is not None else None
         return cls(action, *bounds, bounds[0] if start is None else start,
-                   max(bounds[1] - bounds[0], 0.001))
+                   max(bounds[1] - bounds[0], 1 if whole_frames else 0.001))
 
     @property
     def end(self):
@@ -31,23 +34,27 @@ class Clip:
         offset = min(max(frame - self.start, 0), self.duration)
         return self.source_start + offset * (self.source_end - self.source_start) / self.duration
 
-    def resize(self, edge, frame):
+    def resize(self, edge, frame, whole_frames=False):
+        minimum = 1 if whole_frames else .001
+        if whole_frames: frame = round(frame)
         if edge == 'RIGHT':
-            duration = max(0.001, frame - self.start)
+            duration = max(minimum, frame - self.start)
             if self.mode == 'TRIM':
                 bounds = core.actual_range(self.action)
+                if whole_frames: bounds = (math.floor(bounds[0]),math.ceil(bounds[1]))
                 self.source_end = min(bounds[1], self.source_start + duration)
-                duration = max(0.001, self.source_end - self.source_start)
+                duration = max(minimum, self.source_end - self.source_start)
             self.duration = duration
         else:
             end = self.end
-            start = min(frame, end - 0.001)
+            start = min(frame, end - minimum)
             if self.mode == 'TRIM':
                 bounds = core.actual_range(self.action)
+                if whole_frames: bounds = (math.floor(bounds[0]),math.ceil(bounds[1]))
                 source = max(bounds[0], self.source_start + start - self.start)
                 start = self.start + source - self.source_start
                 self.source_start = source
-            self.start, self.duration = start, max(0.001, end - start)
+            self.start, self.duration = start, max(minimum, end - start)
 
     def duplicate(self):
         return replace(self, start=self.end)

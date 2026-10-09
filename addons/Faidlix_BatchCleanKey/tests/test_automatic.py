@@ -27,8 +27,11 @@ for n in range(2):
   if i==1: c.mute=True
  c=bag.fcurves.new(bone.path_from_id()+'.location',index=0)
  for f in (1,9): c.keyframe_points.insert(f,9)
- # Empty conflicting targets are automatically replaced.
- bag.fcurves.new(bone.path_from_id()+'.rotation_euler',index=0)
+ # Existing destination and inactive rotation representations must be replaced.
+ for prop,count in [('rotation_euler',3),('rotation_axis_angle',4)]:
+  for i in range(count):
+   c=bag.fcurves.new(bone.path_from_id()+'.'+prop,index=i)
+   for f in (2,8): c.keyframe_points.insert(f,123)
  actions.append(a)
 addon.core.assign_action(bpy.context,obj,actions[0])
 track=obj.animation_data.nla_tracks.new()
@@ -49,7 +52,7 @@ work=addon.ui.automatic.rotation_steps(bpy.context,obj,['AutoBone'],actions[:1],
 while '寫回中' not in next(work)[2]: pass
 work.close()
 assert digest()==before and strip.action==actions[1] and obj.animation_data.action==actions[0]
-times=[1+i*.25 for i in range(33)]
+times=[1,5]
 expected=[]
 for a in actions:
  curves={c.array_index:c for c in addon.core.action_curves(a) if c.data_path.endswith('rotation_quaternion')}
@@ -65,11 +68,15 @@ for n,quats in enumerate(expected):
   actual=Euler([curves[i].evaluate(t) for i in range(3)],'XYZ').to_quaternion()
   assert abs(actual.dot(q))>.999999,(t,actual,q)
  assert all(not c.modifiers and not c.lock and not c.mute for c in curves.values())
+ assert len(curves)==3
+ assert all([p.co.x for p in c.keyframe_points]==times for c in curves.values())
+ assert all(p.interpolation=='BEZIER' and p.handle_left_type==p.handle_right_type=='AUTO_CLAMPED' for c in curves.values() for p in c.keyframe_points)
+ assert not any(c.data_path.endswith(('rotation_quaternion','rotation_axis_angle')) for c in addon.core.action_curves(a))
  assert next(c for c in addon.core.action_curves(a) if c.data_path.endswith('location')).evaluate(4)==9
 assert not any(a.name.startswith('__BCK_Auto__') for a in bpy.data.actions)
 addon.core.assign_action(bpy.context,obj,bpy.data.actions['AutomaticAction0'])
 assert bone.rotation_mode=='XYZ'
-print('AUTOMATIC_ROTATION_PASS unified cycles locked mute empty_targets samples rollback NLA users')
+print('AUTOMATIC_ROTATION_PASS unified original_key_times no_extra_frames replaces_stale_rotations Bezier_AutoClamped cycles locked mute rollback NLA users')
 
 # Sampled channels, missing components and unsafe Driver cancellation.
 a=bpy.data.actions['AutomaticAction0']

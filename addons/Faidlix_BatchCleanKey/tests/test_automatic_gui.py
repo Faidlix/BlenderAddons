@@ -25,7 +25,9 @@ for n in range(2):
   bone.rotation_mode='QUATERNION'; bone.select=True
   for i,value in enumerate((1,0,0,0)):
    c=bag.fcurves.new(bone.path_from_id()+'.rotation_quaternion',index=i)
-   for f in (1,100): c.keyframe_points.insert(f,value)
+   c.keyframe_points.add(2000)
+   for f,p in enumerate(c.keyframe_points,1): p.co=f,value
+   c.update()
    c.lock=True; c.modifiers.new('CYCLES')
  actions.append(action)
 addon.core.assign_action(bpy.context,obj,actions[0])
@@ -52,7 +54,7 @@ def test():
   with bpy.context.temp_override(area=area,region=region):
    state=bpy.context.window_manager.faidlix_batch_clean_key
    if stage==0:
-    bpy.ops.ed.undo_push(message='Auto fixture'); start(.01); stage=1
+    bpy.ops.ed.undo_push(message='Auto fixture'); start(1); stage=1
    elif stage==1:
     if not state.running: return .05
     if state.progress>.03:
