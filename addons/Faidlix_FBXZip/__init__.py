@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 1),
+    "version": (1, 8, 2),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import zipfile
 from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit
@@ -30,7 +31,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 1)
+ADDON_VERSION = (1, 8, 2)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -67,6 +68,10 @@ def _normalized_url(value):
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), "", ""))
 
 
+def _fresh_repository_url():
+    return f"{REPOSITORY_URL}?cache={int(time.time())}"
+
+
 def _repository(context):
     for index, repo in enumerate(context.preferences.extensions.repos):
         if _normalized_url(repo.remote_url) == _normalized_url(REPOSITORY_URL):
@@ -79,10 +84,11 @@ def _ensure_repository(context):
     if repo is not None:
         repo.enabled = True
         repo.use_sync_on_startup = True
+        repo.remote_url = _fresh_repository_url()
         return index, repo
     result = bpy.ops.preferences.extension_repo_add(
         name="Faidlix Blender Add-ons",
-        remote_url=REPOSITORY_URL,
+        remote_url=_fresh_repository_url(),
         use_sync_on_startup=True,
         type='REMOTE',
     )

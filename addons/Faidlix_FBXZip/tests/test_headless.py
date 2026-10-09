@@ -15,8 +15,8 @@ root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root.parent))
 addon = importlib.import_module('Faidlix_FBXZip')
 addon.register()
-assert addon.bl_info['version'] == (1, 8, 1)
-assert addon.ADDON_VERSION == (1, 8, 1)
+assert addon.bl_info['version'] == (1, 8, 2)
+assert addon.ADDON_VERSION == (1, 8, 2)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
@@ -26,6 +26,7 @@ assert addon.FBXZIP_PT_panel.bl_order == 20
 assert 'DEFAULT_CLOSED' in addon.FBXZIP_PT_panel.bl_options
 assert hasattr(bpy.types, 'EXPORT_SCENE_OT_fbx_zip_online_update')
 assert addon.REPOSITORY_URL == 'https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json'
+assert addon._normalized_url(addon._fresh_repository_url()) == addon._normalized_url(addon.REPOSITORY_URL)
 
 
 class _PanelLayoutProbe:
