@@ -4,6 +4,17 @@ import json
 import re
 
 
+def reset_pose(obj, names):
+    for name in names:
+        bone = obj.pose.bones[name]
+        bone.location = (0, 0, 0)
+        bone.rotation_euler = (0, 0, 0)
+        bone.rotation_quaternion = (1, 0, 0, 0)
+        bone.rotation_axis_angle = (0, 0, 1, 0)
+        bone.scale = (1, 1, 1)
+    obj.update_tag()
+
+
 def selected_bones(context):
     obj = context.object
     if not obj or obj.type != 'ARMATURE' or obj.mode != 'POSE':
@@ -92,7 +103,9 @@ def assign_action(context, obj, action):
 
 def sync_scene_range(scene, action):
     import math
-    bounds = tuple(action.frame_range) if action.use_frame_range else actual_range(action)
+    bounds = actual_range(action)
+    if bounds is not None and action.is_editable:
+        sync_ranges([action])
     if bounds is None:
         bounds = (1, 1)
     start, end = math.floor(bounds[0]), math.ceil(bounds[1])
@@ -112,8 +125,12 @@ def loop_curves(action, obj):
     curves = [c for c in bags[0].fcurves if c.keyframe_points or c.sampled_points]
     if not curves:
         raise ValueError('Action 沒有 Key')
-    if any(c.lock or c.mute or c.modifiers or c.sampled_points for c in curves):
-        raise ValueError('Action 含鎖定、停用、修飾器或取樣曲線，請先烘焙／解鎖')
+    for c in curves:
+        reason = ('曲線已鎖定，請解鎖' if c.lock else '曲線已停用，請先確認是否啟用' if c.mute else
+                  '含修飾器：' + ', '.join(m.type for m in c.modifiers) + '，請先烘焙' if c.modifiers else
+                  '使用取樣曲線，請先轉為 Key' if c.sampled_points else '')
+        if reason:
+            raise ValueError(f'{action.name} / {c.data_path}[{c.array_index}]：{reason}')
     frames = [p.co.x for c in curves for p in c.keyframe_points]
     return curves, min(frames), max(frames)
 
@@ -176,6 +193,90 @@ def make_loop(action, obj, smooth=True):
     return len(curves), added, start, end
 
 
+def rotation_has_data(curve):
+    return bool(curve.keyframe_points or curve.sampled_points or curve.modifiers)
+
+
+def loop_copy_steps(action, obj, smooth=True, step=1.0):
+    """Bake evaluated curves to a cancellable, unlocked loop copy; preserve source."""
+    import math
+    slot = slot_for(action, obj)
+    bags = [s.channelbag(slot) for l in action.layers for s in l.strips
+            if s.type == 'KEYFRAME' and slot and s.channelbag(slot)]
+    frames = [float(p.co.x) for bag in bags for c in bag.fcurves
+              for points in (c.keyframe_points,c.sampled_points) for p in points]
+    bounds = (min(frames),max(frames)) if frames else None
+    if len(bags) != 1 or not bounds or bounds[1] <= bounds[0]:
+        raise ValueError('循環副本需有可辨識 Slot、單層 Action 與兩個不同影格')
+    if not math.isfinite(step) or step < .01-1e-8:
+        raise ValueError('取樣間隔至少 0.01 影格')
+    step = max(step,.01)
+    start,end = bounds
+    count = math.ceil((end-start)/step)
+    if count > 200000:
+        raise ValueError('循環取樣過多，請增加間隔')
+    times = {start,end}
+    times.update(start+i*step for i in range(count) if start+i*step<end)
+    times.update(float(p.co.x) for c in bags[0].fcurves for p in c.keyframe_points)
+    times = sorted(times)
+    source_curves = [c for c in bags[0].fcurves if rotation_has_data(c)]
+    total = len(times)*len(source_curves)*2
+    if total > 4000000:
+        raise ValueError('循環取樣過多，請增加間隔')
+    copy = action.copy()
+    copy.name = action.name+'_Loop'
+    copy.use_fake_user = True
+    try:
+        copied_slot = slot_for(copy,obj)
+        bag = next(s.channelbag(copied_slot) for l in copy.layers for s in l.strips
+                   if s.type=='KEYFRAME' and s.channelbag(copied_slot))
+        done = 0
+        for curve in [c for c in bag.fcurves if rotation_has_data(c)]:
+            values = []
+            for frame in times:
+                values.append(curve.evaluate(frame))
+                done += 1
+                yield done,total,copy.name
+            for modifier in list(curve.modifiers):
+                curve.modifiers.remove(modifier)
+            if curve.sampled_points:
+                curve.convert_to_keyframes(math.floor(start),math.ceil(end))
+            curve.keyframe_points.clear()
+            curve.keyframe_points.add(len(times))
+            curve.lock = curve.mute = False
+            for i,(frame,value) in enumerate(zip(times,values)):
+                p=curve.keyframe_points[i]
+                p.co=frame,value; p.interpolation='LINEAR'
+                done += 1
+                if i%128==0:
+                    yield done,total,copy.name
+            first,last=curve.keyframe_points[0],curve.keyframe_points[-1]
+            last.co.y=first.co.y
+            if smooth:
+                slope=(values[1]-values[0])/(times[1]-times[0])
+                for p,span in ((first,times[1]-start),(last,end-times[-2])):
+                    d=span/3
+                    p.handle_left_type=p.handle_right_type='FREE'
+                    p.handle_left=(p.co.x-d,first.co.y-slope*d)
+                    p.handle_right=(p.co.x+d,first.co.y+slope*d)
+                    p.interpolation='BEZIER'
+                curve.keyframe_points[-2].interpolation='BEZIER'
+            curve.update()
+            yield done,total,copy.name
+        sync_ranges([copy])
+        return copy
+    except BaseException:
+        bpy.data.actions.remove(copy)
+        raise
+
+
+def rotation_dependencies(obj, names, actions, target):
+    source = 'rotation_quaternion' if target == 'XYZ' else 'rotation_euler'
+    paths = {obj.pose.bones[n].path_from_id() + '.' + source for n in names}
+    return [a for a in bpy.data.actions if a not in actions and
+            any(c.data_path in paths and rotation_has_data(c) for c in target_curves(a, obj, names))]
+
+
 def rotation_steps(context, obj, names, actions, target, step=1.0):
     """Bake evaluated local rotation channels; stage before an atomic commit.
 
@@ -184,8 +285,9 @@ def rotation_steps(context, obj, names, actions, target, step=1.0):
     """
     import math
     from mathutils import Euler, Quaternion
-    if target not in {'XYZ', 'QUATERNION'} or not math.isfinite(step) or step < 0.01:
+    if target not in {'XYZ', 'QUATERNION'} or not math.isfinite(step) or step < 0.01-1e-8:
         raise ValueError('旋轉模式或取樣間隔無效')
+    step = max(step,.01)
     source = 'rotation_quaternion' if target == 'XYZ' else 'rotation_euler'
     dest = 'rotation_euler' if target == 'XYZ' else 'rotation_quaternion'
     size = 4 if target == 'XYZ' else 3
@@ -194,11 +296,10 @@ def rotation_steps(context, obj, names, actions, target, step=1.0):
         raise ValueError('請選取可編輯的骨架、骨骼與 Action')
     paths = {n: obj.pose.bones[n].path_from_id() + '.' + source for n in names}
     for action in bpy.data.actions:
-        if action.slots and not slot_for(action, obj) and any(c.data_path in paths.values() for c in action_curves(action)):
+        if action.slots and not slot_for(action, obj) and any(c.data_path in paths.values() and rotation_has_data(c) for c in action_curves(action)):
             raise ValueError(action.name + '：來源旋轉 Slot 不明確，請先整理 Slot')
     # Changing a pose bone's mode affects every Action, including NLA users.
-    blockers = [a.name for a in bpy.data.actions if a not in actions and
-                any(c.data_path in paths.values() for c in target_curves(a, obj, names))]
+    blockers = [a.name for a in rotation_dependencies(obj, names, actions, target)]
     if blockers:
         raise ValueError('請一併勾選仍有來源旋轉 Key 的 Action：' + ', '.join(blockers[:8]))
     if obj.animation_data and any(d.data_path in paths.values() or
@@ -214,20 +315,29 @@ def rotation_steps(context, obj, names, actions, target, step=1.0):
                 for strip in layer.strips if strip.type == 'KEYFRAME' and slot_for(action, obj)]
         for name, path in paths.items():
             channels = [c for c in curves if c.data_path == path]
-            if not channels:
+            if not any(rotation_has_data(c) for c in channels):
                 continue
             if len(bags) != 1 or not bags[0]:
                 raise ValueError(action.name + '：多層旋轉需先烘焙')
             if len(channels) != size or {c.array_index for c in channels} != set(range(size)):
                 raise ValueError(action.name + ' / ' + name + '：旋轉通道不完整，請先補齊 Key')
-            if any(c.lock or c.mute or c.modifiers or c.sampled_points or not c.keyframe_points or
-                   c.extrapolation != 'CONSTANT' for c in channels):
-                raise ValueError(action.name + '：旋轉含鎖定、停用、修飾器或取樣資料，請先烘焙／解鎖')
+            for c in channels:
+                reason = ('曲線已鎖定，請解鎖' if c.lock else
+                          '曲線已停用，請先確認是否啟用' if c.mute else
+                          '含修飾器：' + ', '.join(m.type for m in c.modifiers) + '，請先烘焙' if c.modifiers else
+                          '使用取樣曲線，請先轉為 Key' if c.sampled_points else
+                          '分量沒有 Key，請補齊旋轉通道' if not c.keyframe_points else
+                          '使用 ' + c.extrapolation + ' 外插，請先確認轉換範圍' if c.extrapolation != 'CONSTANT' else '')
+                if reason:
+                    component = ('WXYZ' if size == 4 else 'XYZ')[c.array_index]
+                    raise ValueError(f'{action.name} / {name} / {component}：{reason}')
             if obj.pose.bones[name].rotation_mode not in {'XYZ', 'QUATERNION'}:
                 raise ValueError(name + '：目前只支援 XYZ Euler')
             destpath = obj.pose.bones[name].path_from_id() + '.' + dest
-            if any(c.data_path == destpath for c in curves):
+            if any(c.data_path == destpath and rotation_has_data(c) for c in curves):
                 raise ValueError(action.name + '：已有目標旋轉通道，請先移除重複通道')
+            if any(c.data_path == destpath for c in curves):
+                raise ValueError(f'{action.name} / {name}：目標模式留有空通道，請先清除空通道')
             times = {float(p.co.x) for c in channels for p in c.keyframe_points}
             first, last = min(times), max(times)
             count = math.ceil((last - first) / step)
@@ -263,7 +373,7 @@ def rotation_steps(context, obj, names, actions, target, step=1.0):
     created, removed = [], []
     bones = {name: (obj.pose.bones[name].rotation_mode,
                    obj.pose.bones[name].rotation_euler.copy(),
-                   obj.pose.bones[name].rotation_quaternion.copy()) for name in {j[1] for j in jobs}}
+                   obj.pose.bones[name].rotation_quaternion.copy()) for name in names}
     try:
         for action, name, bag, channels, path, samples in staged:
             for index in range(3 if target == 'XYZ' else 4):

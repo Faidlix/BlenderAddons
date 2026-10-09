@@ -38,3 +38,11 @@ The user's working blend file is never used as a test fixture.
 - 同樣 fixture 在 99% 寫回中點擊浮層取消按鈕，下一次檢查（約 0.023 秒）已停止，新增目標曲線回復，原曲線及模式一致。重測可設定 `CANCEL_PHASE=COMMIT`、`CANCEL_INPUT=CLICK`。
 - 原版完整彈窗 fixture 在 90 秒尚未達取消門檻，故不將該次視為 Esc 重現成功。改版取消與寫回回復經實際輸入驗證。
 - headless／management／rotation 測試全部通過，新增 Delete 與旋轉寫回中 generator.close 的回復檢查。GUI 旋轉正常完成、Undo、Redo、Esc 取消再次通過。
+
+# 1.3.0
+
+- Blender 5.2.2 隔離 CLI：headless／management／rotation／compose 全部通過；組合包含裁切與變速、選定骨骼覆蓋與空隙回復、Quaternion/Euler 轉換、取樣及寫入中取消、來源不變、預覽副本清理、骨骼全選／不選、完整 TRS 重設、空鎖定旋轉曲線忽略、成功後沒有 Key 的勾選骨骼模式同步，以及重新點選目前 Action 依最新 Key 更新範圍。
+- `test_compose_gui.py`：獨立雙軌視窗、實際拖曳移動／裁切把手、複製區塊、設定彈窗確認、播放、Esc 關閉、處理進度與處理中 Esc 取消、產生新 Action、Undo／Redo 全部通過。原場景 Action／影格／範圍保持不變，關閉後清除預覽副本；高解析度尺寸與設定彈窗截圖已檢視。
+- 合併批次彈窗的大量取樣取消回歸：142704 筆取樣於 75% 送 Esc，下一次檢查約 0.017 秒已停止，原曲線摘要與模式一致，未殘留浮層或暫存資料。
+- 完全沒有動畫資料的來源空曲線不再造成旋轉誤阻擋。真正具有 Key 且鎖定／停用／修飾器／Sampled 的旋轉曲線仍需先整理；錯誤包含具體通道原因。
+- 循環新增烘焙／解鎖副本：locked／mute／modifier／sampled 曲線處理、共同頭尾、來源不變及取消刪除副本通過；GUI 彈窗自動提供副本、顯示進度並可 Esc 取消。副本明確啟用原本停用的曲線，來源停用狀態保留。

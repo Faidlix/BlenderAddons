@@ -91,7 +91,7 @@ ui.refresh(bpy.context)
 state=bpy.context.window_manager.faidlix_batch_clean_key
 state.browser_index=next(i for i,item in enumerate(state.browser) if item.action==actions[1])
 assert obj.animation_data.action==actions[1]
-assert (bpy.context.scene.frame_start,bpy.context.scene.frame_end)==(20,80)
+assert (bpy.context.scene.frame_start,bpy.context.scene.frame_end)==(2,6)
 actions[1].name='RenamedRotation'
 ui.refresh(bpy.context)
 assert state.browser[state.browser_index].action==actions[1]
@@ -140,3 +140,26 @@ except ValueError:
     pass
 assert saved==[core.snapshot(c) for c in (long,short)]
 print('BATCH_LOOP_TEST_OK union_bounds added_keys values tangents interiors locked_atomic')
+
+# Unsupported source curves can be handled on an independently baked copy.
+long.modifiers.new('NOISE')
+short.mute=True
+saved=[(c.lock,c.mute,[m.type for m in c.modifiers],core.snapshot(c)) for c in (long,short)]
+steps=core.loop_copy_steps(loop,obj,True,.25)
+next(steps); steps.close()
+assert not bpy.data.actions.get('LoopTest_Loop')
+assert saved==[(c.lock,c.mute,[m.type for m in c.modifiers],core.snapshot(c)) for c in (long,short)]
+copy=consume(core.loop_copy_steps(loop,obj,True,.25))
+curves,start,end=core.loop_curves(copy,obj)
+assert len(curves)==2 and start==1.25 and end==10.75
+for c in curves:
+    assert not c.lock and not c.mute and not c.modifiers
+    assert abs(c.evaluate(start)-c.evaluate(end))<1e-6
+assert saved==[(c.lock,c.mute,[m.type for m in c.modifiers],core.snapshot(c)) for c in (long,short)]
+sample=curves[1]
+sample.convert_to_samples(2,9)
+sample.lock=True
+resampled=consume(core.loop_copy_steps(copy,obj,True,.25))
+assert all(not c.sampled_points for c in core.action_curves(resampled))
+assert sample.sampled_points and sample.lock
+print('BATCH_LOOP_BAKE_PASS locked mute modifiers sampled copy cancellation sources_preserved')

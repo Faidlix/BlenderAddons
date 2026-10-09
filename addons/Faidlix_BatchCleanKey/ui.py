@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core
 
-ADDON_VERSION = '1.2.1'
+ADDON_VERSION = '1.3.0'
 _sync_signature = None
 _refreshing = False
 
@@ -81,7 +81,9 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     show_browser: BoolProperty(name='Action 清單', default=True)
     operation: EnumProperty(items=[('DELETE', 'Delete 刪除', '刪除所選骨骼全部 Key'),
                                    ('CLEAN', 'Clean 清理', 'Blender 原生 Clean'),
-                                   ('DECIMATE', 'Decimate 縮減', 'Blender 原生 Decimate')], default='CLEAN')
+                                   ('DECIMATE', 'Decimate 縮減', 'Blender 原生 Decimate'),
+                                   ('ROTATION', '旋轉轉換', '換算旋轉 Key 並同步骨骼旋轉模式')], default='CLEAN')
+    reset_bones: BoolProperty(name='完整重設所選骨骼（位置、旋轉、縮放）', default=True)
     threshold: FloatProperty(name='清理閾值', default=0.001, min=0.0, precision=5)
     decimate_mode: EnumProperty(items=[('RATIO', '比例', '依比例移除 Key'), ('ERROR', '誤差', '限制曲線誤差')])
     ratio: FloatProperty(name='移除比例', default=0.5, min=0, max=1, subtype='FACTOR')
@@ -93,6 +95,10 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     progress: FloatProperty(min=0, max=1, subtype='FACTOR')
     progress_text: StringProperty()
     rotation_job: BoolProperty(default=False)
+    loop_job: BoolProperty(default=False)
+    loop_action: PointerProperty(type=bpy.types.Action)
+    loop_smooth: BoolProperty(default=True)
+    loop_step: FloatProperty(default=1, min=.01)
     rotation_target: EnumProperty(name='轉換方向', items=[('XYZ', 'Quaternion → XYZ Euler', ''),
                     ('QUATERNION', 'XYZ Euler → Quaternion', '')])
     sample_step: FloatProperty(name='烘焙間隔（影格）', default=1, min=0.01, max=100, precision=2)
@@ -212,6 +218,24 @@ class BCK_UL_Bones(bpy.types.UIList):
         layout.prop(item, 'selected', text=item.name)
 
 
+class BCK_OT_BonesAll(bpy.types.Operator):
+    bl_idname = 'faidlix_batch_clean_key.bones_all'
+    bl_label = '骨骼全選／取消全選'
+    bl_options = {'INTERNAL'}
+    value: BoolProperty(default=True)
+
+    def execute(self, context):
+        state = context.window_manager.faidlix_batch_clean_key
+        obj = state.armature
+        if not obj or obj.mode != 'POSE' or state.running or state.pending:
+            return {'CANCELLED'}
+        for bone in obj.pose.bones:
+            bone.select = self.value
+        update_counts(state)
+        redraw(context)
+        return {'FINISHED'}
+
+
 class BCK_UL_Actions(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.operator_context = 'INVOKE_DEFAULT'
@@ -235,6 +259,7 @@ class BCK_UL_Browser(bpy.types.UIList):
         row.operator('faidlix_batch_clean_key.switch', text='', depress=item.selected,
                      icon='RADIOBUT_ON' if item.selected else 'RADIOBUT_OFF').action_name = action.name
         row.prop(action, 'name', text='', emboss=False)
+        row.operator('faidlix_batch_clean_key.delete_action', text='', icon='TRASH').action_name = action.name
         row.operator('faidlix_batch_clean_key.loop', text='', icon='FILE_REFRESH').action_name = action.name
         row.operator('faidlix_batch_clean_key.duplicate', text='', icon='DUPLICATE').action_name = action.name
         row.operator('faidlix_batch_clean_key.flip', text='', icon='MOD_MIRROR').action_name = action.name
@@ -253,6 +278,9 @@ def fold(layout, state, prop, title):
 def draw_bones(layout, state):
     count = sum(b.selected for b in state.bones)
     if fold(layout, state, 'show_bones', f'骨架：{state.armature.name if state.armature else "無"} ｜ 骨骼 {count}/{len(state.bones)}'):
+        row = layout.row(align=True)
+        row.operator('faidlix_batch_clean_key.bones_all', text='全選骨骼').value = True
+        row.operator('faidlix_batch_clean_key.bones_all', text='取消全選骨骼').value = False
         layout.template_list('BCK_UL_Bones', '', state, 'bones', state, 'bone_index', rows=5, maxrows=5)
 
 
@@ -309,7 +337,9 @@ class BCK_OT_Batch(bpy.types.Operator):
 
     def invoke(self, context, event):
         populate(context)
-        context.window_manager.faidlix_batch_clean_key.rotation_job = False
+        state = context.window_manager.faidlix_batch_clean_key
+        state.loop_job = False
+        state.rotation_job = state.operation == 'ROTATION'
         return context.window_manager.invoke_props_dialog(self, width=700, confirm_text='執行')
 
     def draw_selection(self, context):
@@ -326,7 +356,7 @@ class BCK_OT_Batch(bpy.types.Operator):
         layout.label(text=f'已選 {len(chosen)}/{len(state.actions)} Actions ｜ {sum(i.keys for i in chosen)} Keys')
 
     def draw(self, context):
-        self.draw_selection(context)
+        BCK_OT_Batch.draw_selection(self, context)
         state = context.window_manager.faidlix_batch_clean_key
         layout = self.layout
         layout.prop(state, 'operation', expand=True)
@@ -335,14 +365,19 @@ class BCK_OT_Batch(bpy.types.Operator):
         elif state.operation == 'DECIMATE':
             layout.prop(state, 'decimate_mode', expand=True)
             layout.prop(state, 'ratio' if state.decimate_mode == 'RATIO' else 'error')
+        elif state.operation == 'ROTATION':
+            BCK_OT_Rotation.draw_options(self, context)
         else:
+            layout.prop(state, 'reset_bones')
             layout.label(text='刪除勾選骨骼的全部 Key；保留 Action 與其他骨骼', icon='ERROR')
         layout.label(text='共用 Action 會影響其他使用者；鎖定與唯讀資料略過。Ctrl+Z 復原。')
 
     def execute(self, context):
         # Synchronous execution is useful to scripts; user confirmation launches modal progress.
-        context.window_manager.faidlix_batch_clean_key.rotation_job = False
+        state = context.window_manager.faidlix_batch_clean_key
+        state.rotation_job = state.operation == 'ROTATION'
         if bpy.app.background:
+            state.loop_job = False
             return run_sync(self, context)
         return launch_batch(context)
 
@@ -356,11 +391,15 @@ def batch_args(context):
     actions = [i.action for i in state.actions if i.selected and i.action]
     if not names or not actions:
         raise ValueError('請至少選取一個骨骼與 Action')
+    if state.operation == 'DELETE' and state.reset_bones and not obj.is_editable:
+        raise ValueError('目前骨架為唯讀，無法重設變換')
     return (context, obj, names, actions, state.operation, state.threshold,
             state.decimate_mode, state.ratio, state.error)
 
 
 def result_text(result):
+    if 'loop_action' in result:
+        return '已建立烘焙循環副本：' + result['loop_action']
     if 'samples' in result:
         return f'{result["actions"]} Actions，{result["bones"]} 骨骼，{result["samples"]} 旋轉取樣'
     return f'{result["actions"]} Actions，移除 {result["removed"]} Keys，略過 {result["skipped"]} 項'
@@ -368,10 +407,29 @@ def result_text(result):
 
 def processing_steps(context):
     state = context.window_manager.faidlix_batch_clean_key
+    if state.loop_job:
+        action, obj = state.loop_action, rig(context)
+        if not action or not obj or not obj.is_editable:
+            raise ValueError('請選取可編輯骨架與 Action')
+        def loop_steps():
+            copied = yield from core.loop_copy_steps(action,obj,state.loop_smooth,state.loop_step)
+            try:
+                core.assign_action(context,obj,copied)
+                core.sync_scene_range(context.scene,copied)
+            except Exception:
+                bpy.data.actions.remove(copied)
+                raise
+            return {'loop_action':copied.name}
+        return loop_steps()
     args = batch_args(context)
     if state.rotation_job:
         return core.rotation_steps(*args[:4], state.rotation_target, state.sample_step)
-    return core.process_steps(*args)
+    def steps():
+        result = yield from core.process_steps(*args)
+        if state.operation == 'DELETE' and state.reset_bones:
+            core.reset_pose(args[1], args[2])
+        return result
+    return steps()
 
 
 def run_sync(operator, context):
@@ -384,10 +442,12 @@ def run_sync(operator, context):
                 result = done.value
                 break
     except Exception as exc:
+        context.window_manager.faidlix_batch_clean_key.loop_job = False
         operator.report({'ERROR'}, str(exc))
         return {'CANCELLED'}
     state = context.window_manager.faidlix_batch_clean_key
     state.last_result = result_text(result)
+    state.loop_job = False
     operator.report({'INFO'}, state.last_result)
     update_counts(state)
     return {'FINISHED'}
@@ -469,6 +529,7 @@ class BCK_OT_Run(bpy.types.Operator):
                 context.window_manager.progress_end()
                 state = context.window_manager.faidlix_batch_clean_key
                 state.running = state.pending = state.cancel_requested = False
+                state.loop_job = False
                 refresh(context)
                 redraw(context)
 
@@ -504,7 +565,7 @@ class BCK_OT_Run(bpy.types.Operator):
             # Publish once per tick, rather than issuing thousands of RNA/UI
             # updates per second and building a timer/keyboard event backlog.
             state.progress = min(0.99, done / max(1, total))
-            unit = '取樣' if state.rotation_job else '通道'
+            unit = '取樣' if state.rotation_job or state.loop_job else '通道'
             state.progress_text = f'{name} ｜ {done}/{total} {unit}'
             context.window_manager.progress_update(state.progress)
         except StopIteration as done:
@@ -553,21 +614,55 @@ class BCK_OT_Rotation(bpy.types.Operator):
 
     def invoke(self, context, event):
         state = populate(context)
+        state.loop_job = False
         state.rotation_job = True
+        state.operation = 'ROTATION'
         return context.window_manager.invoke_props_dialog(self, width=700, confirm_text='轉換')
 
     def draw(self, context):
-        BCK_OT_Batch.draw_selection(self, context)
+        BCK_OT_Batch.draw(self, context)
+
+    def draw_options(self, context):
         state = context.window_manager.faidlix_batch_clean_key
         self.layout.prop(state, 'rotation_target', expand=True)
         self.layout.prop(state, 'sample_step')
+        names = [b.name for b in state.bones if b.selected]
+        chosen = [i.action for i in state.actions if i.selected and i.action]
+        dependencies = core.rotation_dependencies(state.armature, names, chosen, state.rotation_target) if state.armature else []
+        if dependencies:
+            self.layout.operator('faidlix_batch_clean_key.rotation_include', text=f'補選相容 Action（{len(dependencies)} 個）', icon='ADD')
+            self.layout.label(text='需要一起轉換：' + ', '.join(a.name for a in dependencies[:4]))
         self.layout.label(text='烘焙原始 Key 與間隔取樣；間隔內動畫為近似，較小間隔更精確')
         self.layout.label(text='會切換骨骼旋轉模式；仍含來源旋轉 Key 的 Action 必須一起勾選')
         self.layout.label(text='來源需有完整旋轉通道；鎖定／修飾器／重複目標通道需先處理')
 
     def execute(self, context):
-        context.window_manager.faidlix_batch_clean_key.rotation_job = True
+        state = context.window_manager.faidlix_batch_clean_key
+        if bpy.app.background:
+            state.operation = 'ROTATION'
+            state.loop_job = False
+        state.rotation_job = state.operation == 'ROTATION'
         return run_sync(self, context) if bpy.app.background else launch_batch(context)
+
+
+class BCK_OT_RotationInclude(bpy.types.Operator):
+    bl_idname = 'faidlix_batch_clean_key.rotation_include'
+    bl_label = '補選相容 Action'
+    bl_description = '勾選仍有所選骨骼來源旋轉資料的 Action，避免切換模式後失效'
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        state = context.window_manager.faidlix_batch_clean_key
+        if not state.armature or state.running or state.pending:
+            return {'CANCELLED'}
+        names = [b.name for b in state.bones if b.selected]
+        chosen = [i.action for i in state.actions if i.selected and i.action]
+        dependencies = core.rotation_dependencies(state.armature, names, chosen, state.rotation_target)
+        for item in state.actions:
+            if item.action in dependencies:
+                item.selected = True
+        redraw(context)
+        return {'FINISHED'}
 
 
 class BCK_OT_Loop(bpy.types.Operator):
@@ -577,6 +672,8 @@ class BCK_OT_Loop(bpy.types.Operator):
     bl_options = {'UNDO'}
     action_name: StringProperty()
     smooth: BoolProperty(name='銜接頭尾斜率', default=True)
+    bake_copy: BoolProperty(name='建立烘焙／解鎖循環副本', default=False)
+    sample_step: FloatProperty(name='烘焙間隔',default=1,min=.01)
 
     def invoke(self, context, event):
         try:
@@ -584,18 +681,31 @@ class BCK_OT_Loop(bpy.types.Operator):
             curves, start, end = core.loop_curves(action, rig(context))
             self._summary = f'{len(curves)} 曲線 ｜ 起始 {start:g} ｜ 結束 {end:g}'
         except Exception as exc:
-            self.report({'ERROR'}, str(exc))
-            return {'CANCELLED'}
+            if not action or not core.actual_range(action):
+                self.report({'ERROR'}, str(exc))
+                return {'CANCELLED'}
+            self.bake_copy = True
+            self._summary = str(exc)
         return context.window_manager.invoke_props_dialog(self, width=460, confirm_text='建立循環')
 
     def draw(self, context):
         self.layout.label(text=self.action_name)
         self.layout.label(text=getattr(self, '_summary', ''))
         self.layout.prop(self, 'smooth')
+        self.layout.prop(self, 'bake_copy')
+        if self.bake_copy:
+            self.layout.prop(self,'sample_step')
+            self.layout.label(text='保留來源，副本烘焙修飾器／取樣資料，解除鎖定並啟用停用曲線')
         self.layout.label(text='較短曲線補頭尾 Key；尾端值改成開頭值')
         self.layout.label(text='銜接斜率會調整接縫控制柄及鄰接段插值；Ctrl+Z 復原')
 
     def execute(self, context):
+        if self.bake_copy:
+            state = context.window_manager.faidlix_batch_clean_key
+            state.loop_job, state.rotation_job = True, False
+            state.loop_action = bpy.data.actions.get(self.action_name)
+            state.loop_smooth, state.loop_step = self.smooth, self.sample_step
+            return run_sync(self,context) if bpy.app.background else launch_batch(context)
         try:
             action = bpy.data.actions.get(self.action_name)
             count, added, start, end = core.make_loop(action, rig(context), self.smooth)
@@ -630,10 +740,14 @@ class BCK_OT_Delete(bpy.types.Operator):
     bl_label = '刪除 Action'
     bl_description = '刪除目前 Action 資料；共用者也會解除連結；Ctrl+Z 復原'
     bl_options = {'UNDO'}
+    action_name: StringProperty()
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
 
     def execute(self, context):
         obj = rig(context)
-        action = obj.animation_data.action if obj and obj.animation_data else None
+        action = bpy.data.actions.get(self.action_name) if self.action_name else (obj.animation_data.action if obj and obj.animation_data else None)
         if not action or not action.is_editable:
             return {'CANCELLED'}
         bpy.data.actions.remove(action, do_unlink=True)
@@ -735,16 +849,14 @@ class _Panel:
         col = layout.column()
         col.enabled = not state.running and not state.pending
         if self.bl_space_type == 'VIEW_3D':
-            col.operator('faidlix_batch_clean_key.sync_ranges', icon='PREVIEW_RANGE')
             row = col.row(align=True)
             row.enabled = bool(rig(context))
             row.operator('faidlix_batch_clean_key.new', icon='ADD')
-            row.operator('faidlix_batch_clean_key.delete_action', icon='TRASH')
+            row.operator('faidlix_batch_clean_key.combine', text='組合 Action', icon='NLA')
             if fold(col, state, 'show_browser', 'Action 清單'):
                 col.template_list('BCK_UL_Browser', '', state, 'browser', state, 'browser_index', rows=8, maxrows=8)
         col.label(text=f'目前選取骨骼：{len(core.selected_bones(context))}')
         col.operator('faidlix_batch_clean_key.batch', text='批次處理 Action Keys', icon='ACTION')
-        col.operator('faidlix_batch_clean_key.rotation', icon='FILE_REFRESH')
         if state.last_result:
             layout.label(text=state.last_result)
 
@@ -772,10 +884,10 @@ class BCK_PT_Graph(_Panel, bpy.types.Panel):
         return context.space_data.mode == 'FCURVES'
 
 
-CLASSES = (BCK_PG_Action, BCK_PG_Bone, BCK_PG_State, BCK_OT_Select, BCK_OT_SelectAll,
+CLASSES = (BCK_PG_Action, BCK_PG_Bone, BCK_PG_State, BCK_OT_Select, BCK_OT_SelectAll, BCK_OT_BonesAll,
            BCK_UL_Bones, BCK_UL_Actions, BCK_UL_Browser, BCK_OT_Batch, BCK_OT_Run,
            BCK_OT_Switch, BCK_OT_New, BCK_OT_Delete, BCK_OT_Duplicate, BCK_OT_Flip,
-           BCK_OT_Ranges, BCK_OT_Rotation, BCK_OT_Loop, BCK_OT_Cancel, BCK_PT_View3D, BCK_PT_DopeSheet, BCK_PT_Graph)
+           BCK_OT_Ranges, BCK_OT_Rotation, BCK_OT_RotationInclude, BCK_OT_Loop, BCK_OT_Cancel, BCK_PT_View3D, BCK_PT_DopeSheet, BCK_PT_Graph)
 
 
 def register():
