@@ -1,46 +1,75 @@
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 7, 3),
+    "version": (1, 8, 0),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
     "category": "Import-Export",
 }
 
-import hashlib
 import json
 import os
 import shutil
 import tempfile
 import zipfile
+from datetime import datetime
+from urllib.parse import urlsplit, urlunsplit
 
 import bpy
 from bpy.props import (
     BoolProperty,
+    CollectionProperty,
     EnumProperty,
     FloatProperty,
-    FloatVectorProperty,
     IntProperty,
     StringProperty,
 )
-from bpy.types import Menu, Operator, Panel
+from bpy.types import Menu, Operator, Panel, PropertyGroup, UIList
 from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 7, 3)
+ADDON_VERSION = (1, 8, 0)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
     "BlenderAddons/main/repository/index.json"
 )
 _UPDATE_STATUS = ""
+_UPDATE_STATUS_GENERATION = 0
+
+
+def _redraw_ui():
+    for window in getattr(bpy.context.window_manager, "windows", ()):
+        for area in window.screen.areas:
+            area.tag_redraw()
+
+
+def _set_update_status(text, clear_after=4.0):
+    global _UPDATE_STATUS, _UPDATE_STATUS_GENERATION
+    _UPDATE_STATUS = text
+    _UPDATE_STATUS_GENERATION += 1
+    generation = _UPDATE_STATUS_GENERATION
+    _redraw_ui()
+    if clear_after:
+        def clear_status():
+            global _UPDATE_STATUS
+            if generation == _UPDATE_STATUS_GENERATION:
+                _UPDATE_STATUS = ""
+                _redraw_ui()
+            return None
+        bpy.app.timers.register(clear_status, first_interval=clear_after)
+
+
+def _normalized_url(value):
+    parts = urlsplit(value or "")
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), "", ""))
 
 
 def _repository(context):
     for index, repo in enumerate(context.preferences.extensions.repos):
-        if repo.remote_url.rstrip("/") == REPOSITORY_URL.rstrip("/"):
+        if _normalized_url(repo.remote_url) == _normalized_url(REPOSITORY_URL):
             return index, repo
     return None, None
 
@@ -89,6 +118,48 @@ def _object_images(objects):
     return list(dict.fromkeys(node.image for node in _used_image_nodes(objects)))
 
 
+def _material_slots(objects):
+    """Yield material slots that are actually assigned to exported geometry."""
+    for obj in objects:
+        used_slots = None
+        if obj.type == 'MESH' and obj.data.polygons:
+            used_slots = {polygon.material_index for polygon in obj.data.polygons}
+        for slot_index, slot in enumerate(getattr(obj, "material_slots", ())):
+            if used_slots is not None and slot_index not in used_slots:
+                continue
+            if slot.material:
+                yield slot.material
+
+
+def _all_image_nodes(objects):
+    result = []
+    seen_nodes = set()
+
+    def visit_tree(tree):
+        for node in tree.nodes:
+            pointer = node.as_pointer()
+            if pointer in seen_nodes:
+                continue
+            seen_nodes.add(pointer)
+            if node.type == 'GROUP' and node.node_tree:
+                visit_tree(node.node_tree)
+            if getattr(node, "image", None):
+                result.append(node)
+
+    seen_materials = set()
+    for material in _material_slots(objects):
+        if material.as_pointer() in seen_materials:
+            continue
+        seen_materials.add(material.as_pointer())
+        if material.use_nodes and material.node_tree:
+            visit_tree(material.node_tree)
+    return result
+
+
+def _all_material_images(objects):
+    return list(dict.fromkeys(node.image for node in _all_image_nodes(objects)))
+
+
 def _used_image_nodes(objects):
     """Walk backwards from active material outputs, including nested groups."""
     result, visited = [], set()
@@ -124,20 +195,13 @@ def _used_image_nodes(objects):
             for input_socket in node.inputs:
                 socket_walk(input_socket, parents)
 
-    for obj in objects:
-        used_slots = None
-        if obj.type == 'MESH' and obj.data.polygons:
-            used_slots = {p.material_index for p in obj.data.polygons}
-        for slot_index, slot in enumerate(getattr(obj, "material_slots", ())):
-            if used_slots is not None and slot_index not in used_slots:
-                continue
-            material = slot.material
-            if not material or not material.use_nodes or not material.node_tree:
-                continue
-            for node in material.node_tree.nodes:
-                if node.type == 'OUTPUT_MATERIAL' and node.is_active_output:
-                    for input_socket in node.inputs:
-                        socket_walk(input_socket)
+    for material in _material_slots(objects):
+        if not material or not material.use_nodes or not material.node_tree:
+            continue
+        for node in material.node_tree.nodes:
+            if node.type == 'OUTPUT_MATERIAL' and node.is_active_output:
+                for input_socket in node.inputs:
+                    socket_walk(input_socket)
     return result
 
 
@@ -316,7 +380,9 @@ def _preset_data(operator):
         data[name] = value
     data.update({
         "package_textures": getattr(operator, "package_textures", True),
+        "package_all_textures": getattr(operator, "package_all_textures", False),
         "keep_fbx": getattr(operator, "keep_fbx", True),
+        "select_actions": getattr(operator, "select_actions", True),
     })
     return data
 
@@ -333,20 +399,25 @@ def _apply_preset(operator, data):
             pass
 
 
-def _safe_texture_name(image, used):
+def _default_texture_name(image):
     raw = os.path.basename(bpy.path.abspath(image.filepath)) or image.name
     raw = raw.replace("\\", "_").replace("/", "_")
     if image.source in {'GENERATED', 'VIEWER'} or image.is_dirty:
         raw = os.path.splitext(raw)[0] + '.png'
     if not os.path.splitext(raw)[1]:
         raw += ".png"
-    stem, ext = os.path.splitext(raw)
-    candidate = raw
-    if candidate.lower() in used:
-        digest = hashlib.sha1(image.name.encode("utf-8")).hexdigest()[:8]
-        candidate = f"{stem}_{digest}{ext}"
-    used.add(candidate.lower())
-    return candidate
+    return raw
+
+
+def _safe_output_name(value, fallback="texture.png"):
+    name = os.path.basename((value or "").strip()).replace("\\", "_").replace("/", "_")
+    if not name:
+        name = fallback
+    fallback_ext = os.path.splitext(fallback)[1] or ".png"
+    stem, extension = os.path.splitext(name)
+    if not extension or extension.lower() != fallback_ext.lower():
+        name = (stem or name) + fallback_ext
+    return name
 
 
 def _write_packed_image(image, destination):
@@ -364,6 +435,368 @@ def _write_packed_image(image, destination):
     finally:
         if copied:
             bpy.data.images.remove(copied)
+
+
+class FBXZIP_PG_action_item(PropertyGroup):
+    action_name: StringProperty(name="Action")
+    object_name: StringProperty(name="Object")
+    include: BoolProperty(name="", default=True)
+    export_name: StringProperty(name="Unity Clip")
+    frame_start: FloatProperty()
+    frame_end: FloatProperty()
+
+
+class FBXZIP_PG_texture_item(PropertyGroup):
+    image_name: StringProperty(name="Image")
+    include: BoolProperty(name="", default=True)
+    output_name: StringProperty(name="ZIP Filename")
+    default_name: StringProperty()
+
+
+class FBXZIP_UL_actions(UIList):
+    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, index=0):
+        row = layout.row(align=True)
+        row.prop(item, "include", text="")
+        row.label(text=item.action_name, icon="ACTION")
+        row.prop(item, "export_name", text="")
+        row.label(text=f"{item.frame_start:g}-{item.frame_end:g}")
+
+
+class FBXZIP_UL_textures(UIList):
+    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, index=0):
+        row = layout.row(align=True)
+        row.prop(item, "include", text="")
+        row.label(text=item.image_name, icon="IMAGE_DATA")
+        row.prop(item, "output_name", text="")
+
+
+def _active_export_operator(context):
+    space = getattr(context, "space_data", None)
+    operator = getattr(space, "active_operator", None)
+    if operator and operator.bl_idname == FBXZIP_OT_export.bl_idname:
+        return operator
+    operator = getattr(context, "active_operator", None)
+    return operator if operator and operator.bl_idname == FBXZIP_OT_export.bl_idname else None
+
+
+def _action_slot_for_object(action, obj):
+    animation_data = obj.animation_data
+    if animation_data and animation_data.action == action:
+        return getattr(animation_data, "action_slot", None) or True
+    found_curve = False
+    for layer in getattr(action, "layers", ()):
+        for strip in getattr(layer, "strips", ()):
+            for channelbag in getattr(strip, "channelbags", ()):
+                curves = tuple(getattr(channelbag, "fcurves", ()))
+                if not curves:
+                    continue
+                found_curve = True
+                for curve in curves:
+                    path = curve.data_path
+                    if curve.array_index:
+                        path = f"{path}[{curve.array_index}]"
+                    try:
+                        obj.path_resolve(path)
+                    except (ValueError, TypeError):
+                        break
+                else:
+                    return getattr(channelbag, "slot", None) or True
+    curves = tuple(getattr(action, "fcurves", ()))
+    if curves:
+        found_curve = True
+        for curve in curves:
+            try:
+                obj.path_resolve(curve.data_path)
+            except (ValueError, TypeError):
+                return None
+        return True
+    return True if not found_curve and action == getattr(animation_data, "action", None) else None
+
+
+def _action_target(action, objects):
+    ordered = sorted(objects, key=lambda obj: (obj.type != 'ARMATURE', obj.name.lower()))
+    for obj in ordered:
+        slot = _action_slot_for_object(action, obj)
+        if slot:
+            return obj, slot
+    return None, None
+
+
+def _unique_name(value, used):
+    base = (value or "Action").strip() or "Action"
+    candidate = base
+    index = 1
+    while candidate.lower() in used:
+        candidate = f"{base}_{index:03d}"
+        index += 1
+    used.add(candidate.lower())
+    return candidate
+
+
+def _refresh_action_items(window_manager, objects, preserve=True):
+    previous = {
+        item.action_name: (item.include, item.export_name)
+        for item in window_manager.fbxzip_action_items
+    } if preserve else {}
+    rows = []
+    for action in bpy.data.actions:
+        target, _slot = _action_target(action, objects)
+        if target:
+            rows.append((action, target))
+    rows.sort(key=lambda pair: pair[0].name.lower())
+    window_manager.fbxzip_action_items.clear()
+    used = set()
+    for action, target in rows:
+        item = window_manager.fbxzip_action_items.add()
+        item.action_name = action.name
+        item.object_name = target.name
+        item.frame_start, item.frame_end = action.frame_range
+        had_previous = action.name in previous
+        include, export_name = previous.get(action.name, (True, action.name))
+        item.include = include
+        item.export_name = export_name if had_previous else _unique_name(export_name, used)
+        used.add(item.export_name.lower())
+
+
+def _refresh_texture_items(window_manager, objects, include_all=False, preserve=True):
+    previous = {
+        item.image_name: (item.include, item.output_name)
+        for item in window_manager.fbxzip_texture_items
+    } if preserve else {}
+    images = _all_material_images(objects) if include_all else _object_images(objects)
+    window_manager.fbxzip_texture_items.clear()
+    for image in images:
+        item = window_manager.fbxzip_texture_items.add()
+        item.image_name = image.name
+        item.default_name = _default_texture_name(image)
+        item.include, item.output_name = previous.get(image.name, (True, item.default_name))
+
+
+def _action_conflicts(items):
+    groups = {}
+    for item in items:
+        if item.include:
+            groups.setdefault(item.export_name.strip().lower(), []).append(item)
+    return [group for key, group in groups.items() if not key or len(group) > 1]
+
+
+def _dedupe_action_names(items):
+    used = set()
+    for item in items:
+        if item.include:
+            item.export_name = _unique_name(item.export_name, used)
+
+
+def _texture_conflicts(items):
+    groups = {}
+    for item in items:
+        if item.include:
+            name = _safe_output_name(item.output_name, item.default_name).lower()
+            groups.setdefault(name, []).append(item)
+    return [group for group in groups.values() if len(group) > 1]
+
+
+def _image_metadata(image):
+    source = bpy.path.abspath(image.filepath, library=image.library) if image.filepath else ""
+    width, height = tuple(image.size) if len(image.size) == 2 else (0, 0)
+    if source and os.path.isfile(source):
+        stat = os.stat(source)
+        date_text = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+        size_text = f"{stat.st_size / 1024:.1f} KB"
+    else:
+        date_text = "Packed / Generated" if image.packed_file or image.source in {'GENERATED', 'VIEWER'} else "No source file"
+        size_text = "--"
+    return source or image.source, date_text, f"{width} x {height}", size_text
+
+
+def _setup_action_strips(objects, items):
+    states = []
+    for item in items:
+        if not item.include:
+            continue
+        action = bpy.data.actions.get(item.action_name)
+        target, slot = _action_target(action, objects) if action else (None, None)
+        if not action or not target:
+            continue
+        state = next((entry for entry in states if entry['object'] == target), None)
+        if state is None:
+            created = target.animation_data is None
+            animation_data = target.animation_data_create()
+            tweak = getattr(animation_data, "use_tweak_mode", False)
+            if getattr(animation_data, "is_property_readonly", lambda _name: False)('action') and tweak:
+                animation_data.use_tweak_mode = False
+            state = {
+                'object': target,
+                'created': created,
+                'action': animation_data.action,
+                'action_slot': getattr(animation_data, "action_slot", None),
+                'tweak': tweak,
+                'track_mutes': [(track, track.mute) for track in animation_data.nla_tracks],
+                'track': None,
+            }
+            animation_data.action = None
+            for track in animation_data.nla_tracks:
+                track.mute = True
+            track = animation_data.nla_tracks.new()
+            track.name = "__FAIDLIX_FBXZIP_TEMP__"
+            state['track'] = track
+            states.append(state)
+        start = int(action.frame_range[0])
+        strip = state['track'].strips.new(item.export_name, start, action)
+        strip.name = item.export_name
+        if slot is not True and hasattr(strip, "action_slot"):
+            try:
+                strip.action_slot = slot
+            except (TypeError, ValueError, AttributeError):
+                pass
+    return states
+
+
+def _restore_action_strips(states):
+    for state in reversed(states):
+        obj = state['object']
+        animation_data = obj.animation_data
+        if not animation_data:
+            continue
+        track = state['track']
+        if track and track in animation_data.nla_tracks[:]:
+            animation_data.nla_tracks.remove(track)
+        for existing, muted in state['track_mutes']:
+            if existing in animation_data.nla_tracks[:]:
+                existing.mute = muted
+        animation_data.action = state['action']
+        if state['action'] and state['action_slot'] and hasattr(animation_data, "action_slot"):
+            try:
+                animation_data.action_slot = state['action_slot']
+            except (TypeError, ValueError, AttributeError):
+                pass
+        if hasattr(animation_data, "use_tweak_mode"):
+            animation_data.use_tweak_mode = state['tweak']
+        if state['created'] and not animation_data.action and not animation_data.nla_tracks:
+            obj.animation_data_clear()
+
+
+class FBXZIP_OT_action_select(Operator):
+    bl_idname = "export_scene.fbx_zip_action_select"
+    bl_label = "Select Actions"
+    bl_options = {'INTERNAL'}
+
+    mode: EnumProperty(items=[('ALL', "All", ""), ('NONE', "None", ""), ('CURRENT', "Current", "")])
+
+    def execute(self, context):
+        current = {
+            data.action.name
+            for obj in context.selected_objects
+            if (data := obj.animation_data) and data.action
+        }
+        for item in context.window_manager.fbxzip_action_items:
+            item.include = self.mode == 'ALL' or (self.mode == 'CURRENT' and item.action_name in current)
+        return {'FINISHED'}
+
+
+class FBXZIP_OT_texture_list_action(Operator):
+    bl_idname = "export_scene.fbx_zip_texture_list_action"
+    bl_label = "Texture Selection"
+    bl_options = {'INTERNAL'}
+
+    mode: EnumProperty(items=[('ALL', "All", ""), ('NONE', "None", ""), ('RESET', "Reset", "")])
+
+    def execute(self, context):
+        for item in context.window_manager.fbxzip_texture_items:
+            if self.mode == 'RESET':
+                item.include = True
+                item.output_name = item.default_name
+            else:
+                item.include = self.mode == 'ALL'
+        return {'FINISHED'}
+
+
+class FBXZIP_OT_texture_choose(Operator):
+    bl_idname = "export_scene.fbx_zip_texture_choose"
+    bl_label = "Use This Texture"
+    bl_options = {'INTERNAL'}
+
+    keep_image: StringProperty()
+    drop_image: StringProperty()
+
+    def execute(self, context):
+        for item in context.window_manager.fbxzip_texture_items:
+            if item.image_name == self.keep_image:
+                item.include = True
+            elif item.image_name == self.drop_image:
+                item.include = False
+        return {'FINISHED'}
+
+
+class FBXZIP_OT_texture_settings(Operator):
+    bl_idname = "export_scene.fbx_zip_texture_settings"
+    bl_label = "貼圖設定"
+    bl_options = {'INTERNAL'}
+
+    def invoke(self, context, _event):
+        operator = _active_export_operator(context)
+        if operator:
+            objects = _export_objects(context, operator)
+            _refresh_texture_items(context.window_manager, objects, operator.package_all_textures, preserve=True)
+        return context.window_manager.invoke_props_dialog(self, width=760)
+
+    def draw(self, context):
+        layout = self.layout
+        items = context.window_manager.fbxzip_texture_items
+        conflicts = _texture_conflicts(items)
+        if conflicts:
+            group = conflicts[0]
+            box = layout.box()
+            box.label(text="同名貼圖：請選擇要保留的版本", icon="ERROR")
+            row = box.row(align=True)
+            for item, other in ((group[0], group[1]), (group[1], group[0])):
+                column = row.column(align=True)
+                image = bpy.data.images.get(item.image_name)
+                if image:
+                    image.preview_ensure()
+                    column.template_icon(icon_value=image.preview.icon_id, scale=6.0)
+                    source, date_text, dimensions, file_size = _image_metadata(image)
+                    column.label(text=item.image_name)
+                    column.label(text=dimensions)
+                    column.label(text=file_size)
+                    column.label(text=date_text)
+                    column.label(text=os.path.basename(source) or source)
+                choose = column.operator(FBXZIP_OT_texture_choose.bl_idname, text="使用這張", depress=True)
+                choose.keep_image = item.image_name
+                choose.drop_image = other.image_name
+            layout.separator()
+        row = layout.row(align=True)
+        row.operator(FBXZIP_OT_texture_list_action.bl_idname, text="全部勾選").mode = 'ALL'
+        row.operator(FBXZIP_OT_texture_list_action.bl_idname, text="全部取消").mode = 'NONE'
+        row.operator(FBXZIP_OT_texture_list_action.bl_idname, text="還原預設", icon="LOOP_BACK").mode = 'RESET'
+        layout.template_list(FBXZIP_UL_textures.__name__, "", context.window_manager, "fbxzip_texture_items", context.window_manager, "fbxzip_texture_index", rows=8)
+
+    def execute(self, context):
+        return {'FINISHED'}
+
+
+class FBXZIP_OT_action_conflicts(Operator):
+    bl_idname = "export_scene.fbx_zip_action_conflicts"
+    bl_label = "Unity Clip 名稱"
+    bl_options = {'INTERNAL'}
+
+    def invoke(self, context, _event):
+        return context.window_manager.invoke_props_dialog(self, width=620)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="重複名稱已加上流水號，可直接修改後再輸出。", icon="INFO")
+        for item in context.window_manager.fbxzip_action_items:
+            if item.include:
+                row = layout.row(align=True)
+                row.label(text=item.action_name, icon="ACTION")
+                row.prop(item, "export_name", text="")
+
+    def execute(self, context):
+        if _action_conflicts(context.window_manager.fbxzip_action_items):
+            self.report({'ERROR'}, "Unity Clip 名稱仍有重複")
+            return {'CANCELLED'}
+        return {'FINISHED'}
 
 
 class FBXZIP_OT_export(Operator, ExportHelper):
@@ -448,11 +881,16 @@ class FBXZIP_OT_export(Operator, ExportHelper):
     batch_mode: EnumProperty(name="Batch Mode", items=[("OFF", "Off", ""), ("GROUP", "Group", ""), ("SCENE", "Scene", "")], default="OFF")
     use_batch_own_dir: BoolProperty(name="Batch Own Directory", default=False)
     use_metadata: BoolProperty(name="Metadata", default=True)
-    package_textures: BoolProperty(name="Collect Used Textures", default=True)
+    package_textures: BoolProperty(name="打包貼圖", default=True)
+    package_all_textures: BoolProperty(name="收集全部貼圖", default=False)
     keep_fbx: BoolProperty(name="Keep FBX in ZIP", default=True)
+    select_actions: BoolProperty(name="選擇要打包的 Actions", default=True)
 
     def invoke(self, context, event):
         _sync_from_native(self)
+        objects = _export_objects(context, self)
+        _refresh_action_items(context.window_manager, objects, preserve=False)
+        _refresh_texture_items(context.window_manager, objects, self.package_all_textures, preserve=False)
         return ExportHelper.invoke(self, context, event)
 
     def draw(self, context):
@@ -465,7 +903,17 @@ class FBXZIP_OT_export(Operator, ExportHelper):
         layout.operator("export_scene.fbx_zip_sync_native", icon="FILE_REFRESH")
         box = layout.box()
         box.label(text="Package")
-        box.prop(self, "package_textures")
+        row = box.row(align=True)
+        row.prop(self, "package_textures", text="打包貼圖")
+        options = row.row(align=True)
+        options.enabled = self.package_textures
+        options.prop(
+            self,
+            "package_all_textures",
+            text="收集全部貼圖" if self.package_all_textures else "只收集有用到的",
+            toggle=True,
+        )
+        options.operator(FBXZIP_OT_texture_settings.bl_idname, text="貼圖設定…")
         box.prop(self, "keep_fbx")
         box = layout.box()
         box.label(text="FBX: Include / Transform")
@@ -486,7 +934,20 @@ class FBXZIP_OT_export(Operator, ExportHelper):
             box.prop(self, name)
         box = layout.box()
         box.label(text="FBX: Animation")
-        for name in ("bake_anim", "bake_anim_use_all_bones", "bake_anim_use_nla_strips", "bake_anim_use_all_actions", "bake_anim_force_startend_keying", "bake_anim_step", "bake_anim_simplify_factor"):
+        box.prop(self, "bake_anim")
+        action_box = box.column()
+        action_box.enabled = self.bake_anim
+        action_box.prop(self, "select_actions")
+        if self.select_actions:
+            action_box.template_list(FBXZIP_UL_actions.__name__, "", context.window_manager, "fbxzip_action_items", context.window_manager, "fbxzip_action_index", rows=7)
+            row = action_box.row(align=True)
+            row.operator(FBXZIP_OT_action_select.bl_idname, text="全部選取").mode = 'ALL'
+            row.operator(FBXZIP_OT_action_select.bl_idname, text="全部取消").mode = 'NONE'
+            row.operator(FBXZIP_OT_action_select.bl_idname, text="目前 Action").mode = 'CURRENT'
+        else:
+            action_box.prop(self, "bake_anim_use_nla_strips")
+            action_box.prop(self, "bake_anim_use_all_actions")
+        for name in ("bake_anim_use_all_bones", "bake_anim_force_startend_keying", "bake_anim_step", "bake_anim_simplify_factor"):
             box.prop(self, name)
         box = layout.box()
         box.label(text="FBX: Files")
@@ -517,22 +978,47 @@ class FBXZIP_OT_export(Operator, ExportHelper):
         if not objects:
             self.report({"ERROR"}, "沒有可輸出的物件")
             return {"CANCELLED"}
+        if self.bake_anim and self.select_actions:
+            _refresh_action_items(context.window_manager, objects, preserve=True)
+            selected_actions = [item for item in context.window_manager.fbxzip_action_items if item.include]
+            if not selected_actions:
+                self.report({"ERROR"}, "請至少勾選一個 Action")
+                return {"CANCELLED"}
+            if _action_conflicts(selected_actions):
+                _dedupe_action_names(selected_actions)
+                bpy.ops.export_scene.fbx_zip_action_conflicts('INVOKE_DEFAULT')
+                self.report({"WARNING"}, "請確認 Unity Clip 名稱後再輸出")
+                return {"CANCELLED"}
+        else:
+            selected_actions = []
+        if self.package_textures:
+            _refresh_texture_items(context.window_manager, objects, self.package_all_textures, preserve=True)
+            if _texture_conflicts(context.window_manager.fbxzip_texture_items):
+                bpy.ops.export_scene.fbx_zip_texture_settings('INVOKE_DEFAULT')
+                self.report({"WARNING"}, "請在貼圖設定中選擇同名貼圖後再輸出")
+                return {"CANCELLED"}
         output_zip = os.path.abspath(self.filepath)
         os.makedirs(os.path.dirname(output_zip), exist_ok=True)
         # Keep Blender's native FBX exporter defaults in sync with the settings
         # used for this package export.
         _sync_to_native(self)
-        node_restore, temporary_images = [], []
+        node_restore, temporary_images, action_states = [], [], []
         with tempfile.TemporaryDirectory(prefix="faidlix_fbxzip_") as temp_dir:
             fbx_path = os.path.join(temp_dir, os.path.splitext(os.path.basename(output_zip))[0] + ".fbx")
             try:
-                nodes = _used_image_nodes(objects)
-                export_images = _object_images(objects) if self.package_textures else []
+                nodes = _all_image_nodes(objects)
                 packaged = []
                 if self.package_textures:
-                    used = set()
-                    for image in export_images:
-                        name = _safe_texture_name(image, used)
+                    texture_items = {
+                        item.image_name: item
+                        for item in context.window_manager.fbxzip_texture_items
+                        if item.include
+                    }
+                    for image_name, item in texture_items.items():
+                        image = bpy.data.images.get(image_name)
+                        if not image:
+                            continue
+                        name = _safe_output_name(item.output_name, item.default_name)
                         destination = os.path.join(temp_dir, name)
                         source = bpy.path.abspath(image.filepath, library=image.library) if image.filepath else ""
                         if image.packed_file or image.source in {"GENERATED", "VIEWER"}:
@@ -555,7 +1041,12 @@ class FBXZIP_OT_export(Operator, ExportHelper):
                             if node.image == image:
                                 node_restore.append((node, image))
                                 node.image = staged
+                if selected_actions:
+                    action_states = _setup_action_strips(objects, selected_actions)
                 options = self._fbx_options(fbx_path)
+                if selected_actions:
+                    options['bake_anim_use_all_actions'] = False
+                    options['bake_anim_use_nla_strips'] = True
                 if self.package_textures:
                     # Portable references; the original graph and image datablocks are restored.
                     options['path_mode'] = 'COPY' if self.embed_textures else 'STRIP'
@@ -579,6 +1070,7 @@ class FBXZIP_OT_export(Operator, ExportHelper):
                 self.report({"ERROR"}, f"FBX ZIP 匯出失敗：{exc}")
                 return {"CANCELLED"}
             finally:
+                _restore_action_strips(action_states)
                 for node, image in reversed(node_restore):
                     node.image = image
                 for image in temporary_images:
@@ -611,7 +1103,9 @@ class FBXZIP_OT_preset_add(AddPresetBase, Operator):
     preset_menu = 'FBXZIP_MT_presets'
     preset_subdir = 'operator/export_scene.fbx'
     preset_defines = ['op = bpy.context.active_operator']
-    preset_values = ['op.' + name for name in _SYNC_PROPERTIES]
+    preset_values = ['op.' + name for name in _SYNC_PROPERTIES] + [
+        'op.package_textures', 'op.package_all_textures', 'op.keep_fbx', 'op.select_actions'
+    ]
 
 
 def _preset_items(self, context):
@@ -689,38 +1183,42 @@ class FBXZIP_OT_online_update(Operator):
     force: BoolProperty(default=False, options={'HIDDEN'})
 
     def execute(self, context):
-        global _UPDATE_STATUS
         context.preferences.system.use_online_access = True
+        _set_update_status("檢查更新中…", clear_after=0)
         repo_index, repo = _ensure_repository(context)
         if repo is None:
-            _UPDATE_STATUS = "無法建立 Faidlix Blender Add-ons 更新來源"
-            self.report({'ERROR'}, _UPDATE_STATUS)
+            message = "無法建立更新來源"
+            _set_update_status(message)
+            self.report({'ERROR'}, message)
             return {'CANCELLED'}
         try:
             sync_result = bpy.ops.extensions.repo_sync(repo_index=repo_index)
         except RuntimeError as exc:
-            _UPDATE_STATUS = f"GitHub 同步失敗：{exc}"
-            self.report({'ERROR'}, _UPDATE_STATUS)
+            message = f"更新失敗：{exc}"
+            _set_update_status(message)
+            self.report({'ERROR'}, message)
             return {'CANCELLED'}
         if sync_result != {'FINISHED'}:
-            _UPDATE_STATUS = "GitHub 同步未完成"
-            self.report({'ERROR'}, _UPDATE_STATUS)
+            message = "更新同步未完成"
+            _set_update_status(message)
+            self.report({'ERROR'}, message)
             return {'CANCELLED'}
         latest = _latest_version(_repository_index(repo))
         if not latest:
-            _UPDATE_STATUS = "共用索引中找不到 Faidlix_Fbx ZipExporter"
-            self.report({'ERROR'}, _UPDATE_STATUS)
+            message = "索引中找不到外掛"
+            _set_update_status(message)
+            self.report({'ERROR'}, message)
             return {'CANCELLED'}
         if latest <= ADDON_VERSION and not self.force:
-            _UPDATE_STATUS = f"目前已是最新版 {'.'.join(map(str, ADDON_VERSION))}"
+            message = f"已是最新版 {'.'.join(map(str, ADDON_VERSION))}"
+            _set_update_status(message)
             bpy.ops.wm.save_userpref()
-            self.report({'INFO'}, _UPDATE_STATUS)
+            self.report({'INFO'}, message)
             return {'FINISHED'}
 
         version_text = ".".join(map(str, latest))
 
         def install_after_operator_returns():
-            global _UPDATE_STATUS
             try:
                 result = bpy.ops.extensions.package_install(
                     repo_index=repo_index,
@@ -729,16 +1227,17 @@ class FBXZIP_OT_online_update(Operator):
                 )
                 if result != {'FINISHED'}:
                     raise RuntimeError(str(result))
-                _UPDATE_STATUS = f"已安裝 {version_text}"
+                _set_update_status(f"更新完成 {version_text}")
                 bpy.ops.wm.save_userpref()
             except Exception as exc:
-                _UPDATE_STATUS = f"更新失敗：{exc}"
+                _set_update_status(f"更新失敗：{exc}")
                 print(f"Faidlix_Fbx ZipExporter update failed: {exc}")
             return None
 
         bpy.app.timers.register(install_after_operator_returns, first_interval=0.1)
-        _UPDATE_STATUS = f"已找到 {version_text}，準備從集中倉庫安裝"
-        self.report({'INFO'}, _UPDATE_STATUS)
+        message = f"準備安裝 {version_text}…"
+        _set_update_status(message, clear_after=0)
+        self.report({'INFO'}, message)
         return {'FINISHED'}
 
 
@@ -758,23 +1257,50 @@ class FBXZIP_PT_panel(Panel):
 
     def draw(self, context):
         layout = self.layout
-        layout.operator(FBXZIP_OT_export.bl_idname, icon="EXPORT")
-        layout.separator()
-        layout.operator(FBXZIP_OT_online_update.bl_idname, icon="FILE_REFRESH")
-        layout.label(text=f"版本 {'.'.join(map(str, ADDON_VERSION))}")
-        if _UPDATE_STATUS:
-            layout.label(text=_UPDATE_STATUS, icon="INFO")
+        row = layout.row(align=True)
+        row.operator(FBXZIP_OT_export.bl_idname, text="Export FBX + ZIP", icon="EXPORT")
+        row.operator(FBXZIP_OT_online_update.bl_idname, text=_UPDATE_STATUS or "線上更新", icon="FILE_REFRESH")
 
 
-classes = (FBXZIP_MT_presets, FBXZIP_OT_preset_add, FBXZIP_OT_export, FBXZIP_OT_save_preset, FBXZIP_OT_load_preset, FBXZIP_OT_sync_native, FBXZIP_OT_online_update, FBXZIP_PT_panel)
+classes = (
+    FBXZIP_PG_action_item,
+    FBXZIP_PG_texture_item,
+    FBXZIP_UL_actions,
+    FBXZIP_UL_textures,
+    FBXZIP_MT_presets,
+    FBXZIP_OT_preset_add,
+    FBXZIP_OT_action_select,
+    FBXZIP_OT_texture_list_action,
+    FBXZIP_OT_texture_choose,
+    FBXZIP_OT_texture_settings,
+    FBXZIP_OT_action_conflicts,
+    FBXZIP_OT_export,
+    FBXZIP_OT_save_preset,
+    FBXZIP_OT_load_preset,
+    FBXZIP_OT_sync_native,
+    FBXZIP_OT_online_update,
+    FBXZIP_PT_panel,
+)
 
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    bpy.types.WindowManager.fbxzip_action_items = CollectionProperty(type=FBXZIP_PG_action_item)
+    bpy.types.WindowManager.fbxzip_action_index = IntProperty(default=0)
+    bpy.types.WindowManager.fbxzip_texture_items = CollectionProperty(type=FBXZIP_PG_texture_item)
+    bpy.types.WindowManager.fbxzip_texture_index = IntProperty(default=0)
 
 
 def unregister():
+    for name in (
+        "fbxzip_action_items",
+        "fbxzip_action_index",
+        "fbxzip_texture_items",
+        "fbxzip_texture_index",
+    ):
+        if hasattr(bpy.types.WindowManager, name):
+            delattr(bpy.types.WindowManager, name)
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
