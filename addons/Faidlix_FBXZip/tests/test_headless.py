@@ -17,8 +17,8 @@ addon_module = os.environ.get('FBXZIP_ADDON_MODULE', 'Faidlix_FBXZip')
 sys.path.insert(0, addon_parent)
 addon = importlib.import_module(addon_module)
 addon.register()
-assert addon.bl_info['version'] == (1, 8, 4)
-assert addon.ADDON_VERSION == (1, 8, 4)
+assert addon.bl_info['version'] == (1, 8, 5)
+assert addon.ADDON_VERSION == (1, 8, 5)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
@@ -89,6 +89,21 @@ with tempfile.TemporaryDirectory(prefix='fbxzip_smoke_') as folder:
         assert set(archive.namelist()) == {'smoke.fbx', 'UsedGenerated.png'}, archive.namelist()
     assert tex.image == used and obj.active_material == material
 
+    addon._refresh_material_items(bpy.context.window_manager, [obj], preserve=False)
+    assert len(bpy.context.window_manager.fbxzip_material_items) == 1
+    material_item = bpy.context.window_manager.fbxzip_material_items[0]
+    assert material_item.material == material
+    assert material_item.default_name == 'ExportSmoke'
+    material_item.output_name = 'Unity_Character_Material'
+    assert material.name == 'Unity_Character_Material'
+    material_package = Path(folder)/'material_renamed.zip'
+    result = bpy.ops.export_scene.fbx_zip(filepath=str(material_package), use_selection=True, bake_anim=False)
+    assert result == {'FINISHED'}, result
+    with zipfile.ZipFile(material_package) as archive:
+        assert b'Unity_Character_Material' in archive.read('material_renamed.fbx')
+    bpy.ops.export_scene.fbx_zip_material_names_reset()
+    assert material.name == 'ExportSmoke'
+
     addon._refresh_texture_items(bpy.context.window_manager, [obj], include_all=False, preserve=False)
     texture_item = bpy.context.window_manager.fbxzip_texture_items[0]
     texture_item.output_name = 'Unity_BaseColor.png'
@@ -155,6 +170,20 @@ run_channelbag = actions[1].layers[0].strips[0].channelbags[0]
 run_channelbag.fcurves.new('pose.bones["RemovedBone"].location', index=0)
 addon._refresh_action_items(bpy.context.window_manager, [armature], preserve=False)
 assert {item.action_name for item in bpy.context.window_manager.fbxzip_action_items} == {'Fairy_Idle', 'Fairy_Run'}
+accessory_data = bpy.data.armatures.new('AccessoryRigData')
+accessory = bpy.data.objects.new('AccessoryRig', accessory_data)
+bpy.context.scene.collection.objects.link(accessory)
+accessory_slot = actions[1].slots.new('OBJECT', 'AccessoryRig')
+actions[1].layers[0].strips[0].channelbags.new(accessory_slot)
+addon._refresh_action_items(bpy.context.window_manager, [armature, accessory], preserve=False)
+run_rows = [item for item in bpy.context.window_manager.fbxzip_action_items if item.action_name == 'Fairy_Run']
+assert {(item.object_name, item.slot_identifier) for item in run_rows} == {
+    ('ActionRig', actions[1].slots[0].identifier),
+    ('AccessoryRig', accessory_slot.identifier),
+}
+for item in bpy.context.window_manager.fbxzip_action_items:
+    item.include = item.action_name == 'Fairy_Run'
+addon._refresh_action_items(bpy.context.window_manager, [armature], preserve=False)
 for item in bpy.context.window_manager.fbxzip_action_items:
     item.include = True
     item.export_name = item.action_name

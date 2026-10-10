@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 4),
+    "version": (1, 8, 5),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -24,6 +24,7 @@ from bpy.props import (
     EnumProperty,
     FloatProperty,
     IntProperty,
+    PointerProperty,
     StringProperty,
 )
 from bpy.types import Menu, Operator, Panel, PropertyGroup, UIList
@@ -31,7 +32,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 4)
+ADDON_VERSION = (1, 8, 5)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -446,6 +447,7 @@ def _write_packed_image(image, destination):
 class FBXZIP_PG_action_item(PropertyGroup):
     action_name: StringProperty(name="Action")
     object_name: StringProperty(name="Object")
+    slot_identifier: StringProperty(name="Slot")
     include: BoolProperty(name="", default=True)
     export_name: StringProperty(name="Unity Clip")
     frame_start: FloatProperty()
@@ -459,10 +461,40 @@ class FBXZIP_PG_texture_item(PropertyGroup):
     default_name: StringProperty()
 
 
+_MATERIAL_NAME_UPDATE = False
+
+
+def _update_material_name(item, _context):
+    global _MATERIAL_NAME_UPDATE
+    if _MATERIAL_NAME_UPDATE:
+        return
+    material = item.material
+    if not material or material.library:
+        return
+    requested = item.output_name.strip()
+    if not requested:
+        requested = material.name
+    material.name = requested
+    if item.output_name != material.name:
+        _MATERIAL_NAME_UPDATE = True
+        try:
+            item.output_name = material.name
+        finally:
+            _MATERIAL_NAME_UPDATE = False
+
+
+class FBXZIP_PG_material_item(PropertyGroup):
+    material: PointerProperty(type=bpy.types.Material)
+    default_name: StringProperty(name="Original Material")
+    output_name: StringProperty(name="Material Name", update=_update_material_name)
+    read_only: BoolProperty(default=False)
+
+
 class FBXZIP_UL_actions(UIList):
     def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, index=0):
         row = layout.row(align=True)
         row.prop(item, "include", text="")
+        row.label(text=item.object_name, icon="ARMATURE_DATA")
         row.label(text=item.action_name, icon="ACTION")
         row.prop(item, "export_name", text="")
         row.label(text=f"{item.frame_start:g}-{item.frame_end:g}")
@@ -474,6 +506,18 @@ class FBXZIP_UL_textures(UIList):
         row.prop(item, "include", text="")
         row.label(text=item.image_name, icon="IMAGE_DATA")
         row.prop(item, "output_name", text="")
+
+
+class FBXZIP_UL_materials(UIList):
+    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, index=0):
+        row = layout.row(align=True)
+        material = item.material
+        row.label(text=item.default_name, icon="MATERIAL")
+        name_row = row.row(align=True)
+        name_row.enabled = bool(material) and not item.read_only
+        name_row.prop(item, "output_name", text="")
+        if item.read_only:
+            row.label(text="Library", icon="LOCKED")
 
 
 def _active_export_operator(context):
@@ -542,12 +586,27 @@ def _action_slot_for_object(action, obj):
 
 
 def _action_target(action, objects):
+    targets = _action_targets(action, objects)
+    if targets:
+        return targets[0]
+    return None, None
+
+
+def _action_targets(action, objects):
+    """Return every selected object/slot pair owned by an Action."""
+    result = []
+    seen = set()
     ordered = sorted(objects, key=lambda obj: (obj.type != 'ARMATURE', obj.name.lower()))
     for obj in ordered:
         slot = _action_slot_for_object(action, obj)
-        if slot:
-            return obj, slot
-    return None, None
+        if not slot:
+            continue
+        identifier = getattr(slot, "identifier", "") if slot is not True else ""
+        key = (obj.as_pointer(), identifier)
+        if key not in seen:
+            seen.add(key)
+            result.append((obj, slot))
+    return result
 
 
 def _unique_name(value, used):
@@ -563,27 +622,53 @@ def _unique_name(value, used):
 
 def _refresh_action_items(window_manager, objects, preserve=True):
     previous = {
-        item.action_name: (item.include, item.export_name)
+        (item.action_name, item.object_name, item.slot_identifier): (item.include, item.export_name)
         for item in window_manager.fbxzip_action_items
     } if preserve else {}
     rows = []
     for action in bpy.data.actions:
-        target, _slot = _action_target(action, objects)
-        if target:
-            rows.append((action, target))
-    rows.sort(key=lambda pair: pair[0].name.lower())
+        for target, slot in _action_targets(action, objects):
+            rows.append((action, target, slot))
+    rows.sort(key=lambda row: (row[1].name.lower(), row[0].name.lower(), getattr(row[2], 'identifier', '')))
     window_manager.fbxzip_action_items.clear()
-    used = set()
-    for action, target in rows:
+    for action, target, slot in rows:
+        slot_identifier = getattr(slot, "identifier", "") if slot is not True else ""
+        key = (action.name, target.name, slot_identifier)
         item = window_manager.fbxzip_action_items.add()
         item.action_name = action.name
         item.object_name = target.name
+        item.slot_identifier = slot_identifier
         item.frame_start, item.frame_end = action.frame_range
-        had_previous = action.name in previous
-        include, export_name = previous.get(action.name, (True, action.name))
+        include, export_name = previous.get(key, (True, action.name))
         item.include = include
-        item.export_name = export_name if had_previous else _unique_name(export_name, used)
-        used.add(item.export_name.lower())
+        item.export_name = export_name
+
+
+def _used_materials(objects):
+    result = []
+    seen = set()
+    for material in _material_slots(objects):
+        pointer = material.as_pointer()
+        if pointer not in seen:
+            seen.add(pointer)
+            result.append(material)
+    return result
+
+
+def _refresh_material_items(window_manager, objects, preserve=True):
+    previous = {
+        item.material.as_pointer(): (item.default_name, item.output_name)
+        for item in window_manager.fbxzip_material_items
+        if item.material
+    } if preserve else {}
+    window_manager.fbxzip_material_items.clear()
+    for material in _used_materials(objects):
+        item = window_manager.fbxzip_material_items.add()
+        item.material = material
+        default_name, output_name = previous.get(material.as_pointer(), (material.name, material.name))
+        item.default_name = default_name
+        item.output_name = material.name if material.name != output_name else output_name
+        item.read_only = material.library is not None
 
 
 def _refresh_texture_items(window_manager, objects, include_all=False, preserve=True):
@@ -605,14 +690,20 @@ def _action_conflicts(items):
     for item in items:
         if item.include:
             groups.setdefault(item.export_name.strip().lower(), []).append(item)
-    return [group for key, group in groups.items() if not key or len(group) > 1]
+    return [
+        group for key, group in groups.items()
+        if not key or len({item.action_name for item in group}) > 1
+    ]
 
 
 def _dedupe_action_names(items):
     used = set()
+    names_by_action = {}
     for item in items:
         if item.include:
-            item.export_name = _unique_name(item.export_name, used)
+            if item.action_name not in names_by_action:
+                names_by_action[item.action_name] = _unique_name(item.export_name, used)
+            item.export_name = names_by_action[item.action_name]
 
 
 def _texture_conflicts(items):
@@ -644,8 +735,18 @@ def _setup_action_strips(objects, items):
             if not item.include:
                 continue
             action = bpy.data.actions.get(item.action_name)
-            target, slot = _action_target(action, objects) if action else (None, None)
-            if not action or not target:
+            target = bpy.data.objects.get(item.object_name)
+            if not action or not target or target not in objects:
+                continue
+            slot = None
+            if item.slot_identifier:
+                slot = next(
+                    (candidate for candidate in getattr(action, 'slots', ())
+                     if candidate.identifier == item.slot_identifier),
+                    None,
+                )
+            slot = slot or _action_slot_for_object(action, target)
+            if not slot:
                 continue
             state = next((entry for entry in states if entry['object'] == target), None)
             if state is None:
@@ -680,7 +781,12 @@ def _setup_action_strips(objects, items):
             start = int(action.frame_range[0])
             strip = track.strips.new(item.export_name, start, action)
             strip.name = item.export_name
-            if slot is not True and hasattr(strip, "action_slot"):
+            if slot is not True and hasattr(strip, "action_slot_handle"):
+                try:
+                    strip.action_slot_handle = slot.handle
+                except (TypeError, ValueError, AttributeError):
+                    pass
+            elif slot is not True and hasattr(strip, "action_slot"):
                 try:
                     strip.action_slot = slot
                 except (TypeError, ValueError, AttributeError):
@@ -726,12 +832,27 @@ class FBXZIP_OT_action_select(Operator):
 
     def execute(self, context):
         current = {
-            data.action.name
+            (obj.name, data.action.name, getattr(getattr(data, 'action_slot', None), 'identifier', ''))
             for obj in context.selected_objects
             if (data := obj.animation_data) and data.action
         }
         for item in context.window_manager.fbxzip_action_items:
-            item.include = self.mode == 'ALL' or (self.mode == 'CURRENT' and item.action_name in current)
+            item.include = self.mode == 'ALL' or (
+                self.mode == 'CURRENT'
+                and (item.object_name, item.action_name, item.slot_identifier) in current
+            )
+        return {'FINISHED'}
+
+
+class FBXZIP_OT_material_names_reset(Operator):
+    bl_idname = "export_scene.fbx_zip_material_names_reset"
+    bl_label = "還原材質名稱"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        for item in context.window_manager.fbxzip_material_items:
+            if item.material and not item.read_only:
+                item.output_name = item.default_name
         return {'FINISHED'}
 
 
@@ -830,6 +951,7 @@ class FBXZIP_OT_action_conflicts(Operator):
         for item in context.window_manager.fbxzip_action_items:
             if item.include:
                 row = layout.row(align=True)
+                row.label(text=item.object_name, icon="ARMATURE_DATA")
                 row.label(text=item.action_name, icon="ACTION")
                 row.prop(item, "export_name", text="")
 
@@ -932,6 +1054,7 @@ class FBXZIP_OT_export(Operator, ExportHelper):
         objects = _export_objects(context, self)
         _refresh_action_items(context.window_manager, objects, preserve=False)
         _refresh_texture_items(context.window_manager, objects, self.package_all_textures, preserve=False)
+        _refresh_material_items(context.window_manager, objects, preserve=False)
         return ExportHelper.invoke(self, context, event)
 
     def draw(self, context):
@@ -956,6 +1079,21 @@ class FBXZIP_OT_export(Operator, ExportHelper):
         )
         options.operator(FBXZIP_OT_texture_settings.bl_idname, text="貼圖設定…")
         box.prop(self, "keep_fbx")
+        material_box = layout.box()
+        material_box.label(text="材質球名稱（直接修改 Blender 原檔）", icon="MATERIAL")
+        if context.window_manager.fbxzip_material_items:
+            material_box.template_list(
+                FBXZIP_UL_materials.__name__, "", context.window_manager,
+                "fbxzip_material_items", context.window_manager,
+                "fbxzip_material_index", rows=6,
+            )
+            material_box.operator(
+                FBXZIP_OT_material_names_reset.bl_idname,
+                text="還原開啟輸出視窗時的名稱",
+                icon="LOOP_BACK",
+            )
+        else:
+            material_box.label(text="選取的輸出模型沒有已使用材質", icon="INFO")
         box = layout.box()
         box.label(text="FBX: Include / Transform")
         box.prop(self, "use_selection")
@@ -1019,6 +1157,7 @@ class FBXZIP_OT_export(Operator, ExportHelper):
         if not objects:
             self.report({"ERROR"}, "沒有可輸出的物件")
             return {"CANCELLED"}
+        _refresh_material_items(context.window_manager, objects, preserve=True)
         if self.bake_anim and self.select_actions:
             _refresh_action_items(context.window_manager, objects, preserve=True)
             selected_actions = [item for item in context.window_manager.fbxzip_action_items if item.include]
@@ -1306,11 +1445,14 @@ class FBXZIP_PT_panel(Panel):
 classes = (
     FBXZIP_PG_action_item,
     FBXZIP_PG_texture_item,
+    FBXZIP_PG_material_item,
     FBXZIP_UL_actions,
     FBXZIP_UL_textures,
+    FBXZIP_UL_materials,
     FBXZIP_MT_presets,
     FBXZIP_OT_preset_add,
     FBXZIP_OT_action_select,
+    FBXZIP_OT_material_names_reset,
     FBXZIP_OT_texture_list_action,
     FBXZIP_OT_texture_choose,
     FBXZIP_OT_texture_settings,
@@ -1331,6 +1473,8 @@ def register():
     bpy.types.WindowManager.fbxzip_action_index = IntProperty(default=0)
     bpy.types.WindowManager.fbxzip_texture_items = CollectionProperty(type=FBXZIP_PG_texture_item)
     bpy.types.WindowManager.fbxzip_texture_index = IntProperty(default=0)
+    bpy.types.WindowManager.fbxzip_material_items = CollectionProperty(type=FBXZIP_PG_material_item)
+    bpy.types.WindowManager.fbxzip_material_index = IntProperty(default=0)
 
 
 def unregister():
@@ -1339,6 +1483,8 @@ def unregister():
         "fbxzip_action_index",
         "fbxzip_texture_items",
         "fbxzip_texture_index",
+        "fbxzip_material_items",
+        "fbxzip_material_index",
     ):
         if hasattr(bpy.types.WindowManager, name):
             delattr(bpy.types.WindowManager, name)
