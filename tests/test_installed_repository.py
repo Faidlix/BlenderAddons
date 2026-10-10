@@ -3,8 +3,14 @@ import bpy
 
 
 URL = "https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json"
+
+
+def normalized_repository_url(url):
+    return (url or "").split("#", 1)[0].split("?", 1)[0].rstrip("/")
+
+
 repo = next(repo for repo in bpy.context.preferences.extensions.repos
-            if repo.remote_url.rstrip("/") == URL.rstrip("/"))
+            if normalized_repository_url(repo.remote_url) == normalized_repository_url(URL))
 
 paint_name = f"bl_ext.{repo.module}.faidlix_paint"
 preference_name = f"bl_ext.{repo.module}.blander_peferance"
@@ -38,7 +44,7 @@ assert bone_remap.ui.ADDON_VERSION == (0, 6, 8)
 assert bone_remap.updater.GITHUB_REPOSITORY_URL == URL
 assert outliner.ADDON_VERSION == (0, 2, 17)
 assert outliner.GITHUB_REPOSITORY_URL == URL
-assert weight.ADDON_VERSION == (1, 3, 1)
+assert weight.ADDON_VERSION == (1, 3, 2)
 assert weight.GITHUB_REPOSITORY_URL == URL
 assert manager.ADDON_VERSION == (1, 1, 3)
 assert manager.REPOSITORY_URL == URL

@@ -12,9 +12,15 @@ REPOSITORY_URL = (
 PACKAGE_ID = "faidlix_weight"
 
 
+def normalized_repository_url(url):
+    return (url or "").split("#", 1)[0].split("?", 1)[0].rstrip("/")
+
+
 def find_target_repo():
     for index, repo in enumerate(bpy.context.preferences.extensions.repos):
-        if repo.remote_url.rstrip("/") == REPOSITORY_URL.rstrip("/"):
+        if normalized_repository_url(repo.remote_url) == normalized_repository_url(
+            REPOSITORY_URL
+        ):
             return index, repo
     return None, None
 

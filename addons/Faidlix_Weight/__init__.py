@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_Weight",
     "author": "Faidlix",
-    "version": (1, 3, 1),
+    "version": (1, 3, 2),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Weight Paint > Right-click",
     "description": "Mirror or flip selected vertex weights across the local X axis",
@@ -22,7 +22,7 @@ from mathutils.kdtree import KDTree
 _LONG_SIDE_RE = re.compile(r"left|right", re.IGNORECASE)
 _SHORT_SIDE_RE = re.compile(r"(?P<separator>[._\-\s])(?P<side>[lr])(?=$|[._\-\s]|\d)", re.IGNORECASE)
 _CONTEXT_MENU = None
-ADDON_VERSION = (1, 3, 1)
+ADDON_VERSION = (1, 3, 2)
 PACKAGE_ID = "faidlix_weight"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -30,9 +30,16 @@ GITHUB_REPOSITORY_URL = (
 )
 
 
+def _normalized_repository_url(url):
+    """Compare repository endpoints independently of cache-busting suffixes."""
+    return (url or "").split("#", 1)[0].split("?", 1)[0].rstrip("/")
+
+
 def _github_repository(context):
     for index, repo in enumerate(context.preferences.extensions.repos):
-        if repo.remote_url.rstrip("/") == GITHUB_REPOSITORY_URL.rstrip("/"):
+        if _normalized_repository_url(repo.remote_url) == _normalized_repository_url(
+            GITHUB_REPOSITORY_URL
+        ):
             return index, repo
     return None, None
 

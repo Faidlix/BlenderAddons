@@ -11,10 +11,16 @@ REPOSITORY_URL = (
 PACKAGE_ID = "faidlix_weight"
 
 
+def normalized_repository_url(url):
+    return (url or "").split("#", 1)[0].split("?", 1)[0].rstrip("/")
+
+
 repo = next(
     repo
     for repo in bpy.context.preferences.extensions.repos
-    if repo.remote_url.rstrip("/") == REPOSITORY_URL.rstrip("/")
+    if normalized_repository_url(repo.remote_url) == normalized_repository_url(
+        REPOSITORY_URL
+    )
 )
 ADDON_MODULE = f"bl_ext.{repo.module}.{PACKAGE_ID}"
 
@@ -130,7 +136,7 @@ for source, expected in name_cases.items():
     actual = addon.mirror_group_name(source)
     assert actual == expected, (source, actual, expected)
 
-assert addon.ADDON_VERSION == (1, 3, 1)
+assert addon.ADDON_VERSION == (1, 3, 2)
 assert addon.GITHUB_REPOSITORY_URL == REPOSITORY_URL
 assert hasattr(bpy.ops.faidlix_weight, "online_update")
 
