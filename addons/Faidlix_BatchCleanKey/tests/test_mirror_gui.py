@@ -8,11 +8,12 @@ bpy.context.preferences.view.show_splash=False
 bpy.context.preferences.filepaths.use_auto_save_temporary_files=False
 obj=bpy.context.object; source=bpy.data.actions['RestAwareMirror']
 keyed_only=os.environ.get('BCK_TEST_KEYED_MODE')=='1'
+kind='TIME' if os.environ.get('BCK_TEST_TIME_MODE')=='1' else 'MIRROR'
 addon.core.assign_action(bpy.context,obj,source)
 c=next(c for c in addon.core.action_curves(source) if c.data_path.endswith('.location'))
 c.keyframe_points.insert(500,c.evaluate(5))
 if keyed_only:
- for frame in range(6,1206):
+ for frame in range(6,12006 if kind=='TIME' else 1206):
   c.keyframe_points.insert(frame,c.evaluate(5),options={'FAST'})
  c.update()
 def digest():
@@ -36,7 +37,7 @@ def test():
    if stage==0:
     bpy.ops.ed.undo_push(message='Mirror fixture')
     bpy.ops.screen.screenshot(filepath=str(OUT/'v131-sidebar.png'))
-    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1,keyed_only=keyed_only)
+    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1,keyed_only=keyed_only,kind=kind)
     stage=1
    elif stage==1:
     bpy.ops.screen.screenshot(filepath=str(OUT/'mirror-keyed-dialog.png'))
@@ -47,13 +48,13 @@ def test():
    elif stage==3:
     if state.running or state.pending: return .02
     assert digest()==before and len(bpy.data.actions)==count,state.last_result
-    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1,keyed_only=keyed_only)
+    bpy.ops.faidlix_batch_clean_key.flip('INVOKE_DEFAULT',action_name='RestAwareMirror',sample_step=1,keyed_only=keyed_only,kind=kind)
     stage=4
    elif stage==4: event('RET'); stage=5
    elif stage==5:
     if state.running or state.pending: return .02
     assert len(bpy.data.actions)==count+1 and digest()==before,state.last_result
-    assert bpy.context.object.animation_data.action.name.startswith('RestAwareMirror_Flipped')
+    assert bpy.context.object.animation_data.action.name.startswith('RestAwareMirror_'+('Reversed' if kind=='TIME' else 'Flipped'))
     bpy.ops.ed.undo(); stage=6
    elif stage==6:
     assert len(bpy.data.actions)==count and digest()==before

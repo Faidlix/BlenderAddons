@@ -81,7 +81,7 @@ class Layout:
     def label(self,**kwargs): pass
 for enabled in (False,True):
     log=[]
-    addon.ui.BCK_OT_Flip.draw(SimpleNamespace(layout=Layout(log),action_name=name,keyed_only=enabled),bpy.context)
+    addon.ui.BCK_OT_Flip.draw(SimpleNamespace(layout=Layout(log),action_name=name,keyed_only=enabled,kind='MIRROR'),bpy.context)
     button=next(item for item in log if item[0]=='keyed_only')
     assert button[1] and button[2].get('toggle')
     interval=[item for item in log if item[0]=='sample_step']

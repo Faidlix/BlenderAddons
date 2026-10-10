@@ -4,9 +4,18 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror
 
-ADDON_VERSION = '1.3.2'
+ADDON_VERSION = '1.4.0'
 _sync_signature = None
 _refreshing = False
+_rig_choices={'CURRENT':('CURRENT','原骨架','使用目前工具指定的骨架')}
+
+
+def destination_items(self,context):
+    context=context or bpy.context
+    names=[o.name for o in context.scene.objects if o.type=='ARMATURE'] if context.scene else []
+    for name in names:
+        _rig_choices.setdefault(name,(name,name,'複製到此骨架'))
+    return [_rig_choices['CURRENT']]+[_rig_choices[n] for n in names if n!='CURRENT']
 
 
 def browser_changed(state, context):
@@ -17,6 +26,7 @@ def browser_changed(state, context):
     if obj and action:
         try:
             core.assign_action(context, obj, action)
+            core.pad_bone_bounds(action,obj)
             core.sync_scene_range(context.scene, action)
             for item in state.browser:
                 item.selected = item.action == action
@@ -32,8 +42,27 @@ def redraw(context):
 
 
 def rig(context):
+    state=getattr(context.window_manager,'faidlix_batch_clean_key',None)
+    target=state.target_armature if state else None
+    if target and target.type=='ARMATURE' and target.name in context.scene.objects:
+        return target
     obj = context.object
     return obj if obj and obj.type == 'ARMATURE' else None
+
+
+def target_changed(state,context):
+    if not state.running and not state.pending:
+        refresh(context,reset=True)
+        redraw(context)
+
+
+def rig_action(action,obj):
+    if not obj: return False
+    if obj.animation_data and obj.animation_data.action==action: return True
+    if any(obj in s.users() or s.identifier=='OB'+obj.name for s in action.slots): return True
+    if any(o.type=='ARMATURE' and o!=obj for s in action.slots for o in s.users()): return False
+    if any(s.identifier=='OB'+o.name for s in action.slots for o in bpy.context.scene.objects if o.type=='ARMATURE' and o!=obj): return False
+    return bool(core.target_curves(action,obj,[b.name for b in obj.pose.bones]))
 
 
 def bone_get(item):
@@ -44,7 +73,7 @@ def bone_get(item):
 
 def bone_set(item, value):
     obj = item.armature
-    if obj and obj.mode == 'POSE' and obj.is_editable:
+    if obj and obj.mode != 'EDIT' and obj.is_editable:
         bone = obj.pose.bones.get(item.name)
         if bone:
             bone.select = value
@@ -68,6 +97,8 @@ class BCK_PG_Bone(bpy.types.PropertyGroup):
 
 
 class BCK_PG_State(bpy.types.PropertyGroup):
+    target_armature: PointerProperty(name='骨架',type=bpy.types.Object,
+        poll=lambda self,obj:obj.type=='ARMATURE',update=target_changed)
     actions: CollectionProperty(type=BCK_PG_Action)
     browser: CollectionProperty(type=BCK_PG_Action)
     bones: CollectionProperty(type=BCK_PG_Bone)
@@ -100,6 +131,7 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     flip_mode: StringProperty(default='COPY')
     flip_step: IntProperty(default=1,min=1)
     flip_keyed_only: BoolProperty(default=False)
+    flip_kind: StringProperty(default='MIRROR')
     loop_job: BoolProperty(default=False)
     loop_action: PointerProperty(type=bpy.types.Action)
     loop_smooth: BoolProperty(default=True)
@@ -136,7 +168,7 @@ def refresh(context, reset=False):
         for name in names:
             item = state.bones.add()
             item.name, item.armature = name, obj
-    actions = sorted(bpy.data.actions, key=lambda a: a.name.casefold())
+    actions = sorted((a for a in bpy.data.actions if rig_action(a,obj)), key=lambda a: a.name.casefold())
     changed_actions = ([i.action for i in state.actions] != actions or
                        [i.action for i in state.browser] != actions)
     if changed_actions or reset:
@@ -232,7 +264,7 @@ class BCK_OT_BonesAll(bpy.types.Operator):
     def execute(self, context):
         state = context.window_manager.faidlix_batch_clean_key
         obj = state.armature
-        if not obj or obj.mode != 'POSE' or state.running or state.pending:
+        if not obj or obj.mode == 'EDIT' or state.running or state.pending:
             return {'CANCELLED'}
         for bone in obj.pose.bones:
             bone.select = self.value
@@ -336,7 +368,7 @@ class BCK_OT_Batch(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return bool(rig(context) and context.object.mode == 'POSE' and
+        return bool(rig(context) and rig(context).mode != 'EDIT' and
                     not context.window_manager.faidlix_batch_clean_key.running and
                     not context.window_manager.faidlix_batch_clean_key.pending)
 
@@ -398,7 +430,7 @@ def batch_args(context):
         actions=[a for a in bpy.data.actions if core.slot_for(a,obj) and any(c.data_path in paths and core.rotation_has_data(c) for c in core.target_curves(a,obj,names))]
         return (context,obj,names,actions,state.operation,state.threshold,state.decimate_mode,state.ratio,state.error)
     obj = state.armature
-    if not obj or obj != context.object or obj.mode != 'POSE':
+    if not obj or obj != rig(context) or obj.mode == 'EDIT':
         raise ValueError('骨架或模式已變更，請重新開啟工具')
     names = [b.name for b in state.bones if b.selected]
     actions = [i.action for i in state.actions if i.selected and i.action]
@@ -423,6 +455,8 @@ def result_text(result):
 def processing_steps(context):
     state=context.window_manager.faidlix_batch_clean_key
     if state.flip_job:
+        if state.flip_kind=='TIME':
+            return mirror.reverse_steps(context,rig(context),state.flip_action,state.flip_mode)
         return mirror.steps(context,rig(context),state.flip_action,state.flip_mode,state.flip_step,state.flip_keyed_only)
     state = context.window_manager.faidlix_batch_clean_key
     if state.loop_job:
@@ -620,6 +654,7 @@ class BCK_OT_Switch(bpy.types.Operator):
             return {'CANCELLED'}
         try:
             core.assign_action(context, obj, action)
+            core.pad_bone_bounds(action,obj)
             core.sync_scene_range(context.scene, action)
         except ValueError as exc:
             self.report({'ERROR'}, str(exc))
@@ -754,20 +789,41 @@ class BCK_OT_Duplicate(bpy.types.Operator):
     bl_label = '複製 Action'
     bl_options = {'UNDO'}
     action_name: StringProperty()
+    destination: EnumProperty(name='複製到骨架',items=destination_items)
+
+    def invoke(self,context,event):
+        self.destination='CURRENT'
+        return context.window_manager.invoke_props_dialog(self,width=460,confirm_text='複製')
+
+    def draw(self,context):
+        self.layout.label(text=self.action_name)
+        self.layout.prop(self,'destination')
+        self.layout.label(text='複製動畫通道；不同骨骼名稱或比例不會自動重定向')
 
     def execute(self, context):
         source, obj = bpy.data.actions.get(self.action_name), rig(context)
         if not source or not obj:
             return {'CANCELLED'}
+        target=obj if self.destination=='CURRENT' else context.scene.objects.get(self.destination)
+        slot=core.slot_for(source,obj)
+        if not slot or not target or not target.is_editable or target.name not in context.scene.objects:
+            return {'CANCELLED'}
         copy = source.copy()
         copy.name = source.name + '_Copy'
         copy.use_fake_user = True
         try:
-            core.assign_action(context, obj, copy)
+            target_slot=next(s for s in copy.slots if s.identifier==slot.identifier)
+            if target!=obj:
+                for unused in list(copy.slots):
+                    if unused!=target_slot: copy.slots.remove(unused)
+                target_slot.identifier='OB'+target.name
+            ad=target.animation_data_create(); ad.action=copy; ad.action_slot=target_slot
+            core.assign_action(context, target, copy)
         except ValueError as exc:
             bpy.data.actions.remove(copy)
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
+        if target!=obj: context.window_manager.faidlix_batch_clean_key.target_armature=target
         refresh(context)
         redraw(context)
         return {'FINISHED'}
@@ -775,9 +831,11 @@ class BCK_OT_Duplicate(bpy.types.Operator):
 
 class BCK_OT_Flip(bpy.types.Operator):
     bl_idname = 'faidlix_batch_clean_key.flip'
-    bl_label = '左右翻轉 Action'
+    bl_label = '翻轉 Action'
     bl_options = {'UNDO'}
     action_name: StringProperty()
+    kind: EnumProperty(name='翻轉方式',items=[('MIRROR','Action 左右翻轉','鏡像左右骨骼'),
+        ('TIME','時間前後翻轉','順播變倒播')],default='MIRROR')
     sample_step: IntProperty(name='烘焙間隔（影格）',default=1,min=1,max=100)
     keyed_only: BoolProperty(name='只翻轉有下 Key 的部分',default=False,
         description='只交換有動畫資料的分量，保留各曲線原有 Key 影格，不加入間隔取樣或其他曲線的 Key')
@@ -789,7 +847,12 @@ class BCK_OT_Flip(bpy.types.Operator):
 
     def draw(self, context):
         self.layout.label(text=self.action_name)
+        self.layout.prop(self,'kind',expand=True)
         self.layout.prop(self, 'mode', expand=True)
+        if self.kind=='TIME':
+            self.layout.label(text='依指定骨架 Slot 的實際起訖反轉時間與貝茲控制柄')
+            self.layout.label(text='一般修飾器以原 Key 影格烘焙；取樣曲線轉為貝茲 Key')
+            return
         row=self.layout.row(align=True)
         row.prop(self, 'keyed_only', toggle=True)
         if not self.keyed_only:
@@ -808,6 +871,7 @@ class BCK_OT_Flip(bpy.types.Operator):
         state.flip_job=True; state.loop_job=False; state.rotation_job=False
         state.flip_action=source; state.flip_mode=self.mode; state.flip_step=self.sample_step
         state.flip_keyed_only=self.keyed_only
+        state.flip_kind=self.kind
         return run_sync(self,context) if bpy.app.background else launch_batch(context)
 
 
@@ -839,14 +903,17 @@ class _Panel:
         draw_progress(layout, state)
         col = layout.column()
         col.enabled = not state.running and not state.pending
+        col.prop(state,'target_armature',text='骨架')
+        if not state.target_armature and rig(context): col.label(text='目前骨架：'+rig(context).name)
         if self.bl_space_type == 'VIEW_3D':
             row = col.row(align=True)
             row.enabled = bool(rig(context))
             row.operator('faidlix_batch_clean_key.new', icon='ADD')
             row.operator('faidlix_batch_clean_key.combine', text='組合 Action', icon='NLA')
-            if fold(col, state, 'show_browser', 'Action 清單'):
+            if fold(col, state, 'show_browser', f'Action 清單（{len(state.browser)}）'):
                 col.template_list('BCK_UL_Browser', '', state, 'browser', state, 'browser_index', rows=8, maxrows=8)
-        col.label(text=f'目前選取骨骼：{len(core.selected_bones(context))}')
+        obj=rig(context)
+        col.label(text=f'目前選取骨骼：{sum(b.select for b in obj.pose.bones) if obj else 0}')
         col.operator('faidlix_batch_clean_key.batch', text='批次處理 Action Keys', icon='ACTION')
         box=col.box()
         box.label(text='統一轉換旋轉座標')

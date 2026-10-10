@@ -28,6 +28,9 @@ def slot_for(action, obj):
     ad = obj.animation_data
     if ad and ad.action == action and ad.action_slot:
         return ad.action_slot
+    named=[s for s in action.slots if s.identifier=='OB'+obj.name]
+    if len(named)==1:
+        return named[0]
     if ad and ad.action_slot:
         match = [s for s in action.slots if s.identifier == ad.action_slot.identifier]
         if len(match) == 1:
@@ -68,6 +71,24 @@ def actual_range(action):
     frames = [p.co.x for c in action_curves(action)
               for points in (c.keyframe_points, c.sampled_points) for p in points]
     return (min(frames), max(frames)) if frames else None
+
+
+def pad_bone_bounds(action,obj):
+    """Pad existing bone curves only, in this rig's slot; never create new channels."""
+    if not action.is_editable: return 0
+    curves=target_curves(action,obj,[b.name for b in obj.pose.bones])
+    times=[float(p.co.x) for c in curves for pts in (c.keyframe_points,c.sampled_points) for p in pts]
+    if not times: return 0
+    start,end=min(times),max(times); added=0
+    for c in curves:
+        if not c.keyframe_points or c.sampled_points or c.modifiers: continue
+        existing={float(p.co.x) for p in c.keyframe_points}
+        pending=[(f,c.evaluate(f)) for f in {start,end} if f not in existing]
+        for frame,value in pending:
+            p=c.keyframe_points.insert(frame,value,options={'FAST'})
+            p.interpolation='BEZIER'; p.handle_left_type=p.handle_right_type='AUTO_CLAMPED'; added+=1
+        if pending: c.update()
+    return added
 
 
 def sync_ranges(actions):

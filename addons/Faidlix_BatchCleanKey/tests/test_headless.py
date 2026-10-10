@@ -99,8 +99,10 @@ with bpy.context.temp_override(area=area, region=next(r for r in area.regions if
     original = core.snapshot(c)
     core.process(bpy.context, obj, ['Target'], [a], 'DELETE')
     assert core.snapshot(c) == original
-    # Unused ambiguous action must not fall back to all slots.
+    # An exact rig identifier resolves an unused slot; ambiguous names never do.
     obj.animation_data.action = None
+    assert core.slot_for(a,obj).identifier=='OB'+obj.name
+    a.slots[0].identifier='OBUnidentified'
     assert core.target_curves(a, obj, ['Target']) == []
     checks.append('SLOT_ISOLATION')
 

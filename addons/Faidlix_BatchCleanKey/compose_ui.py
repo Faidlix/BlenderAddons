@@ -22,7 +22,8 @@ def clip_text(left, bottom, right, top):
 
 class Session:
     def __init__(self, context):
-        self.window, self.scene, self.obj = context.window, context.scene, context.object
+        from .ui import rig
+        self.window, self.scene, self.obj = context.window, context.scene, rig(context)
         self.main = self.obj.animation_data.action
         bounds = core.actual_range(self.main)
         if bounds is None:
@@ -322,7 +323,8 @@ class BCK_OT_Combine(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        obj = context.object
+        from .ui import rig
+        obj = rig(context)
         return bool(not SESSION and obj and obj.type == 'ARMATURE' and obj.is_editable and
                     obj.animation_data and obj.animation_data.action)
 

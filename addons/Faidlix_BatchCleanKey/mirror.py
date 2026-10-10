@@ -9,6 +9,67 @@ from . import core
 TRS={'location','rotation_euler','rotation_quaternion','rotation_axis_angle','scale'}
 
 
+def reverse_steps(context,obj,source,mode='COPY'):
+    """Reverse one rig's slot on a native copy, preserving other slots."""
+    slot=core.slot_for(source,obj) if source and obj else None
+    bags=[s.channelbag(slot) for l in source.layers for s in l.strips
+          if slot and s.type=='KEYFRAME' and s.channelbag(slot)] if source else []
+    if not obj or not obj.is_editable or len(bags)!=1:
+        raise ValueError('時間翻轉需要明確的單一骨架 Slot／動畫層')
+    curves=[c for c in bags[0].fcurves if c.keyframe_points or c.sampled_points]
+    times=[float(p.co.x) for c in curves for pts in (c.keyframe_points,c.sampled_points) for p in pts]
+    if not times: raise ValueError('Action 沒有可翻轉的 Key')
+    pivot=min(times)+max(times); copied=None
+    total=max(1,sum(len(c.keyframe_points)+len(c.sampled_points) for c in curves)); done=0
+    try:
+        copied=source.copy(); copied.name='__BCK_Reverse__'+source.name
+        bag=next(s.channelbag(core.slot_for(copied,obj)) for l in copied.layers for s in l.strips if s.type=='KEYFRAME' and s.channelbag(core.slot_for(copied,obj)))
+        for c in list(bag.fcurves):
+            if not c.keyframe_points and not c.sampled_points: continue
+            bake=bool(c.sampled_points or any(m.type!='CYCLES' for m in c.modifiers))
+            if bake:
+                frames=sorted({float(p.co.x) for pts in (c.keyframe_points,c.sampled_points) for p in pts})
+                values=[(pivot-f,c.evaluate(f)) for f in frames]
+                path,index,group,lock,mute,extrap=c.data_path,c.array_index,c.group,c.lock,c.mute,c.extrapolation
+                bag.fcurves.remove(c); c=bag.fcurves.new(path,index=index)
+                c.group,c.lock,c.mute,c.extrapolation=group,lock,mute,extrap
+                c.keyframe_points.add(len(values))
+                for p,value in zip(c.keyframe_points,sorted(values)):
+                    p.co=value; p.interpolation='BEZIER'; p.handle_left_type=p.handle_right_type='AUTO_CLAMPED'
+                    done+=1
+                    if done%128==0: yield done,total,source.name+'（時間倒播）'
+                c.update()
+            else:
+                before=core.snapshot(c); points=[]
+                for j in range(len(before)-1,-1,-1):
+                    original=before[j]; p=dict(original)
+                    p['co']=(pivot-original['co'][0],original['co'][1])
+                    for left,right in [('handle_left','handle_right'),('handle_left_type','handle_right_type'),('select_left_handle','select_right_handle')]:
+                        p[left],p[right]=original[right],original[left]
+                    for side in ('handle_left','handle_right'):
+                        p[side]=(pivot-p[side][0],p[side][1])
+                    segment=before[max(0,j-1)]
+                    for key in ('interpolation','easing','back','amplitude','period'):
+                        if key in segment: p[key]=segment[key]
+                    p['easing']={'EASE_IN':'EASE_OUT','EASE_OUT':'EASE_IN'}.get(p['easing'],p['easing'])
+                    points.append(p)
+                for _ in core.write_points_steps(c,points):
+                    yield done,total,source.name+'（時間倒播）'
+                for m in c.modifiers:
+                    m.mode_before,m.mode_after=m.mode_after,m.mode_before
+                    m.cycles_before,m.cycles_after=m.cycles_after,m.cycles_before
+                done+=len(points)
+            yield done,total,source.name+'（時間倒播）'
+        if mode=='COPY': copied.name=source.name+'_Reversed'; copied.use_fake_user=True
+        else:
+            name=source.name; source.user_remap(copied); bpy.data.actions.remove(source); copied.name=name
+        core.assign_action(context,obj,copied); core.sync_scene_range(context.scene,copied)
+        result=copied; copied=None
+        return {'flip_action':result.name}
+    finally:
+        if copied: bpy.data.actions.remove(copied)
+
+
 def steps(context,obj,source,mode='COPY',step=1,keyed_only=False):
     if not source or not obj or not obj.is_editable or (not keyed_only and (step<.01 or not math.isfinite(step))):
         raise ValueError('骨架、Action 或取樣間隔無效')
