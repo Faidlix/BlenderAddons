@@ -66,5 +66,31 @@ other.keyframe_points.insert(4,3); other.keyframe_points.insert(7,4)
 assert bpy.ops.faidlix_batch_clean_key.switch(action_name=action.name)=={'FINISHED'}
 assert [p.co.x for p in other.keyframe_points]==[1.5,4,7,9.5]
 assert addon.core.snapshot(bb.fcurves[0])==untouched
+# Regression: another slot's old 30-frame animation must not re-expand this rig.
+foreign_curve=bb.fcurves[0]
+foreign_curve.keyframe_points.clear()
+foreign_curve.keyframe_points.insert(0,7); foreign_curve.keyframe_points.insert(30,9)
+foreign_before=addon.core.snapshot(foreign_curve)
+for curve in ba.fcurves:
+ curve.keyframe_points.clear()
+ curve.keyframe_points.insert(0,0)
+ba.fcurves[0].keyframe_points.insert(1,1)
+assert addon.core.actual_range(action)==(0,30)
+assert addon.core.actual_range(action,a)==(0,1)
+bpy.context.scene.frame_end=30
+assert bpy.ops.faidlix_batch_clean_key.switch(action_name=action.name)=={'FINISHED'}
+assert (bpy.context.scene.frame_start,bpy.context.scene.frame_end)==(0,1)
+assert all({p.co.x for p in c.keyframe_points}=={0,1} for c in ba.fcurves)
+assert addon.core.snapshot(foreign_curve)==foreign_before
+# Re-select through the browser callback after editing keys to a new short range.
+for curve in ba.fcurves:
+ for p in curve.keyframe_points: p.co.x+=2
+ curve.update()
+addon.ui.refresh(bpy.context)
+state.browser_index=next(i for i,row in enumerate(state.browser) if row.action==action)
+addon.ui.browser_changed(state,bpy.context)
+assert (bpy.context.scene.frame_start,bpy.context.scene.frame_end)==(2,3)
+assert all({p.co.x for p in c.keyframe_points}=={2,3} for c in ba.fcurves)
+assert addon.core.snapshot(foreign_curve)==foreign_before
 state.target_armature=None
-print('REVERSE_RIGS_PASS selected_rig filter count new_action multi_slot reverse_Bezier_handles original_key_count subframes cancel source_preserved')
+print('REVERSE_RIGS_PASS selected_rig filter count new_action multi_slot reverse_Bezier_handles original_key_count subframes cancel source_preserved reselect_short_slot_bounds foreign_30_untouched')

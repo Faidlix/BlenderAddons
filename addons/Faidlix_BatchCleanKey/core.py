@@ -67,8 +67,16 @@ def action_curves(action):
                     yield from bag.fcurves
 
 
-def actual_range(action):
-    frames = [p.co.x for c in action_curves(action)
+def actual_range(action, obj=None):
+    """Read real key/sample bounds; an explicit rig restricts this to its slot."""
+    if obj is None:
+        curves=action_curves(action)
+    else:
+        slot=slot_for(action,obj)
+        curves=(c for layer in action.layers for strip in layer.strips
+                if strip.type=='KEYFRAME' and slot
+                for bag in [strip.channelbag(slot)] if bag for c in bag.fcurves)
+    frames = [p.co.x for c in curves
               for points in (c.keyframe_points, c.sampled_points) for p in points]
     return (min(frames), max(frames)) if frames else None
 
@@ -76,7 +84,7 @@ def actual_range(action):
 def pad_bone_bounds(action,obj):
     """Pad every bone's active TRS representation, restricted to the rig slot."""
     if not action.is_editable: return 0
-    bounds=actual_range(action)
+    bounds=actual_range(action,obj)
     slot=slot_for(action,obj)
     if not bounds or not slot: return 0
     bags=[s.channelbag(slot) for l in action.layers for s in l.strips
@@ -121,10 +129,10 @@ def pad_bone_bounds(action,obj):
     return added
 
 
-def sync_ranges(actions):
+def sync_ranges(actions, obj=None):
     changed = skipped = 0
     for action in actions:
-        bounds = actual_range(action)
+        bounds = actual_range(action,obj)
         if bounds is None or not action.is_editable:
             skipped += 1
             continue
@@ -179,11 +187,11 @@ def assign_action(context, obj, action):
     context.scene.frame_set(context.scene.frame_current, subframe=context.scene.frame_subframe)
 
 
-def sync_scene_range(scene, action):
+def sync_scene_range(scene, action, obj=None):
     import math
-    bounds = actual_range(action)
+    bounds = actual_range(action,obj)
     if bounds is not None and action.is_editable:
-        sync_ranges([action])
+        sync_ranges([action],obj)
     if bounds is None:
         bounds = (1, 1)
     start, end = math.floor(bounds[0]), math.ceil(bounds[1])

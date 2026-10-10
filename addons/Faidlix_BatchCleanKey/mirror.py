@@ -63,7 +63,7 @@ def reverse_steps(context,obj,source,mode='COPY'):
         if mode=='COPY': copied.name=source.name+'_Reversed'; copied.use_fake_user=True
         else:
             name=source.name; source.user_remap(copied); bpy.data.actions.remove(source); copied.name=name
-        core.assign_action(context,obj,copied); core.sync_scene_range(context.scene,copied)
+        core.assign_action(context,obj,copied); core.sync_scene_range(context.scene,copied,obj)
         result=copied; copied=None
         return {'flip_action':result.name}
     finally:
@@ -221,7 +221,7 @@ def steps(context,obj,source,mode='COPY',step=1,keyed_only=False):
         else:
             name=source.name; source.user_remap(copied); bpy.data.actions.remove(source); copied.name=name
         core.assign_action(context,obj,copied)
-        core.sync_scene_range(context.scene,copied)
+        core.sync_scene_range(context.scene,copied,obj)
         result=copied; copied=None
         return {'flip_action':result.name}
     finally:

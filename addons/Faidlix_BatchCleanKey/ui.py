@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror
 
-ADDON_VERSION = '1.4.1'
+ADDON_VERSION = '1.4.2'
 _sync_signature = None
 _refreshing = False
 _rig_choices={'CURRENT':('CURRENT','原骨架','使用目前工具指定的骨架')}
@@ -26,7 +26,7 @@ def browser_changed(state, context):
     if obj and action:
         try:
             core.assign_action(context, obj, action)
-            core.sync_scene_range(context.scene, action)
+            core.sync_scene_range(context.scene, action, obj)
             core.pad_bone_bounds(action,obj)
             for item in state.browser:
                 item.selected = item.action == action
@@ -468,7 +468,7 @@ def processing_steps(context):
             copied = yield from core.loop_copy_steps(action,obj,state.loop_smooth,state.loop_step,state.loop_keyed_only)
             try:
                 core.assign_action(context,obj,copied)
-                core.sync_scene_range(context.scene,copied)
+                core.sync_scene_range(context.scene,copied,obj)
             except Exception:
                 bpy.data.actions.remove(copied)
                 raise
@@ -655,7 +655,7 @@ class BCK_OT_Switch(bpy.types.Operator):
             return {'CANCELLED'}
         try:
             core.assign_action(context, obj, action)
-            core.sync_scene_range(context.scene, action)
+            core.sync_scene_range(context.scene, action, obj)
             core.pad_bone_bounds(action,obj)
         except ValueError as exc:
             self.report({'ERROR'}, str(exc))
