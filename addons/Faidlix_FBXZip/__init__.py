@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 3),
+    "version": (1, 8, 4),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -31,7 +31,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 3)
+ADDON_VERSION = (1, 8, 4)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -489,6 +489,28 @@ def _action_slot_for_object(action, obj):
     animation_data = obj.animation_data
     if animation_data and animation_data.action == action:
         return getattr(animation_data, "action_slot", None) or True
+
+    # Blender 4.4+ Actions explicitly identify their target through slots.
+    # Prefer that ownership information over resolving every F-Curve path: an
+    # otherwise valid Action can contain curves for bones that were removed
+    # from the current rig, and one unresolved path must not hide the Action.
+    known_identifiers = set()
+    if animation_data:
+        current_slot = getattr(animation_data, "action_slot", None)
+        if current_slot:
+            known_identifiers.add(current_slot.identifier)
+        for track in animation_data.nla_tracks:
+            for strip in track.strips:
+                strip_slot = getattr(strip, "action_slot", None)
+                if strip_slot:
+                    known_identifiers.add(strip_slot.identifier)
+    expected_identifier = f"OB{obj.name}" if obj.id_type == 'OBJECT' else ""
+    for slot in getattr(action, "slots", ()):
+        if getattr(slot, "target_id_type", None) != obj.id_type:
+            continue
+        if slot.identifier in known_identifiers or slot.identifier == expected_identifier:
+            return slot
+
     found_curve = False
     for layer in getattr(action, "layers", ()):
         for strip in getattr(layer, "strips", ()):

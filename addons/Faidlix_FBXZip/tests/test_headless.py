@@ -17,8 +17,8 @@ addon_module = os.environ.get('FBXZIP_ADDON_MODULE', 'Faidlix_FBXZip')
 sys.path.insert(0, addon_parent)
 addon = importlib.import_module(addon_module)
 addon.register()
-assert addon.bl_info['version'] == (1, 8, 3)
-assert addon.ADDON_VERSION == (1, 8, 3)
+assert addon.bl_info['version'] == (1, 8, 4)
+assert addon.ADDON_VERSION == (1, 8, 4)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
@@ -149,6 +149,10 @@ existing_track = armature.animation_data.nla_tracks.new()
 existing_track.name = 'ExistingTrack'
 existing_track.strips.new('Fairy_Run', 1, actions[1])
 existing_track.mute = False
+# A valid slot-owned Action must remain selectable even when the rig no longer
+# contains every animated bone.
+run_channelbag = actions[1].layers[0].strips[0].channelbags[0]
+run_channelbag.fcurves.new('pose.bones["RemovedBone"].location', index=0)
 addon._refresh_action_items(bpy.context.window_manager, [armature], preserve=False)
 assert {item.action_name for item in bpy.context.window_manager.fbxzip_action_items} == {'Fairy_Idle', 'Fairy_Run'}
 for item in bpy.context.window_manager.fbxzip_action_items:
