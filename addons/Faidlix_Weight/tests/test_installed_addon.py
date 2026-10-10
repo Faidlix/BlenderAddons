@@ -48,6 +48,47 @@ def make_mesh():
     return obj
 
 
+def make_collision_mesh():
+    mesh = bpy.data.meshes.new("CollisionMesh")
+    mesh.from_pydata(
+        [
+            (-1.0, 0.00, 0.0),
+            (-1.0, 0.10, 0.0),
+            (1.0, 0.05, 0.0),
+            (1.0, 0.18, 0.0),
+        ],
+        [],
+        [(0, 2, 3, 1)],
+    )
+    mesh.update()
+    obj = bpy.data.objects.new("CollisionMesh", mesh)
+    bpy.context.collection.objects.link(obj)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    mesh.use_paint_mask_vertex = True
+    return obj
+
+
+def make_single_target_mesh():
+    mesh = bpy.data.meshes.new("SingleTargetMesh")
+    mesh.from_pydata(
+        [
+            (-1.0, 0.00, 0.0),
+            (-1.0, 0.10, 0.0),
+            (1.0, 0.05, 0.0),
+        ],
+        [],
+        [(0, 2, 1)],
+    )
+    mesh.update()
+    obj = bpy.data.objects.new("SingleTargetMesh", mesh)
+    bpy.context.collection.objects.link(obj)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    mesh.use_paint_mask_vertex = True
+    return obj
+
+
 def set_selected(obj, indices):
     if obj.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -89,9 +130,18 @@ for source, expected in name_cases.items():
     actual = addon.mirror_group_name(source)
     assert actual == expected, (source, actual, expected)
 
-assert addon.ADDON_VERSION == (1, 3, 0)
+assert addon.ADDON_VERSION == (1, 3, 1)
 assert addon.GITHUB_REPOSITORY_URL == REPOSITORY_URL
 assert hasattr(bpy.ops.faidlix_weight, "online_update")
+
+assignment = addon._assign_unique_targets({
+    10: [(0.10, 0.10, 100), (0.20, 0.20, 101)],
+    11: [(0.11, 0.11, 100)],
+})
+assert assignment == {10: 101, 11: 100}, assignment
+assert addon._assign_unique_targets({
+    12: [(0.01, 0.01, 100), (0.20, 0.20, 102)],
+}, {100}) == {12: 102}
 
 obj = make_mesh()
 set_weight(obj, "RightHand", 0, 0.75)
@@ -171,6 +221,38 @@ assert weights(obj, 3) == {"Right_LowerArm": 0.7, "Right_Hand": 0.3}
 set_selected(obj, {4})
 assert bpy.ops.faidlix_weight.mirror_selected() == {'CANCELLED'}
 
+reset_scene()
+obj = make_collision_mesh()
+set_weight(obj, "Left_First", 0, 1.0)
+set_weight(obj, "Left_Second", 1, 1.0)
+set_weight(obj, "OldTargetA", 2, 1.0)
+set_weight(obj, "OldTargetB", 3, 1.0)
+bpy.context.scene.faidlix_weight_flip = False
+bpy.context.scene.faidlix_weight_smart_match = True
+set_selected(obj, {0, 1})
+assert bpy.ops.faidlix_weight.mirror_selected() == {'FINISHED'}
+collision_results = [weights(obj, 2), weights(obj, 3)]
+assert all(len(result) == 1 for result in collision_results)
+assert {next(iter(result)) for result in collision_results} == {
+    "Right_First",
+    "Right_Second",
+}
+assert all(next(iter(result.values())) == 1.0 for result in collision_results)
+
+reset_scene()
+obj = make_single_target_mesh()
+set_weight(obj, "Left_First", 0, 1.0)
+set_weight(obj, "Left_Second", 1, 1.0)
+set_weight(obj, "OldTarget", 2, 1.0)
+bpy.context.scene.faidlix_weight_flip = False
+bpy.context.scene.faidlix_weight_smart_match = True
+set_selected(obj, {0, 1})
+assert bpy.ops.faidlix_weight.mirror_selected() == {'FINISHED'}
+single_result = weights(obj, 2)
+assert len(single_result) == 1
+assert next(iter(single_result)) in {"Right_First", "Right_Second"}
+assert next(iter(single_result.values())) == 1.0
+
 bpy.ops.object.mode_set(mode='OBJECT')
 assert hasattr(bpy.types.Scene, "faidlix_weight_flip")
 assert hasattr(bpy.types.Scene, "faidlix_weight_smart_match")
@@ -184,6 +266,8 @@ print("FLIP_REVERSE=True")
 print("BILATERAL_FORCED_SWAP=True")
 print("LOCKED_GROUP_ATOMIC_CANCEL=True")
 print("SMART_NEARBY_FULL_REPLACE=True")
+print("SMART_ONE_TO_ONE_ASSIGNMENT=True")
+print("SMART_CONFLICT_SKIPS_UNMATCHED=True")
 print("CENTER_SKIP=True")
 print("CONTEXT_MENU=VIEW3D_PT_paint_weight_context_menu")
 print("ONLINE_UPDATE_CHECK=True")

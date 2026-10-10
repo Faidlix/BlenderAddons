@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_Weight",
     "author": "Faidlix",
-    "version": (1, 3, 0),
+    "version": (1, 3, 1),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Weight Paint > Right-click",
     "description": "Mirror or flip selected vertex weights across the local X axis",
@@ -22,7 +22,7 @@ from mathutils.kdtree import KDTree
 _LONG_SIDE_RE = re.compile(r"left|right", re.IGNORECASE)
 _SHORT_SIDE_RE = re.compile(r"(?P<separator>[._\-\s])(?P<side>[lr])(?=$|[._\-\s]|\d)", re.IGNORECASE)
 _CONTEXT_MENU = None
-ADDON_VERSION = (1, 3, 0)
+ADDON_VERSION = (1, 3, 1)
 PACKAGE_ID = "faidlix_weight"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -195,7 +195,7 @@ def _neighborhood_shape_difference(source_lengths, target_lengths):
     return difference / max(len(source), len(target), 1)
 
 
-def _smart_mirror_candidate(mesh, tree, source_index, mirrored_co, tolerance, features, diagonal):
+def _smart_mirror_candidates(mesh, tree, source_index, mirrored_co, tolerance, features, diagonal):
     source = mesh.vertices[source_index]
     source_lengths = features['edge_lengths'][source_index]
     local_scale = sum(source_lengths) / len(source_lengths) if source_lengths else diagonal * 0.01
@@ -235,13 +235,61 @@ def _smart_mirror_candidate(mesh, tree, source_index, mirrored_co, tolerance, fe
         )
         candidates.append((score, distance, target_index))
 
-    if not candidates:
-        return None
     candidates.sort()
-    best_score, _distance, best_index = candidates[0]
-    if best_score > 3.0:
-        return None
-    return best_index
+    return [candidate for candidate in candidates if candidate[0] <= 3.0]
+
+
+def _assign_unique_targets(candidate_map, reserved_targets=()):
+    """Return a maximum one-to-one assignment using ranked smart candidates.
+
+    An augmenting path lets a source that loses a contested target move to its
+    next-best candidate instead of cancelling the whole operation. Sources
+    with fewer choices are attempted first so constrained points keep their
+    only viable match.
+    """
+    reserved = set(reserved_targets)
+    source_to_target = {}
+    target_to_source = {}
+
+    def assign(start_source):
+        source_queue = [start_source]
+        queue_index = 0
+        visited_sources = {start_source}
+        visited_targets = set()
+        parent_source_by_target = {}
+
+        while queue_index < len(source_queue):
+            source_index = source_queue[queue_index]
+            queue_index += 1
+            for _score, _distance, target_index in candidate_map.get(source_index, ()):
+                if target_index in reserved or target_index in visited_targets:
+                    continue
+                visited_targets.add(target_index)
+                parent_source_by_target[target_index] = source_index
+                current_source = target_to_source.get(target_index)
+                if current_source is None:
+                    free_target = target_index
+                    while True:
+                        assigned_source = parent_source_by_target[free_target]
+                        previous_target = source_to_target.get(assigned_source)
+                        target_to_source[free_target] = assigned_source
+                        source_to_target[assigned_source] = free_target
+                        if previous_target is None:
+                            return True
+                        free_target = previous_target
+                if current_source not in visited_sources:
+                    visited_sources.add(current_source)
+                    source_queue.append(current_source)
+        return False
+
+    def source_priority(source_index):
+        candidates = candidate_map.get(source_index, ())
+        best_score = candidates[0][0] if candidates else float('inf')
+        return len(candidates), best_score, source_index
+
+    for source_index in sorted(candidate_map, key=source_priority):
+        assign(source_index)
+    return source_to_target
 
 
 def _mirror_map(obj, indices, smart=True):
@@ -258,7 +306,9 @@ def _mirror_map(obj, indices, smart=True):
     center = []
     smart_matches = []
     features = _topology_features(mesh) if smart else None
-    for index in indices:
+    exact_candidates = []
+    unresolved = []
+    for index in sorted(indices):
         vertex = mesh.vertices[index]
         if abs(vertex.co.x) <= tolerance:
             center.append(index)
@@ -266,10 +316,24 @@ def _mirror_map(obj, indices, smart=True):
         mirrored_co = Vector((-vertex.co.x, vertex.co.y, vertex.co.z))
         _co, target_index, distance = tree.find(mirrored_co)
         if target_index is not None and distance <= tolerance and target_index != index:
-            mapping[index] = target_index
+            exact_candidates.append((distance, index, target_index))
+        else:
+            unresolved.append((index, mirrored_co))
+
+    reserved_targets = set()
+    for _distance, index, target_index in sorted(exact_candidates):
+        if target_index in reserved_targets:
+            mirrored_co = Vector((-mesh.vertices[index].co.x,
+                                  mesh.vertices[index].co.y,
+                                  mesh.vertices[index].co.z))
+            unresolved.append((index, mirrored_co))
             continue
-        if smart:
-            target_index = _smart_mirror_candidate(
+        mapping[index] = target_index
+        reserved_targets.add(target_index)
+
+    if smart:
+        candidate_map = {
+            index: _smart_mirror_candidates(
                 mesh,
                 tree,
                 index,
@@ -278,11 +342,17 @@ def _mirror_map(obj, indices, smart=True):
                 features,
                 diagonal,
             )
-            if target_index is not None:
-                mapping[index] = target_index
-                smart_matches.append(index)
-                continue
-        missing.append(index)
+            for index, mirrored_co in unresolved
+        }
+        smart_mapping = _assign_unique_targets(candidate_map, reserved_targets)
+        mapping.update(smart_mapping)
+        smart_matches.extend(sorted(smart_mapping))
+        missing.extend(
+            index for index, _mirrored_co in unresolved
+            if index not in smart_mapping
+        )
+    else:
+        missing.extend(index for index, _mirrored_co in unresolved)
     return mapping, missing, center, tolerance, smart_matches
 
 

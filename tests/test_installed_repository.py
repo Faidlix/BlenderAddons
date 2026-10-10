@@ -38,7 +38,7 @@ assert bone_remap.ui.ADDON_VERSION == (0, 6, 8)
 assert bone_remap.updater.GITHUB_REPOSITORY_URL == URL
 assert outliner.ADDON_VERSION == (0, 2, 17)
 assert outliner.GITHUB_REPOSITORY_URL == URL
-assert weight.ADDON_VERSION == (1, 3, 0)
+assert weight.ADDON_VERSION == (1, 3, 1)
 assert weight.GITHUB_REPOSITORY_URL == URL
 assert manager.ADDON_VERSION == (1, 1, 3)
 assert manager.REPOSITORY_URL == URL

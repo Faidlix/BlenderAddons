@@ -1,4 +1,4 @@
-# Faidlix_Weight 1.3.0
+# Faidlix_Weight 1.3.1
 
 Blender 5.2 add-on for copying selected Weight Paint vertex weights across the
 object's local X axis.
@@ -15,6 +15,11 @@ local-X mirror. If that fails, it searches nearby vertices using mirrored
 relative position, connected-edge count, adjacent-face count, boundary state,
 and normalized neighboring-edge lengths. Disable Smart Match when only exact
 symmetry should be accepted.
+
+Smart Match assigns targets globally and one-to-one. Exact mirrors are reserved
+first; when sources compete for a nearby target, the displaced source tries its
+next-best topology candidate. Points without a unique match are skipped instead
+of cancelling the entire operation.
 
 With Flip disabled, selected weights are copied to the opposite side. With
 Flip enabled, weights from the opposite side are copied onto the selected
