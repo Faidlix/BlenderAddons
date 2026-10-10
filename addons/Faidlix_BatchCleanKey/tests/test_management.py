@@ -100,7 +100,7 @@ assert snapshot == [(c.data_path, core.snapshot(c)) for c in bag.fcurves]
 core.assign_action(bpy.context, obj, act)
 steps = core.process_steps(bpy.context, obj, ['Hand.L'], [act], 'DELETE')
 progress = next(steps)
-assert progress[0] == 1 and progress[1] == 5
+assert progress[0] == 1 and progress[1] == len(core.target_curves(act,obj,['Hand.L']))
 steps.close()
 assert [(c.data_path, core.snapshot(c)) for c in bag.fcurves] == snapshot
 steps = core.process_steps(bpy.context, obj, ['Hand.L'], [act], 'DELETE')

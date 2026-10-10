@@ -74,16 +74,46 @@ def actual_range(action):
 
 
 def pad_bone_bounds(action,obj):
-    """Pad existing bone curves only, in this rig's slot; never create new channels."""
+    """Pad every bone's active TRS representation, restricted to the rig slot."""
     if not action.is_editable: return 0
+    bounds=actual_range(action)
+    slot=slot_for(action,obj)
+    if not bounds or not slot: return 0
+    bags=[s.channelbag(slot) for l in action.layers for s in l.strips
+          if s.type=='KEYFRAME' and s.channelbag(slot)]
+    if len(bags)>1: raise ValueError('多層 Action 無法直接補頭尾 Key')
+    if not bags:
+        layer=action.layers[0] if action.layers else action.layers.new('Layer')
+        bags=[layer.strips.new(type='KEYFRAME').channelbag(slot,ensure=True)]
+    bag=bags[0]; start,end=bounds; added=0
     curves=target_curves(action,obj,[b.name for b in obj.pose.bones])
-    times=[float(p.co.x) for c in curves for pts in (c.keyframe_points,c.sampled_points) for p in pts]
-    if not times: return 0
-    start,end=min(times),max(times); added=0
+    # Static channels keep the rig's current local pose, rather than resetting it.
+    for bone in obj.pose.bones:
+        rotation=('rotation_quaternion' if bone.rotation_mode=='QUATERNION' else
+                  'rotation_axis_angle' if bone.rotation_mode=='AXIS_ANGLE' else 'rotation_euler')
+        for prop in ('location',rotation,'scale'):
+            path=bone.path_from_id(prop)
+            for index,value in enumerate(getattr(bone,prop)):
+                curve=bag.fcurves.find(path,index=index)
+                if curve is None or not rotation_has_data(curve):
+                    if curve is None: curve=bag.fcurves.new(path,index=index)
+                    for frame in sorted({start,end}):
+                        p=curve.keyframe_points.insert(frame,value,options={'FAST'})
+                        p.interpolation='BEZIER'; p.handle_left_type=p.handle_right_type='AUTO_CLAMPED'
+                        added+=1
+                    curve.update()
     for c in curves:
-        if not c.keyframe_points or c.sampled_points or c.modifiers: continue
-        existing={float(p.co.x) for p in c.keyframe_points}
-        pending=[(f,c.evaluate(f)) for f in {start,end} if f not in existing]
+        if c.sampled_points:
+            import math
+            c.convert_to_keyframes(math.floor(start),math.ceil(end))
+        # Preserve modifiers and add underlying keys without evaluating them twice.
+        muted=[m.mute for m in c.modifiers]
+        try:
+            for m in c.modifiers: m.mute=True
+            existing={float(p.co.x) for p in c.keyframe_points}
+            pending=[(f,c.evaluate(f)) for f in sorted({start,end}) if f not in existing]
+        finally:
+            for m,mute in zip(c.modifiers,muted): m.mute=mute
         for frame,value in pending:
             p=c.keyframe_points.insert(frame,value,options={'FAST'})
             p.interpolation='BEZIER'; p.handle_left_type=p.handle_right_type='AUTO_CLAMPED'; added+=1
@@ -245,7 +275,7 @@ def rotation_has_data(curve):
     return bool(curve.keyframe_points or curve.sampled_points or curve.modifiers)
 
 
-def loop_copy_steps(action, obj, smooth=True, step=1.0):
+def loop_copy_steps(action, obj, smooth=True, step=1.0, keyed_only=False):
     """Bake evaluated curves to a cancellable, unlocked loop copy; preserve source."""
     import math
     slot = slot_for(action, obj)
@@ -261,14 +291,17 @@ def loop_copy_steps(action, obj, smooth=True, step=1.0):
     step = max(step,.01)
     start,end = bounds
     count = math.ceil((end-start)/step)
-    if count > 200000:
+    if not keyed_only and count > 200000:
         raise ValueError('循環取樣過多，請增加間隔')
     times = {start,end}
-    times.update(start+i*step for i in range(count) if start+i*step<end)
+    if not keyed_only:
+        times.update(start+i*step for i in range(count) if start+i*step<end)
     times.update(float(p.co.x) for c in bags[0].fcurves for p in c.keyframe_points)
     times = sorted(times)
-    source_curves = [c for c in bags[0].fcurves if rotation_has_data(c)]
-    total = len(times)*len(source_curves)*2
+    source_curves = [c for c in bags[0].fcurves if
+                     (bool(c.keyframe_points or c.sampled_points) if keyed_only else rotation_has_data(c))]
+    total = (sum(len({start,end}|{float(p.co.x) for pts in (c.keyframe_points,c.sampled_points) for p in pts}) for c in source_curves)*2
+             if keyed_only else len(times)*len(source_curves)*2)
     if total > 4000000:
         raise ValueError('循環取樣過多，請增加間隔')
     copy = action.copy()
@@ -279,9 +312,16 @@ def loop_copy_steps(action, obj, smooth=True, step=1.0):
         bag = next(s.channelbag(copied_slot) for l in copy.layers for s in l.strips
                    if s.type=='KEYFRAME' and s.channelbag(copied_slot))
         done = 0
-        for curve in [c for c in bag.fcurves if rotation_has_data(c)]:
+        for curve in [c for c in bag.fcurves if (bool(c.keyframe_points or c.sampled_points) if keyed_only else rotation_has_data(c))]:
+            curve_times=sorted({start,end}|{float(p.co.x) for pts in (curve.keyframe_points,curve.sampled_points) for p in pts}) if keyed_only else times
+            if keyed_only and not curve.sampled_points and all(m.type=='CYCLES' for m in curve.modifiers):
+                for modifier in list(curve.modifiers): curve.modifiers.remove(modifier)
+                curve.lock=curve.mute=False
+                done+=len(curve_times)*2
+                yield done,total,copy.name
+                continue
             values = []
-            for frame in times:
+            for frame in curve_times:
                 values.append(curve.evaluate(frame))
                 done += 1
                 yield done,total,copy.name
@@ -290,19 +330,20 @@ def loop_copy_steps(action, obj, smooth=True, step=1.0):
             if curve.sampled_points:
                 curve.convert_to_keyframes(math.floor(start),math.ceil(end))
             curve.keyframe_points.clear()
-            curve.keyframe_points.add(len(times))
+            curve.keyframe_points.add(len(curve_times))
             curve.lock = curve.mute = False
-            for i,(frame,value) in enumerate(zip(times,values)):
+            for i,(frame,value) in enumerate(zip(curve_times,values)):
                 p=curve.keyframe_points[i]
-                p.co=frame,value; p.interpolation='LINEAR'
+                p.co=frame,value; p.interpolation='BEZIER' if keyed_only else 'LINEAR'
+                p.handle_left_type=p.handle_right_type='AUTO_CLAMPED'
                 done += 1
                 if i%128==0:
                     yield done,total,copy.name
             first,last=curve.keyframe_points[0],curve.keyframe_points[-1]
             last.co.y=first.co.y
             if smooth:
-                slope=(values[1]-values[0])/(times[1]-times[0])
-                for p,span in ((first,times[1]-start),(last,end-times[-2])):
+                slope=(values[1]-values[0])/(curve_times[1]-curve_times[0])
+                for p,span in ((first,curve_times[1]-start),(last,end-curve_times[-2])):
                     d=span/3
                     p.handle_left_type=p.handle_right_type='FREE'
                     p.handle_left=(p.co.x-d,first.co.y-slope*d)
@@ -311,6 +352,8 @@ def loop_copy_steps(action, obj, smooth=True, step=1.0):
                 curve.keyframe_points[-2].interpolation='BEZIER'
             curve.update()
             yield done,total,copy.name
+        if keyed_only:
+            make_loop(copy,obj,smooth)
         sync_ranges([copy])
         return copy
     except BaseException:

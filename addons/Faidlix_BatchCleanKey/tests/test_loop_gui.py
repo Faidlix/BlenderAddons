@@ -41,7 +41,7 @@ def test():
    state=bpy.context.window_manager.faidlix_batch_clean_key
    if stage==0:
     bpy.ops.ed.undo_push(message='Loop fixture')
-    assert bpy.ops.faidlix_batch_clean_key.loop('INVOKE_DEFAULT',action_name=action.name,sample_step=.01)=={'RUNNING_MODAL'}
+    assert bpy.ops.faidlix_batch_clean_key.loop('INVOKE_DEFAULT',action_name=action.name,sample_step=1,keyed_only=False)=={'RUNNING_MODAL'}
     stage=1
    elif stage==1:
     bpy.ops.screen.screenshot(filepath=str(OUT/'loop-bake-dialog.png'))
@@ -61,7 +61,7 @@ def test():
     if state.running: return .05
     assert before==digest() and not bpy.data.actions.get('LoopBlocked_Loop')
     assert obj.animation_data.action==action and not state.loop_job
-    bpy.ops.faidlix_batch_clean_key.loop('INVOKE_DEFAULT',action_name=action.name,sample_step=1)
+    bpy.ops.faidlix_batch_clean_key.loop('INVOKE_DEFAULT',action_name=action.name,sample_step=1,keyed_only=False)
     stage=4
    elif stage==4:
     bpy.context.window.event_simulate(type='RET',value='PRESS')

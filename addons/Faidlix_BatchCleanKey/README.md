@@ -62,3 +62,9 @@ Blender 5.2+ 獨立 Extension。Pose Mode 選取骨骼後，在 3D View、Dope S
 `https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json`
 
 授權 GPL-3.0-or-later。無其他 Faidlix 外掛相依。
+
+### 1.4.1
+
+- 切換 Action 先依實際 Key 更新時間軸，再為指定骨架所有骨骼補齊頭尾位置、目前旋轉模式、縮放 Key。保留既有 Key 與修飾器；取樣曲線先轉為 Key。
+- 循環新增「只處理已有 Key」文字選項（預設開啟），只保留各曲線原 Key 位置並補共同頭尾；不建立未動畫通道、不逐格烘焙，隱藏烘焙間隔。
+- 循環副本自動處理 Cycles、鎖定及停用；其他修飾器在原 Key 取樣，影格間為近似。來源保留，可取消與復原。

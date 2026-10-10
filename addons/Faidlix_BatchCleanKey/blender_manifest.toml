@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "faidlix_batch_clean_key"
-version = "1.4.0"
+version = "1.4.1"
 name = "Faidlix_BatchCleanKey"
 tagline = "Batch clean, delete or decimate keys for selected bones"
 maintainer = "Faidlix"

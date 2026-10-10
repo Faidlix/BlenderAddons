@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror
 
-ADDON_VERSION = '1.4.0'
+ADDON_VERSION = '1.4.1'
 _sync_signature = None
 _refreshing = False
 _rig_choices={'CURRENT':('CURRENT','原骨架','使用目前工具指定的骨架')}
@@ -26,8 +26,8 @@ def browser_changed(state, context):
     if obj and action:
         try:
             core.assign_action(context, obj, action)
-            core.pad_bone_bounds(action,obj)
             core.sync_scene_range(context.scene, action)
+            core.pad_bone_bounds(action,obj)
             for item in state.browser:
                 item.selected = item.action == action
             redraw(context)
@@ -136,6 +136,7 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     loop_action: PointerProperty(type=bpy.types.Action)
     loop_smooth: BoolProperty(default=True)
     loop_step: IntProperty(default=1, min=1)
+    loop_keyed_only: BoolProperty(default=False)
     rotation_target: EnumProperty(name='轉換方向', items=[('XYZ', 'Quaternion → XYZ Euler', ''),
                     ('QUATERNION', 'XYZ Euler → Quaternion', '')])
     sample_step: IntProperty(name='烘焙間隔（影格）', default=1, min=1, max=100)
@@ -446,7 +447,7 @@ def result_text(result):
     if 'flip_action' in result:
         return '已翻轉 Action：'+result['flip_action']
     if 'loop_action' in result:
-        return '已建立烘焙循環副本：' + result['loop_action']
+        return '已建立循環副本：' + result['loop_action']
     if 'samples' in result:
         return f'{result["actions"]} Actions，{result["bones"]} 骨骼，{result["samples"]} 旋轉取樣'
     return f'{result["actions"]} Actions，移除 {result["removed"]} Keys，略過 {result["skipped"]} 項'
@@ -464,7 +465,7 @@ def processing_steps(context):
         if not action or not obj or not obj.is_editable:
             raise ValueError('請選取可編輯骨架與 Action')
         def loop_steps():
-            copied = yield from core.loop_copy_steps(action,obj,state.loop_smooth,state.loop_step)
+            copied = yield from core.loop_copy_steps(action,obj,state.loop_smooth,state.loop_step,state.loop_keyed_only)
             try:
                 core.assign_action(context,obj,copied)
                 core.sync_scene_range(context.scene,copied)
@@ -654,8 +655,8 @@ class BCK_OT_Switch(bpy.types.Operator):
             return {'CANCELLED'}
         try:
             core.assign_action(context, obj, action)
-            core.pad_bone_bounds(action,obj)
             core.sync_scene_range(context.scene, action)
+            core.pad_bone_bounds(action,obj)
         except ValueError as exc:
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
@@ -699,6 +700,7 @@ class BCK_OT_Loop(bpy.types.Operator):
     bl_options = {'UNDO'}
     action_name: StringProperty()
     smooth: BoolProperty(name='銜接頭尾斜率', default=True)
+    keyed_only: BoolProperty(name='只處理已有 Key', default=True)
     bake_copy: BoolProperty(name='建立烘焙／解鎖循環副本', default=False)
     sample_step: IntProperty(name='烘焙間隔',default=1,min=1)
 
@@ -712,27 +714,33 @@ class BCK_OT_Loop(bpy.types.Operator):
                 self.report({'ERROR'}, str(exc))
                 return {'CANCELLED'}
             self.bake_copy = True
-            self._summary = str(exc)
+            self._summary = '將在循環副本自動處理修飾器／取樣與鎖定'
         return context.window_manager.invoke_props_dialog(self, width=460, confirm_text='建立循環')
 
     def draw(self, context):
         self.layout.label(text=self.action_name)
         self.layout.label(text=getattr(self, '_summary', ''))
         self.layout.prop(self, 'smooth')
-        self.layout.prop(self, 'bake_copy')
-        if self.bake_copy:
+        self.layout.prop(self, 'keyed_only', toggle=True)
+        if not self.keyed_only:
+            self.layout.prop(self, 'bake_copy')
+        if self.bake_copy and not self.keyed_only:
             self.layout.prop(self,'sample_step')
             self.layout.label(text='保留來源，副本烘焙修飾器／取樣資料，解除鎖定並啟用停用曲線')
+        if self.keyed_only:
+            self.layout.label(text='保留原始 Key 位置，只補共同頭尾；副本自動移除 Cycles')
+            self.layout.label(text='其他修飾器只在原 Key 取值，影格之間為近似')
         self.layout.label(text='較短曲線補頭尾 Key；尾端值改成開頭值')
         self.layout.label(text='銜接斜率會調整接縫控制柄及鄰接段插值；Ctrl+Z 復原')
 
     def execute(self, context):
-        if self.bake_copy:
+        if self.bake_copy or self.keyed_only:
             state = context.window_manager.faidlix_batch_clean_key
             state.loop_job, state.rotation_job = True, False
             state.flip_job=False
             state.loop_action = bpy.data.actions.get(self.action_name)
             state.loop_smooth, state.loop_step = self.smooth, self.sample_step
+            state.loop_keyed_only = self.keyed_only
             return run_sync(self,context) if bpy.app.background else launch_batch(context)
         try:
             action = bpy.data.actions.get(self.action_name)
