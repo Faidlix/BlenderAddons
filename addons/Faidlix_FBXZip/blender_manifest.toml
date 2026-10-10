@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "faidlix_fbx_zip_exporter"
-version = "1.8.5"
+version = "1.8.6"
 name = "Faidlix_Fbx ZipExporter"
 tagline = "Export selected actions and material textures to FBX ZIP"
 maintainer = "Faidlix"

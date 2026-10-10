@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 5),
+    "version": (1, 8, 6),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -32,7 +32,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 5)
+ADDON_VERSION = (1, 8, 6)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -40,6 +40,40 @@ REPOSITORY_URL = (
 )
 _UPDATE_STATUS = ""
 _UPDATE_STATUS_GENERATION = 0
+
+
+class _ExportProgress:
+    """Show package progress in Blender's native status bar."""
+
+    def __init__(self, context):
+        self.window_manager = context.window_manager
+        self.workspace = getattr(context, "workspace", None)
+        self.active = False
+
+    def begin(self, text="準備打包"):
+        self.window_manager.progress_begin(0, 100)
+        self.active = True
+        self.update(0, text)
+
+    def update(self, value, text):
+        if not self.active:
+            return
+        value = max(0, min(100, int(value)))
+        self.window_manager.progress_update(value)
+        if self.workspace:
+            self.workspace.status_text_set(
+                f"Faidlix FBX ZIP：{text}  {value}%"
+            )
+
+    def end(self):
+        if not self.active:
+            return
+        try:
+            self.window_manager.progress_end()
+        finally:
+            if self.workspace:
+                self.workspace.status_text_set(None)
+            self.active = False
 
 
 def _redraw_ui():
@@ -1183,9 +1217,12 @@ class FBXZIP_OT_export(Operator, ExportHelper):
         # used for this package export.
         _sync_to_native(self)
         node_restore, temporary_images, action_states = [], [], []
+        progress = _ExportProgress(context)
         with tempfile.TemporaryDirectory(prefix="faidlix_fbxzip_") as temp_dir:
             fbx_path = os.path.join(temp_dir, os.path.splitext(os.path.basename(output_zip))[0] + ".fbx")
+            progress.begin("準備輸出資料")
             try:
+                progress.update(5, "檢查材質與 Actions")
                 nodes = _all_image_nodes(objects)
                 packaged = []
                 if self.package_textures:
@@ -1194,7 +1231,12 @@ class FBXZIP_OT_export(Operator, ExportHelper):
                         for item in context.window_manager.fbxzip_texture_items
                         if item.include
                     }
-                    for image_name, item in texture_items.items():
+                    texture_total = max(1, len(texture_items))
+                    for texture_index, (image_name, item) in enumerate(texture_items.items(), 1):
+                        progress.update(
+                            8 + int(27 * (texture_index - 1) / texture_total),
+                            f"收集貼圖 {texture_index}/{len(texture_items)}",
+                        )
                         image = bpy.data.images.get(image_name)
                         if not image:
                             continue
@@ -1221,7 +1263,9 @@ class FBXZIP_OT_export(Operator, ExportHelper):
                             if node.image == image:
                                 node_restore.append((node, image))
                                 node.image = staged
+                    progress.update(35, f"已收集 {len(packaged)} 張貼圖")
                 if selected_actions:
+                    progress.update(38, "準備動畫 Actions")
                     action_states = _setup_action_strips(objects, selected_actions)
                 options = self._fbx_options(fbx_path)
                 if selected_actions:
@@ -1230,31 +1274,46 @@ class FBXZIP_OT_export(Operator, ExportHelper):
                 if self.package_textures:
                     # Portable references; the original graph and image datablocks are restored.
                     options['path_mode'] = 'COPY' if self.embed_textures else 'STRIP'
+                progress.update(42, "輸出 FBX")
                 result = bpy.ops.export_scene.fbx(**options)
                 if "FINISHED" not in result or not os.path.isfile(fbx_path):
                     raise RuntimeError("FBX 匯出失敗")
+                progress.update(75, "FBX 輸出完成")
                 temporary_zip = output_zip + '.partial'
+                archive_entries = [
+                    (full, os.path.basename(full))
+                    for full in ([fbx_path] if self.keep_fbx else []) + packaged
+                ]
+                # Native COPY references the companion .fbm directory.
+                if self.package_textures and self.embed_textures:
+                    media_dir = os.path.splitext(fbx_path)[0] + '.fbm'
+                    if os.path.isdir(media_dir):
+                        for directory, _, filenames in os.walk(media_dir):
+                            for filename in filenames:
+                                full = os.path.join(directory, filename)
+                                archive_entries.append((full, os.path.relpath(full, temp_dir)))
                 with zipfile.ZipFile(temporary_zip, "w", zipfile.ZIP_DEFLATED) as archive:
-                    for full in ([fbx_path] if self.keep_fbx else []) + packaged:
-                        archive.write(full, os.path.basename(full))
-                    # Native COPY references the companion .fbm directory.
-                    if self.package_textures and self.embed_textures:
-                        media_dir = os.path.splitext(fbx_path)[0] + '.fbm'
-                        if os.path.isdir(media_dir):
-                            for directory, _, filenames in os.walk(media_dir):
-                                for filename in filenames:
-                                    full = os.path.join(directory, filename)
-                                    archive.write(full, os.path.relpath(full, temp_dir))
+                    archive_total = max(1, len(archive_entries))
+                    for archive_index, (full, archive_name) in enumerate(archive_entries, 1):
+                        progress.update(
+                            78 + int(20 * (archive_index - 1) / archive_total),
+                            f"壓縮 ZIP {archive_index}/{len(archive_entries)}",
+                        )
+                        archive.write(full, archive_name)
                 os.replace(temporary_zip, output_zip)
+                progress.update(100, "打包完成")
             except Exception as exc:
                 self.report({"ERROR"}, f"FBX ZIP 匯出失敗：{exc}")
                 return {"CANCELLED"}
             finally:
-                _restore_action_strips(action_states)
-                for node, image in reversed(node_restore):
-                    node.image = image
-                for image in temporary_images:
-                    bpy.data.images.remove(image)
+                try:
+                    _restore_action_strips(action_states)
+                    for node, image in reversed(node_restore):
+                        node.image = image
+                    for image in temporary_images:
+                        bpy.data.images.remove(image)
+                finally:
+                    progress.end()
         self.report({"INFO"}, f"已輸出：{output_zip}")
         return {"FINISHED"}
 

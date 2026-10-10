@@ -17,8 +17,8 @@ addon_module = os.environ.get('FBXZIP_ADDON_MODULE', 'Faidlix_FBXZip')
 sys.path.insert(0, addon_parent)
 addon = importlib.import_module(addon_module)
 addon.register()
-assert addon.bl_info['version'] == (1, 8, 5)
-assert addon.ADDON_VERSION == (1, 8, 5)
+assert addon.bl_info['version'] == (1, 8, 6)
+assert addon.ADDON_VERSION == (1, 8, 6)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
@@ -29,6 +29,46 @@ assert 'DEFAULT_CLOSED' in addon.FBXZIP_PT_panel.bl_options
 assert hasattr(bpy.types, 'EXPORT_SCENE_OT_fbx_zip_online_update')
 assert addon.REPOSITORY_URL == 'https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json'
 assert addon._normalized_url(addon._fresh_repository_url()) == addon._normalized_url(addon.REPOSITORY_URL)
+
+
+class _ProgressWindowManagerProbe:
+    def __init__(self):
+        self.events = []
+
+    def progress_begin(self, minimum, maximum):
+        self.events.append(('begin', minimum, maximum))
+
+    def progress_update(self, value):
+        self.events.append(('update', value))
+
+    def progress_end(self):
+        self.events.append(('end',))
+
+
+class _ProgressWorkspaceProbe:
+    def __init__(self):
+        self.texts = []
+
+    def status_text_set(self, text):
+        self.texts.append(text)
+
+
+progress_wm = _ProgressWindowManagerProbe()
+progress_workspace = _ProgressWorkspaceProbe()
+progress_context = type(
+    '_ProgressContextProbe', (),
+    {'window_manager': progress_wm, 'workspace': progress_workspace},
+)()
+progress = addon._ExportProgress(progress_context)
+progress.begin('準備')
+progress.update(42, '輸出 FBX')
+progress.end()
+assert progress_wm.events == [
+    ('begin', 0, 100), ('update', 0), ('update', 42), ('end',),
+]
+assert progress_workspace.texts == [
+    'Faidlix FBX ZIP：準備  0%', 'Faidlix FBX ZIP：輸出 FBX  42%', None,
+]
 
 
 class _PanelLayoutProbe:
