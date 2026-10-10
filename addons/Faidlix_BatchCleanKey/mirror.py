@@ -10,7 +10,7 @@ TRS={'location','rotation_euler','rotation_quaternion','rotation_axis_angle','sc
 
 
 def steps(context,obj,source,mode='COPY',step=1,keyed_only=False):
-    if not source or not obj or not obj.is_editable or step<.01 or not math.isfinite(step):
+    if not source or not obj or not obj.is_editable or (not keyed_only and (step<.01 or not math.isfinite(step))):
         raise ValueError('骨架、Action 或取樣間隔無效')
     slot=core.slot_for(source,obj)
     bags=[s.channelbag(slot) for l in source.layers for s in l.strips
@@ -28,19 +28,24 @@ def steps(context,obj,source,mode='COPY',step=1,keyed_only=False):
             if key in keyed: raise ValueError(name+'：重複變換通道，無法確定有效曲線')
             keyed[key]=c
         else: other.append((c,name,suffix))
-    frames={float(p.co.x) for c in curves for pts in (c.keyframe_points,c.sampled_points) for p in pts}
+    source_times={key:sorted({float(p.co.x) for pts in (c.keyframe_points,c.sampled_points) for p in pts})
+                  for key,c in keyed.items()}
+    frame_curves=keyed.values() if keyed_only else curves
+    frames={float(p.co.x) for c in frame_curves for pts in (c.keyframe_points,c.sampled_points) for p in pts}
     if not frames: raise ValueError('Action 沒有可翻轉的 Key')
     start,end=min(frames),max(frames)
-    count=math.ceil((end-start)/step)
-    if count>200000: raise ValueError('取樣過多，請增加間隔')
-    frames.update(start+i*step for i in range(count) if start+i*step<end)
+    if not keyed_only:
+        count=math.ceil((end-start)/step)
+        if count>200000: raise ValueError('取樣過多，請增加間隔')
+        frames.update(start+i*step for i in range(count) if start+i*step<end)
     frames=sorted(frames)
     bones=sorted(obj.data.bones,key=lambda b:len(b.parent_recursive))
     pairs={b.name:bpy.utils.flip_name(b.name) for b in bones
            if bpy.utils.flip_name(b.name) in obj.data.bones}
     active={name for name,prop,index in keyed if core.rotation_has_data(keyed[name,prop,index])}
     keyed_mask={(pairs[n],p,i) for (n,p,i),c in keyed.items()
-                if n in pairs and core.rotation_has_data(c)}
+                if n in pairs and (bool(source_times[n,p,i]) if keyed_only else core.rotation_has_data(c))}
+    output_times={(pairs[n],p,i):times for (n,p,i),times in source_times.items() if n in pairs and times}
     output_props={n:{p for d,p,i in keyed_mask if d==n} for n in pairs}
     affected={n for n,p,i in keyed_mask} if keyed_only else (set(pairs) if any(n in pairs for n in active) else set())
     if not affected: raise ValueError('沒有可配對的骨骼變換 Key')
@@ -57,7 +62,7 @@ def steps(context,obj,source,mode='COPY',step=1,keyed_only=False):
     values={n:[] for n in affected}; previous={}
     # Missing channels retain the rig's current values, rather than an identity pose.
     defaults={b.name:{p:tuple(getattr(b,p)) for p in TRS} for b in obj.pose.bones}
-    total=len(frames)*len(bones)+len(frames)*len(affected)*10; done=0
+    total=len(frames)*len(bones)+(sum(len(times) for times in output_times.values()) if keyed_only else len(frames)*len(affected)*10); done=0
     def components(name,prop,defaults,frame):
         return [keyed[name,prop,i].evaluate(frame) if (name,prop,i) in keyed and not keyed[name,prop,i].mute and core.rotation_has_data(keyed[name,prop,i]) else v for i,v in enumerate(defaults)]
     copied=None
@@ -126,11 +131,12 @@ def steps(context,obj,source,mode='COPY',step=1,keyed_only=False):
             if suffix[1:] in TRS:
                 if ((not keyed_only and n in affected) or
                     (keyed_only and ((n,suffix[1:],c.array_index) in keyed_mask or
-                     ((n,suffix[1:],c.array_index) in keyed and core.rotation_has_data(c))))):
+                     bool(source_times.get((n,suffix[1:],c.array_index)))))):
                     bag.fcurves.remove(c)
             elif not keyed_only or core.rotation_has_data(c):
                 c.data_path=obj.pose.bones[pairs[n]].path_from_id()+suffix
         orders={}
+        frame_indices={frame:j for j,frame in enumerate(frames)}
         for n,samples in values.items():
             rm=modes[pairs[n]]
             if rm not in {'QUATERNION','AXIS_ANGLE'} and (not keyed_only or 'rotation_euler' in output_props[n]): orders[n]=rm
@@ -139,9 +145,12 @@ def steps(context,obj,source,mode='COPY',step=1,keyed_only=False):
                     if keyed_only and (n,prop,i) not in keyed_mask: continue
                     c=bag.fcurves.new(obj.pose.bones[n].path_from_id()+'.'+prop,index=i)
                     c.group=bag.groups.get(n) or bag.groups.new(n)
-                    c.keyframe_points.add(len(frames))
-                    for j,(frame,sample) in enumerate(zip(frames,samples)):
-                        p=c.keyframe_points[j]; p.co=frame,sample[prop][i]; p.interpolation='LINEAR'
+                    curve_frames=output_times[n,prop,i] if keyed_only else frames
+                    c.keyframe_points.add(len(curve_frames))
+                    for j,frame in enumerate(curve_frames):
+                        sample=samples[frame_indices[frame]]
+                        p=c.keyframe_points[j]; p.co=frame,sample[prop][i]; p.interpolation='BEZIER'
+                        p.handle_left_type=p.handle_right_type='AUTO_CLAMPED'
                         done+=1
                         if j%128==0: yield done,total,source.name+'（寫入翻轉副本）'
                     c.update()

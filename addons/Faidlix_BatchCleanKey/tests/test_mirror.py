@@ -59,6 +59,7 @@ assert digest(a)==original and not any(x.name.startswith('__BCK_Mirror__') for x
 result=consume(addon.ui.mirror.steps(bpy.context,obj,a,'COPY',.25))
 flipped=bpy.data.actions[result['flip_action']]
 assert digest(a)==original and flipped!=a
+assert all(p.interpolation=='BEZIER' for c in addon.core.action_curves(flipped) for p in c.keyframe_points)
 reflect=Matrix.Diagonal((-1,1,1,1)); maxerror=0
 for t in times:
  bpy.context.scene.frame_set(int(t),subframe=t%1)

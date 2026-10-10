@@ -780,7 +780,7 @@ class BCK_OT_Flip(bpy.types.Operator):
     action_name: StringProperty()
     sample_step: IntProperty(name='烘焙間隔（影格）',default=1,min=1,max=100)
     keyed_only: BoolProperty(name='只翻轉有下 Key 的部分',default=False,
-        description='只交換有動畫資料的骨骼通道；不新增未打 Key 的位置、旋轉或縮放分量')
+        description='只交換有動畫資料的分量，保留各曲線原有 Key 影格，不加入間隔取樣或其他曲線的 Key')
     mode: EnumProperty(items=[('COPY', '建立翻轉副本', '保留原 Action'),
                               ('IN_PLACE', '修改原 Action', '原 Action 的所有使用者都會受到影響')], default='COPY')
 
@@ -790,12 +790,15 @@ class BCK_OT_Flip(bpy.types.Operator):
     def draw(self, context):
         self.layout.label(text=self.action_name)
         self.layout.prop(self, 'mode', expand=True)
-        self.layout.prop(self, 'sample_step')
-        self.layout.prop(self, 'keyed_only')
+        row=self.layout.row(align=True)
+        row.prop(self, 'keyed_only', toggle=True)
+        if not self.keyed_only:
+            row.prop(self, 'sample_step')
         if self.keyed_only:
             self.layout.label(text='僅交換有 Key 的分量；未打 Key 的分量保留目前姿勢')
         self.layout.label(text='以骨架 X 軸翻轉，依 Blender 左右骨骼名稱配對')
-        self.layout.label(text='依骨骼靜止軸向換算；保留原 Key 時間並加入間隔取樣')
+        self.layout.label(text='保留各曲線原有 Key 影格，不補取樣 Key' if self.keyed_only else '依骨骼靜止軸向換算；保留原 Key 時間並加入間隔取樣')
+        self.layout.label(text='翻轉結果使用 Bezier 貝茲曲線')
 
     def execute(self, context):
         source, obj = bpy.data.actions.get(self.action_name), rig(context)

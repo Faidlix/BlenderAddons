@@ -7,9 +7,14 @@ addon=importlib.import_module(os.environ.get('BCK_TEST_MODULE','Faidlix_BatchCle
 bpy.context.preferences.view.show_splash=False
 bpy.context.preferences.filepaths.use_auto_save_temporary_files=False
 obj=bpy.context.object; source=bpy.data.actions['RestAwareMirror']
+keyed_only=os.environ.get('BCK_TEST_KEYED_MODE')=='1'
 addon.core.assign_action(bpy.context,obj,source)
 c=next(c for c in addon.core.action_curves(source) if c.data_path.endswith('.location'))
 c.keyframe_points.insert(500,c.evaluate(5))
+if keyed_only:
+ for frame in range(6,1206):
+  c.keyframe_points.insert(frame,c.evaluate(5),options={'FAST'})
+ c.update()
 def digest():
  a=bpy.data.actions['RestAwareMirror']
  return repr([(c.data_path,c.array_index,[m.type for m in c.modifiers],addon.core.snapshot(c)) for c in addon.core.action_curves(a)])
@@ -19,7 +24,6 @@ region=next(r for r in area.regions if r.type=='WINDOW')
 area.spaces.active.show_region_ui=True
 region_ui=next(r for r in area.regions if r.type=='UI')
 OUT=ROOT/'validation'; stage=0; started=time.monotonic()
-keyed_only=os.environ.get('BCK_TEST_KEYED_MODE')=='1'
 def event(kind):
  bpy.context.window.event_simulate(type=kind,value='PRESS')
  bpy.context.window.event_simulate(type=kind,value='RELEASE')
