@@ -1,10 +1,10 @@
 """Viewport toolbar for the selected-key transform session."""
 import bpy,blf,gpu
 from gpu_extras.batch import batch_for_shader
-LABELS=(('toggle','一起調整'),('PATH','連同路徑'),('KEEP_PATH','保留路徑'),('LOCAL','局部姿勢'),('settings','主控骨'),('close','×'))
+LABELS=(('toggle','動作一起調整'),('PATH','連同路徑'),('KEEP_PATH','保留路徑'),('LOCAL','局部姿勢'),('settings','主控骨'),('close','關閉'))
 def bounds(region,state):
  scale=bpy.context.preferences.system.ui_scale
- widths=[118,90,90,90,90,30] if state.adjust_mode=='KEEP_PATH' else [118,90,90,90,0,30]
+ widths=[150,90,90,90,230 if state.adjust_mode=='KEEP_PATH' else 0,60] if state.adjust_enabled else [150,0,0,0,0,60]
  widths=[w*scale for w in widths]; total=sum(widths)+8*scale
  x=max(8*scale,(region.width-total)/2); top=region.height-50*scale; h=30*scale
  result={}
@@ -26,9 +26,13 @@ def draw(owner):
    color=(.12,.32,.58,.95) if active else (.12,.12,.12,.94)
    batch=batch_for_shader(shader,'TRI_FAN',{'pos':[(x,y),(right,y),(right,top),(x,top)]})
    shader.bind(); shader.uniform_float('color',color); batch.draw(shader)
+   blf.size(0,int(13*context.preferences.system.ui_scale))
    text=dict(LABELS)[name]
    if name=='toggle': text+='：開' if s.adjust_enabled else '：關'
-   if name=='settings': text='主控骨 ▾'
+   if name=='settings':
+    text='主控骨：'+(s.adjust_root or '請選擇')+' ▾'
+    while len(text)>9 and blf.dimensions(0,text)[0]>right-x-16*context.preferences.system.ui_scale:
+     text=text[:-4]+'… ▾'
    blf.size(0,int(13*context.preferences.system.ui_scale)); blf.color(0,1,1,1,1)
    w,h=blf.dimensions(0,text); blf.position(0,x+(right-x-w)/2,y+(top-y-h)/2,0); blf.draw(0,text)
  finally: gpu.state.blend_set('NONE')

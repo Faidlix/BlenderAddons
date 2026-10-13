@@ -31,9 +31,11 @@ def tick():
     bpy.ops.ed.undo_push(message='HUD fixture'); bpy.ops.faidlix_batch_clean_key.adjust_toggle(); stage=1
    elif stage==1:
     assert s.adjust_toolbar_visible and s.adjust_enabled
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-v151.png')); click('toggle'); stage=2
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-v152.png')); click('toggle'); stage=2
    elif stage==2:
     assert s.adjust_toolbar_visible and not s.adjust_enabled and a.adjust_ui.WATCH
+    assert set(a.adjust_ui.adjust_hud.bounds(region,s))=={'toggle','close'}
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-paused-v152.png'))
     bpy.context.scene.tool_settings.use_keyframe_insert_auto=False
     event('G'); stage=3
    elif stage==3: event('X'); stage=4
@@ -41,19 +43,28 @@ def tick():
    elif stage==5: event('RET'); stage=6
    elif stage==6:
     assert digest()==before,'paused mode must not edit animation keys'
-    click('PATH'); stage=7
+    click('toggle'); stage=7
    elif stage==7:
-    assert s.adjust_mode=='PATH'; click('KEEP_PATH'); stage=8
+    assert s.adjust_enabled
+    click('KEEP_PATH'); stage=8
    elif stage==8:
     assert s.adjust_mode=='KEEP_PATH' and 'settings' in a.adjust_ui.adjust_hud.bounds(region,s)
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-paused-v151.png')); click('toggle'); stage=9
+    s.adjust_root='Root'; click('settings'); stage=9
    elif stage==9:
     assert s.adjust_enabled and s.adjust_toolbar_visible
-    click('close'); stage=10
+    for ch in 'Hand':
+     kind={'H':'H','a':'A','n':'N','d':'D'}[ch]
+     bpy.context.window.event_simulate(type=kind,value='PRESS',unicode=ch,x=region.x+region.width//2,y=region.y+region.height//2)
+     bpy.context.window.event_simulate(type=kind,value='RELEASE',x=region.x+region.width//2,y=region.y+region.height//2)
+    stage=91
+   elif stage==91: event('RET'); stage=92
+   elif stage==92:
+    assert s.adjust_root=='Hand',s.adjust_root
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-root-v152.png')); click('close'); stage=10
    elif stage==10:
     assert not s.adjust_enabled and not s.adjust_toolbar_visible and a.adjust_ui.WATCH is None
     assert digest()==before
-    (OUT/'adjust-hud-gui-result.txt').write_text('ADJUST_HUD_GUI_PASS physical_toggle pause_normal_G no_key_changes inline_modes close_X',encoding='utf-8')
+    (OUT/'adjust-hud-gui-result.txt').write_text('ADJUST_HUD_GUI_PASS physical_toggle pause_normal_G no_key_changes paused_compact direct_root_search_immediate close_label',encoding='utf-8')
     bpy.ops.wm.quit_blender(); return None
   return .4
  except Exception:

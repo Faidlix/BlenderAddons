@@ -17,13 +17,13 @@ def last_transform(context):
 def menu(self,context):
  if context.object and context.object.type=='ARMATURE' and context.object.mode=='POSE':
   self.layout.separator()
-  self.layout.operator('faidlix_batch_clean_key.adjust_toggle',text='一起調整：開／關' if state(context).adjust_toolbar_visible else '一起調整選取 Keys',icon='ACTION')
+  self.layout.operator('faidlix_batch_clean_key.adjust_toggle',text='動作一起調整：開／關' if state(context).adjust_toolbar_visible else '動作一起調整選取 Keys',icon='ACTION')
 
 def draw(layout,context):
  s=state(context); box=layout.box()
  row=box.row(align=True)
- row.operator('faidlix_batch_clean_key.adjust_toggle',text='一起調整：開' if s.adjust_enabled else ('一起調整：關' if s.adjust_toolbar_visible else '一起調整選取 Keys'),depress=s.adjust_enabled,icon='ACTION')
- if s.adjust_toolbar_visible: row.operator('faidlix_batch_clean_key.adjust_close',text='',icon='X')
+ row.operator('faidlix_batch_clean_key.adjust_toggle',text='動作一起調整：開' if s.adjust_enabled else ('動作一起調整：關' if s.adjust_toolbar_visible else '動作一起調整選取 Keys'),depress=s.adjust_enabled,icon='ACTION')
+ if s.adjust_toolbar_visible: row.operator('faidlix_batch_clean_key.adjust_close',text='關閉')
  if s.adjust_enabled:
   box.prop(s,'adjust_mode',expand=True)
   if s.adjust_mode=='KEEP_PATH':
@@ -34,7 +34,7 @@ def draw(layout,context):
 
 class BCK_OT_AdjustIK(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_ik'
- bl_label='一起調整：未選取的 IK 控制骨'
+ bl_label='動作一起調整：未選取的 IK 控制骨'
  choice: EnumProperty(items=[('AUTO','自動加入',''),('SELECTED','維持原選取','')],default='AUTO')
  signature: StringProperty()
  names: StringProperty()
@@ -51,7 +51,7 @@ class BCK_OT_AdjustIK(bpy.types.Operator):
 
 class BCK_OT_AdjustToggle(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_toggle'
- bl_label='一起調整選取 Keys'
+ bl_label='動作一起調整選取 Keys'
  @classmethod
  def poll(cls,context):
   return bool(context.object and context.object.type=='ARMATURE' and context.object.mode=='POSE' and not state(context).running and not state(context).pending)
@@ -75,7 +75,7 @@ class BCK_OT_AdjustToggle(bpy.types.Operator):
 
 class BCK_OT_AdjustWatch(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_watch'
- bl_label='一起調整模式'
+ bl_label='動作一起調整模式'
  bl_options={'INTERNAL'}
  def invoke(self,context,event):
   global WATCH
@@ -144,10 +144,10 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
      if not unchanged:
       # Remove the native preview undo step: one subsequent key edit is one Undo.
       r['deltas']={n:tuple(tuple(row) for row in d) for n,d in deltas.items()}
-      if not bpy.ops.ed.undo.poll(): s.last_result='無法建立安全復原步驟，取消一起調整'; return {'PASS_THROUGH'}
+      if not bpy.ops.ed.undo.poll(): s.last_result='無法建立安全復原步驟，取消動作一起調整'; return {'PASS_THROUGH'}
       bpy.ops.ed.undo()
       restore_context(context,r)
-      bpy.ops.ed.undo_push(message='一起調整（操作前）')
+      bpy.ops.ed.undo_push(message='動作一起調整（操作前）')
       state(context).adjust_enabled=True; state(context).adjust_toolbar_visible=True
       REQUEST=r
       bpy.ops.faidlix_batch_clean_key.adjust_apply('INVOKE_DEFAULT')
@@ -156,7 +156,7 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
      if op.bl_idname.startswith('TRANSFORM_OT_'):
       bpy.ops.ed.undo(); restore_context(context,r)
       state(context).adjust_enabled=True
-      state(context).last_result='此變換不支援一起調整，已取消；請使用 G／R／S'
+      state(context).last_result='此變換不支援動作一起調整，已取消；請使用 G／R／S'
    elif time.monotonic()-self.started>.2:
     self.restore_auto(context); self.request=None
   return {'PASS_THROUGH'}
@@ -186,7 +186,7 @@ def restore_context(context,r):
 
 class BCK_OT_AdjustApply(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_apply'
- bl_label='套用一起調整 Keys'
+ bl_label='套用動作一起調整 Keys'
  bl_options={'UNDO','INTERNAL'}
  def invoke(self,context,event):
   global REQUEST
@@ -210,7 +210,7 @@ class BCK_OT_AdjustApply(bpy.types.Operator):
    button=adjust_hud.hit(context,event,WATCH)
    if button: adjust_hud.click(context,button)
   if event.type=='ESC' or s.cancel_requested:
-   self.steps.close(); s.last_result='已取消一起調整，原 Keys 保留'; self.finish(context); return {'CANCELLED'}
+   self.steps.close(); s.last_result='已取消動作一起調整，原 Keys 保留'; self.finish(context); return {'CANCELLED'}
   if event.type!='TIMER': return {'RUNNING_MODAL'}
   try:
    deadline=time.perf_counter()+.008
@@ -223,7 +223,7 @@ class BCK_OT_AdjustApply(bpy.types.Operator):
      self.steps=adjust.commit_steps(self.request,end.value); self.committing=True
      return {'RUNNING_MODAL'}
     count=end.value
-    s.last_result=f'已一起調整 {len(self.request["times"])} 骨骼，補 {count} 個同影格 Keys'
+    s.last_result=f'已動作一起調整 {len(self.request["times"])} 骨骼，補 {count} 個同影格 Keys'
     self.finish(context)
     return {'FINISHED'}
    except Exception as exc:
@@ -235,19 +235,37 @@ class BCK_OT_AdjustApply(bpy.types.Operator):
 
 class BCK_OT_AdjustClose(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_close'
- bl_label='關閉工具列與一起調整模式'
+ bl_label='關閉工具列與動作一起調整模式'
  def execute(self,context):
   adjust_hud.click(context,'close'); return {'FINISHED'}
 
+BONE_ITEMS=[]
+def root_items(self,context):
+ global BONE_ITEMS
+ obj=bpy.data.objects.get(WATCH.object_name) if WATCH else context.object
+ names=tuple(b.name for b in obj.data.bones) if obj and obj.type=='ARMATURE' else ()
+ if tuple(item[0] for item in BONE_ITEMS)!=names: BONE_ITEMS=[(n,n,'') for n in names]
+ return BONE_ITEMS
+
 class BCK_OT_AdjustSettings(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_settings'
- bl_label='一起調整設定'
- def invoke(self,context,event): return context.window_manager.invoke_props_dialog(self,width=440)
- def draw(self,context):
-  s=state(context); self.layout.prop(s,'adjust_mode',expand=True)
+ bl_label='選取主控骨'
+ bl_property='bone'
+ bone: EnumProperty(items=root_items)
+ @classmethod
+ def poll(cls,context):
+  s=state(context)
+  return s.adjust_enabled and s.adjust_mode=='KEEP_PATH' and not s.running and not s.pending
+ def invoke(self,context,event):
+  context.window_manager.invoke_search_popup(self)
+  return {'CANCELLED'}
+ def execute(self,context):
   obj=bpy.data.objects.get(WATCH.object_name) if WATCH else context.object
-  if obj and s.adjust_mode=='KEEP_PATH': self.layout.prop_search(s,'adjust_root',obj.data,'bones',text='主控骨')
- def execute(self,context): return {'FINISHED'}
+  if not obj or self.bone not in obj.data.bones: return {'CANCELLED'}
+  state(context).adjust_root=self.bone
+  from . import ui
+  ui.redraw(context)
+  return {'FINISHED'}
 
 CLASSES=(BCK_OT_AdjustClose,BCK_OT_AdjustSettings,BCK_OT_AdjustIK,BCK_OT_AdjustToggle,BCK_OT_AdjustWatch,BCK_OT_AdjustApply)
 @bpy.app.handlers.persistent
