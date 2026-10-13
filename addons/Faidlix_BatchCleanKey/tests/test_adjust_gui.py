@@ -53,7 +53,7 @@ def tick():
     ob=bpy.data.objects['Adjust']; current=a.adjust.bag_for(ob.animation_data.action,ob)
     assert abs(current.fcurves.find('pose.bones["Root"].location',index=0).evaluate(11)+10)<1e-4
     assert s.adjust_enabled
-    s.adjust_mode='LOCAL'
+    s.adjust_mode='PATH'
     for b in ob.pose.bones: b.select=b.name=='Hand'
     for c in current.fcurves:
      for p in c.keyframe_points: p.select_control_point='Hand' in c.data_path and p.co.x==11
@@ -68,7 +68,7 @@ def tick():
    elif stage==12:
     if s.running or not s.last_result.startswith('已一起調整'): return .1
     ob=bpy.data.objects['Adjust']; current=a.adjust.bag_for(ob.animation_data.action,ob)
-    assert bpy.context.scene.frame_current==11 and s.adjust_mode=='LOCAL'
+    assert bpy.context.scene.frame_current==11 and s.adjust_mode=='PATH'
     hand_x=current.fcurves.find('pose.bones["Hand"].rotation_euler',index=0)
     assert hand_x and {p.co.x for p in hand_x.keyframe_points}=={11}
     assert abs(current.fcurves.find('pose.bones["Root"].location',index=0).evaluate(11)+10)<1e-4

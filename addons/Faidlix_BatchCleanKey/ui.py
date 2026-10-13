@@ -121,7 +121,7 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     last_result: StringProperty()
     adjust_toolbar_visible: BoolProperty(default=False)
     adjust_enabled: BoolProperty(default=False)
-    adjust_mode: EnumProperty(name='一起調整方式', items=[('PATH','整體轉向，連同路徑',''),('KEEP_PATH','整體轉向，保留路徑',''),('LOCAL','局部姿勢調整','')],default='LOCAL')
+    adjust_mode: EnumProperty(name='一起調整方式', items=[('PATH','整體轉向，連同路徑',''),('KEEP_PATH','整體轉向，保留路徑','')],default='PATH')
     adjust_root: StringProperty(name='主控骨')
     running: BoolProperty(default=False)
     pending: BoolProperty(default=False)

@@ -17,12 +17,12 @@ def last_transform(context):
 def menu(self,context):
  if context.object and context.object.type=='ARMATURE' and context.object.mode=='POSE':
   self.layout.separator()
-  self.layout.operator('faidlix_batch_clean_key.adjust_toggle',text='動作一起調整：開／關' if state(context).adjust_toolbar_visible else '動作一起調整選取 Keys',icon='ACTION')
+  self.layout.operator('faidlix_batch_clean_key.adjust_toggle',text='動作一起調整',icon='ACTION')
 
 def draw(layout,context):
  s=state(context); box=layout.box()
  row=box.row(align=True)
- row.operator('faidlix_batch_clean_key.adjust_toggle',text='動作一起調整：開' if s.adjust_enabled else ('動作一起調整：關' if s.adjust_toolbar_visible else '動作一起調整選取 Keys'),depress=s.adjust_enabled,icon='ACTION')
+ row.operator('faidlix_batch_clean_key.adjust_toggle',text='動作一起調整',depress=s.adjust_enabled,icon='ACTION')
  if s.adjust_toolbar_visible: row.operator('faidlix_batch_clean_key.adjust_close',text='關閉')
  if s.adjust_enabled:
   box.prop(s,'adjust_mode',expand=True)
@@ -104,6 +104,8 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
   if event.type=='LEFTMOUSE' and event.value=='PRESS':
    button=adjust_hud.hit(context,event,self)
    if button: adjust_hud.click(context,button); return {'RUNNING_MODAL'}
+  if event.type=='MOUSEMOVE': adjust_hud.hover(context,event,self)
+  if event.type=='TIMER' and self.area: self.area.tag_redraw()
   if not s.adjust_enabled:
    self.restore_auto(context); self.request=None
    return {'PASS_THROUGH'}
