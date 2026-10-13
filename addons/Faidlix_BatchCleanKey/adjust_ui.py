@@ -3,7 +3,7 @@ import time, math
 import bpy
 from bpy.props import BoolProperty,EnumProperty,StringProperty
 from mathutils import Matrix
-from . import adjust, adjust_hud
+from . import adjust, adjust_hud, adjust_rotation
 WATCH=None
 REQUEST=None
 IK_POLICY={}
@@ -17,12 +17,12 @@ def last_transform(context):
 def menu(self,context):
  if context.object and context.object.type=='ARMATURE' and context.object.mode=='POSE':
   self.layout.separator()
-  self.layout.operator('faidlix_batch_clean_key.adjust_toggle',text='動作一起調整',icon='ACTION')
+  self.layout.operator('faidlix_batch_clean_key.adjust_toggle',text='多影格同步調整',icon='ACTION')
 
 def draw(layout,context):
  s=state(context); box=layout.box()
  row=box.row(align=True)
- row.operator('faidlix_batch_clean_key.adjust_toggle',text='動作一起調整',depress=s.adjust_enabled,icon='ACTION')
+ row.operator('faidlix_batch_clean_key.adjust_toggle',text='多影格同步調整',depress=s.adjust_enabled,icon='ACTION')
  if s.adjust_toolbar_visible: row.operator('faidlix_batch_clean_key.adjust_close',text='關閉')
  if s.adjust_enabled:
   box.prop(s,'adjust_mode',expand=True)
@@ -34,7 +34,7 @@ def draw(layout,context):
 
 class BCK_OT_AdjustIK(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_ik'
- bl_label='動作一起調整：未選取的 IK 控制骨'
+ bl_label='多影格同步調整：未選取的 IK 控制骨'
  choice: EnumProperty(items=[('AUTO','自動加入',''),('SELECTED','維持原選取','')],default='AUTO')
  signature: StringProperty()
  names: StringProperty()
@@ -51,7 +51,7 @@ class BCK_OT_AdjustIK(bpy.types.Operator):
 
 class BCK_OT_AdjustToggle(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_toggle'
- bl_label='動作一起調整選取 Keys'
+ bl_label='多影格同步調整選取 Keys'
  @classmethod
  def poll(cls,context):
   return bool(context.object and context.object.type=='ARMATURE' and context.object.mode=='POSE' and not state(context).running and not state(context).pending)
@@ -75,12 +75,13 @@ class BCK_OT_AdjustToggle(bpy.types.Operator):
 
 class BCK_OT_AdjustWatch(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_watch'
- bl_label='動作一起調整模式'
+ bl_label='多影格同步調整模式'
  bl_options={'INTERNAL'}
  def invoke(self,context,event):
   global WATCH
   WATCH=self; self.object_name=context.object.name; self.action_name=context.object.animation_data.action.name
-  self.window=context.window; self.screen=context.screen; self.area=context.area; self.request=None; self.auto=None
+  self.window=context.window; self.screen=context.screen; self.area=context.area; self.request=None; self.auto=None; self.rotation_preview=None; self.rotation_track=None
+  self.action_pointer=context.object.animation_data.action.as_pointer(); self.slot_name=context.object.animation_data.action_slot.identifier if context.object.animation_data.action_slot else ''
   self.hud=bpy.types.SpaceView3D.draw_handler_add(adjust_hud.draw,(self,),'WINDOW','POST_PIXEL')
   self.timer=context.window_manager.event_timer_add(.08,window=context.window)
   context.window_manager.modal_handler_add(self)
@@ -90,7 +91,7 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
    context.scene.tool_settings.use_keyframe_insert_auto=self.auto; self.auto=None
  def stop(self,context):
   global WATCH
-  self.restore_auto(context); self.request=None
+  self.restore_auto(context); self.request=None; self.rotation_preview=None
   state(context).adjust_enabled=False; state(context).adjust_toolbar_visible=False
   if self.hud: bpy.types.SpaceView3D.draw_handler_remove(self.hud,'WINDOW'); self.hud=None
   if self.timer: context.window_manager.event_timer_remove(self.timer); self.timer=None
@@ -99,15 +100,23 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
   global REQUEST
   s=state(context); obj=bpy.data.objects.get(self.object_name)
   from . import ui
-  if not s.adjust_toolbar_visible or not obj or obj.mode!='POSE' or context.object!=obj or ui.rig(context)!=obj or context.screen!=self.screen or not obj.animation_data or not obj.animation_data.action or obj.animation_data.action.name!=self.action_name:
+  if not s.adjust_toolbar_visible or not obj or obj.mode!='POSE' or context.object!=obj or ui.rig(context)!=obj or context.screen!=self.screen or not obj.animation_data:
    self.stop(context); return {'FINISHED'}
+  current=obj.animation_data.action
+  pointer=current.as_pointer() if current else 0
+  slot=obj.animation_data.action_slot.identifier if obj.animation_data.action_slot else ''
+  if pointer!=self.action_pointer or slot!=self.slot_name:
+   self.restore_auto(context); self.request=None; self.rotation_preview=None; self.rotation_track=None
+   IK_POLICY.clear(); self.hover_name=None
+   self.action_pointer=pointer; self.slot_name=slot
+  self.action_name=current.name if current else ''
   if event.type=='LEFTMOUSE' and event.value=='PRESS':
    button=adjust_hud.hit(context,event,self)
    if button: adjust_hud.click(context,button); return {'RUNNING_MODAL'}
   if event.type=='MOUSEMOVE': adjust_hud.hover(context,event,self)
   if event.type=='TIMER' and self.area: self.area.tag_redraw()
   if not s.adjust_enabled:
-   self.restore_auto(context); self.request=None
+   self.restore_auto(context); self.request=None; self.rotation_preview=None
    return {'PASS_THROUGH'}
   if s.running or s.pending: return {'PASS_THROUGH'}
   if event.type in {'G','R','S','LEFTMOUSE'} and event.value=='PRESS' and not self.request and not event.ctrl and not event.alt:
@@ -126,6 +135,7 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
     r['selected']=sorted(set(r['selected'])|set(added))
     r['added']=added; r['mode']=s.adjust_mode; r['root']=s.adjust_root
     self.request=r; self.operator_pointer=last_transform(context)
+    self.rotation_track=None; self.rotation_preview=None
     self.started=time.monotonic(); self.auto=context.scene.tool_settings.use_keyframe_insert_auto
     r['auto']=self.auto
     context.scene.tool_settings.use_keyframe_insert_auto=False
@@ -135,7 +145,10 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
   if event.type=='TIMER' and self.request:
    # Native transform's own modal handler runs before this observer.
    active=[o.bl_idname for o in context.window.modal_operators]
-   if any(n.startswith('TRANSFORM_OT_') for n in active): return {'PASS_THROUGH'}
+   if any(n.startswith('TRANSFORM_OT_') for n in active):
+    adjust_rotation.update(self,context,obj)
+    return {'PASS_THROUGH'}
+   self.rotation_preview=None
    pointer=last_transform(context)
    if pointer!=self.operator_pointer:
     op=context.window_manager.operators[-1]
@@ -146,10 +159,10 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
      if not unchanged:
       # Remove the native preview undo step: one subsequent key edit is one Undo.
       r['deltas']={n:tuple(tuple(row) for row in d) for n,d in deltas.items()}
-      if not bpy.ops.ed.undo.poll(): s.last_result='無法建立安全復原步驟，取消動作一起調整'; return {'PASS_THROUGH'}
+      if not bpy.ops.ed.undo.poll(): s.last_result='無法建立安全復原步驟，取消多影格同步調整'; return {'PASS_THROUGH'}
       bpy.ops.ed.undo()
       restore_context(context,r)
-      bpy.ops.ed.undo_push(message='動作一起調整（操作前）')
+      bpy.ops.ed.undo_push(message='多影格同步調整（操作前）')
       state(context).adjust_enabled=True; state(context).adjust_toolbar_visible=True
       REQUEST=r
       bpy.ops.faidlix_batch_clean_key.adjust_apply('INVOKE_DEFAULT')
@@ -158,7 +171,7 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
      if op.bl_idname.startswith('TRANSFORM_OT_'):
       bpy.ops.ed.undo(); restore_context(context,r)
       state(context).adjust_enabled=True
-      state(context).last_result='此變換不支援動作一起調整，已取消；請使用 G／R／S'
+      state(context).last_result='此變換不支援多影格同步調整，已取消；請使用 G／R／S'
    elif time.monotonic()-self.started>.2:
     self.restore_auto(context); self.request=None
   return {'PASS_THROUGH'}
@@ -166,8 +179,12 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
 
 def restore_context(context,r):
  obj=bpy.data.objects[r['object']]
+ action=bpy.data.actions[r['action']]
+ ad=obj.animation_data_create(); ad.action=action
+ ad.action_slot=next(slot for slot in action.slots if slot.identifier==r['slot'])
  s=state(context); s.target_armature=obj; s.adjust_mode=r['mode']; s.adjust_root=r['root']
  for bone in obj.pose.bones:
+  bone.rotation_mode=r['modes'][bone.name]
   bone.select=bone.name in r['selected']
   for prop,value in r['defaults'][bone.name].items(): setattr(bone,prop,value)
  if r['active'] in obj.data.bones: obj.data.bones.active=obj.data.bones[r['active']]
@@ -188,7 +205,7 @@ def restore_context(context,r):
 
 class BCK_OT_AdjustApply(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_apply'
- bl_label='套用動作一起調整 Keys'
+ bl_label='套用多影格同步調整 Keys'
  bl_options={'UNDO','INTERNAL'}
  def invoke(self,context,event):
   global REQUEST
@@ -211,8 +228,12 @@ class BCK_OT_AdjustApply(bpy.types.Operator):
   if WATCH and event.type=='LEFTMOUSE' and event.value=='PRESS':
    button=adjust_hud.hit(context,event,WATCH)
    if button: adjust_hud.click(context,button)
+  obj=bpy.data.objects.get(self.request['object'])
+  active=obj.animation_data.action if obj and obj.animation_data else None
+  if not active or active.name!=self.request['action'] or not obj.animation_data.action_slot or obj.animation_data.action_slot.identifier!=self.request['slot']:
+   s.cancel_requested=True
   if event.type=='ESC' or s.cancel_requested:
-   self.steps.close(); s.last_result='已取消動作一起調整，原 Keys 保留'; self.finish(context); return {'CANCELLED'}
+   self.steps.close(); s.last_result='已取消多影格同步調整，原 Keys 保留'; self.finish(context); return {'CANCELLED'}
   if event.type!='TIMER': return {'RUNNING_MODAL'}
   try:
    deadline=time.perf_counter()+.008
@@ -225,7 +246,7 @@ class BCK_OT_AdjustApply(bpy.types.Operator):
      self.steps=adjust.commit_steps(self.request,end.value); self.committing=True
      return {'RUNNING_MODAL'}
     count=end.value
-    s.last_result=f'已動作一起調整 {len(self.request["times"])} 骨骼，補 {count} 個同影格 Keys'
+    s.last_result=f'已多影格同步調整 {len(self.request["times"])} 骨骼，補 {count} 個同影格 Keys'
     self.finish(context)
     return {'FINISHED'}
    except Exception as exc:
@@ -237,7 +258,7 @@ class BCK_OT_AdjustApply(bpy.types.Operator):
 
 class BCK_OT_AdjustClose(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_close'
- bl_label='關閉工具列與動作一起調整模式'
+ bl_label='關閉工具列與多影格同步調整模式'
  def execute(self,context):
   adjust_hud.click(context,'close'); return {'FINISHED'}
 

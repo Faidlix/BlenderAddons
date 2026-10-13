@@ -38,11 +38,12 @@ def tick():
     rects=a.adjust_ui.adjust_hud.bounds(region,s)
     assert 'LOCAL' not in rects and rects['toggle'][1]==rects['close'][1]
     assert rects['PATH'][3]<rects['toggle'][1]
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-v153.png')); click('toggle'); stage=2
+    assert rects['PATH'][0]==rects['toggle'][0] and rects['KEEP_PATH'][2]==rects['toggle'][2]
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-v160.png')); click('toggle'); stage=2
    elif stage==2:
     assert s.adjust_toolbar_visible and not s.adjust_enabled and a.adjust_ui.WATCH
     assert set(a.adjust_ui.adjust_hud.bounds(region,s))=={'toggle','close'}
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-paused-v153.png'))
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-paused-v160.png'))
     bpy.context.scene.tool_settings.use_keyframe_insert_auto=False
     event('G'); stage=3
    elif stage==3: event('X'); stage=4
@@ -56,6 +57,9 @@ def tick():
     click('KEEP_PATH'); stage=8
    elif stage==8:
     assert s.adjust_mode=='KEEP_PATH' and 'settings' in a.adjust_ui.adjust_hud.bounds(region,s)
+    rects=a.adjust_ui.adjust_hud.bounds(region,s)
+    assert rects['settings'][0]==rects['toggle'][0] and rects['settings'][2]==rects['toggle'][2]
+    assert rects['settings'][3]<rects['PATH'][1]
     s.adjust_root='Root'; click('settings'); stage=9
    elif stage==9:
     assert s.adjust_enabled and s.adjust_toolbar_visible
@@ -67,23 +71,23 @@ def tick():
    elif stage==91: event('RET'); stage=92
    elif stage==92:
     assert s.adjust_root=='Hand',s.adjust_root
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-root-v153.png')); hover('PATH'); stage=93
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-root-v160.png')); hover('PATH'); stage=93
    elif stage==93: stage=94; return .8
    elif stage==94:
     assert a.adjust_ui.adjust_hud.tooltip(a.adjust_ui.WATCH,a.adjust_ui.adjust_hud.bounds(region,s))==a.adjust_ui.adjust_hud.TIPS['PATH'],repr((getattr(a.adjust_ui.WATCH,'hover_name',None),time.monotonic()-getattr(a.adjust_ui.WATCH,'hover_since',0)))
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-tip-path-v153.png')); hover('KEEP_PATH'); stage=95
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-tip-path-v160.png')); hover('KEEP_PATH'); stage=95
    elif stage==95: stage=96; return .8
    elif stage==96:
     assert a.adjust_ui.WATCH.hover_name=='KEEP_PATH'
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-tip-keep-v153.png')); hover('settings'); stage=97
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-tip-keep-v160.png')); hover('settings'); stage=97
    elif stage==97: stage=98; return .8
    elif stage==98:
     assert a.adjust_ui.adjust_hud.tooltip(a.adjust_ui.WATCH,a.adjust_ui.adjust_hud.bounds(region,s))==a.adjust_ui.adjust_hud.TIPS['settings']
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-tip-root-v153.png')); click('close'); stage=10
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-hud-tip-root-v160.png')); click('close'); stage=10
    elif stage==10:
     assert not s.adjust_enabled and not s.adjust_toolbar_visible and a.adjust_ui.WATCH is None
     assert digest()==before
-    (OUT/'adjust-hud-gui-result.txt').write_text('ADJUST_HUD_GUI_PASS physical_toggle pause_normal_G no_key_changes two_rows color_toggle no_LOCAL paused_compact direct_root_search_immediate hover_tips close_label',encoding='utf-8')
+    (OUT/'adjust-hud-gui-result.txt').write_text('ADJUST_HUD_GUI_PASS physical_toggle pause_normal_G no_key_changes three_rows color_toggle no_LOCAL paused_compact direct_root_search_immediate hover_tips close_label',encoding='utf-8')
     bpy.ops.wm.quit_blender(); return None
   return .4
  except Exception:

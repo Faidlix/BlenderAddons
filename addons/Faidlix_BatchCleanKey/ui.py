@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror
 
-ADDON_VERSION = '1.5.1'
+ADDON_VERSION = '1.6.0'
 _sync_signature = None
 _refreshing = False
 _rig_choices={'CURRENT':('CURRENT','原骨架','使用目前工具指定的骨架')}
@@ -193,11 +193,12 @@ def refresh(context, reset=False):
             state.anchor = -1
     current = obj.animation_data.action if obj and obj.animation_data else None
     _refreshing = True
-    state.browser_index = -1
+    browser_index = -1
     for i, item in enumerate(state.browser):
         item.selected = item.action == current
         if item.selected:
-            state.browser_index = i
+            browser_index = i
+    if state.browser_index != browser_index: state.browser_index = browser_index
     _refreshing = False
     update_counts(state)
     return state
@@ -653,6 +654,11 @@ class BCK_OT_Switch(bpy.types.Operator):
     bl_options = {'UNDO'}
     action_name: StringProperty()
 
+    @classmethod
+    def poll(cls,context):
+        state=context.window_manager.faidlix_batch_clean_key
+        return not state.running and not state.pending
+
     def execute(self, context):
         obj, action = rig(context), bpy.data.actions.get(self.action_name)
         if not obj or not action:
@@ -782,6 +788,11 @@ class BCK_OT_Delete(bpy.types.Operator):
     bl_options = {'UNDO'}
     action_name: StringProperty()
 
+    @classmethod
+    def poll(cls,context):
+        state=context.window_manager.faidlix_batch_clean_key
+        return not state.running and not state.pending
+
     def invoke(self, context, event):
         return context.window_manager.invoke_confirm(self, event)
 
@@ -790,7 +801,22 @@ class BCK_OT_Delete(bpy.types.Operator):
         action = bpy.data.actions.get(self.action_name) if self.action_name else (obj.animation_data.action if obj and obj.animation_data else None)
         if not action or not action.is_editable:
             return {'CANCELLED'}
-        bpy.data.actions.remove(action, do_unlink=True)
+        state=refresh(context)
+        ordered=[item.action for item in state.browser]
+        index=ordered.index(action) if action in ordered else -1
+        neighbor=ordered[index-1] if index>0 else (ordered[1] if index==0 and len(ordered)>1 else None)
+        global _refreshing
+        _refreshing=True
+        try:
+            for collection in (state.actions,state.browser):
+                for i in reversed(range(len(collection))):
+                    if collection[i].action==action: collection.remove(i)
+            bpy.data.actions.remove(action, do_unlink=True)
+            if obj and neighbor:
+                core.assign_action(context,obj,neighbor)
+                core.sync_scene_range(context.scene,neighbor,obj)
+                core.pad_bone_bounds(neighbor,obj)
+        finally: _refreshing=False
         refresh(context)
         redraw(context)
         return {'FINISHED'}
@@ -801,16 +827,19 @@ class BCK_OT_Duplicate(bpy.types.Operator):
     bl_label = '複製 Action'
     bl_options = {'UNDO'}
     action_name: StringProperty()
-    destination: EnumProperty(name='複製到骨架',items=destination_items)
+    destination: EnumProperty(name='複製到',items=destination_items)
+
+    @classmethod
+    def poll(cls,context):
+        state=context.window_manager.faidlix_batch_clean_key
+        return not state.running and not state.pending
 
     def invoke(self,context,event):
         self.destination='CURRENT'
-        return context.window_manager.invoke_props_dialog(self,width=460,confirm_text='複製')
+        return context.window_manager.invoke_props_dialog(self,width=260,confirm_text='複製')
 
     def draw(self,context):
-        self.layout.label(text=self.action_name)
         self.layout.prop(self,'destination')
-        self.layout.label(text='複製動畫通道；不同骨骼名稱或比例不會自動重定向')
 
     def execute(self, context):
         source, obj = bpy.data.actions.get(self.action_name), rig(context)

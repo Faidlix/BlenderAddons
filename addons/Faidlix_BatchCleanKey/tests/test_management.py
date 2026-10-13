@@ -85,7 +85,7 @@ new = obj.animation_data.action
 assert new.use_fake_user and not list(core.action_curves(new))
 new_name = new.name
 assert bpy.ops.faidlix_batch_clean_key.delete_action() == {'FINISHED'}
-assert new_name not in bpy.data.actions and obj.animation_data.action is None
+assert new_name not in bpy.data.actions and obj.animation_data.action is not None
 assert act.name in bpy.data.actions
 
 assert core.actual_range(act) == (10.25, 20.75)

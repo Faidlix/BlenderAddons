@@ -29,13 +29,13 @@ def tick():
    elif stage==3: event('THREE'); stage=4
    elif stage==4: event('RET'); stage=5
    elif stage==5:
-    if s.running or not s.last_result.startswith('已一起調整'): return .1
+    if s.running or not s.last_result.startswith('已多影格同步調整'): return .1
     bg=current(); assert abs(bg.fcurves.find('pose.bones["Root"].location',index=0).evaluate(11)-3)<1e-4
     assert s.adjust_enabled; s.last_result=''; event('S'); stage=6
    elif stage==6: event('TWO'); stage=7
    elif stage==7: event('RET'); stage=8
    elif stage==8:
-    if s.running or not s.last_result.startswith('已一起調整'): return .1
+    if s.running or not s.last_result.startswith('已多影格同步調整'): return .1
     bg=current()
     assert abs(bg.fcurves.find('pose.bones["Root"].location',index=0).evaluate(11)-6)<1e-4
     assert abs(bg.fcurves.find('pose.bones["Root"].location',index=1).evaluate(11)-20)<1e-4

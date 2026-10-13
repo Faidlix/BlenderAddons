@@ -98,9 +98,7 @@ def steps(request,deltas,mode='LOCAL',root='',added=()):
   for c in obj.pose.bones[n].constraints:
    if not c.mute and c.influence>0 and c.type!='IK': raise ValueError(n+'：'+c.type+' 約束無法安全換算，取消此次調整')
   rot={p for (bn,p,i),c in curves.items() if bn==n and p.startswith('rotation_') and has_values(c)}
-  if len(rot)>1: raise ValueError(n+'：多種旋轉通道，請先統一旋轉座標')
   expected={'QUATERNION':'rotation_quaternion','AXIS_ANGLE':'rotation_axis_angle'}.get(order[n],'rotation_euler')
-  if rot and expected not in rot: raise ValueError(n+'：旋轉模式與 Key 不一致，請先統一旋轉座標')
  # Native pose matrices provide a common world delta for whole-character operations.
  base_names=sorted(request['times'],key=lambda n:len(obj.data.bones[n].parent_recursive))
  ik_chain=set()
@@ -167,20 +165,27 @@ def steps(request,deltas,mode='LOCAL',root='',added=()):
    if max(abs(basis[i][j]-Matrix.LocRotScale(loc,q,scale)[i][j]) for i in range(4) for j in range(4))>1e-4:
     raise ValueError(n+'：變換含剪切，無法以位置／旋轉／縮放 Key 表達')
    rm=order[n]
-   if rm=='QUATERNION':
-    oldq=Quaternion(component(n,'rotation_quaternion',frame))
-    if q.dot(previous.get(n,oldq))<0: q.negate()
-    if oldq.magnitude>1e-8:
-     q*=oldq.magnitude
-    values={'rotation_quaternion':tuple(q)}; previous[n]=q.normalized()
-   elif rm=='AXIS_ANGLE':
-    axis,angle=q.to_axis_angle(); original=component(n,'rotation_axis_angle',frame)
-    if axis.dot(Vector(original[1:]))<0: axis=-axis; angle=-angle
-    angle+=round((original[0]-angle)/(2*math.pi))*2*math.pi
-    values={'rotation_axis_angle':(angle,*axis)}
-   else:
-    e=q.to_euler(rm,previous.get(n,Euler(component(n,'rotation_euler',frame),rm)))
-    values={'rotation_euler':tuple(e)}; previous[n]=e.copy()
+   expected={'QUATERNION':'rotation_quaternion','AXIS_ANGLE':'rotation_axis_angle'}.get(rm,'rotation_euler')
+   representations={p for (bn,p,i),c in curves.items() if bn==n and p.startswith('rotation_') and has_values(c)}|{expected}
+   values={}
+   for prop in sorted(representations):
+    original=component(n,prop,frame); prev=previous.get((n,prop))
+    if prop=='rotation_quaternion':
+     converted=q.normalized(); oldq=Quaternion(original)
+     if converted.dot(prev if prev is not None else oldq)<0: converted.negate()
+     previous[n,prop]=converted.copy()
+     if oldq.magnitude>1e-8: converted*=oldq.magnitude
+     values[prop]=tuple(converted)
+    elif prop=='rotation_axis_angle':
+     axis,angle=q.normalized().to_axis_angle()
+     if axis.dot(Vector(original[1:]))<0: axis=-axis; angle=-angle
+     reference=prev if prev is not None else original[0]
+     angle+=round((reference-angle)/(2*math.pi))*2*math.pi
+     values[prop]=(angle,*axis); previous[n,prop]=angle
+    else:
+     euler_order=rm if rm not in {'QUATERNION','AXIS_ANGLE'} else 'XYZ'
+     e=q.normalized().to_euler(euler_order,prev if prev is not None else Euler(original,euler_order))
+     values[prop]=tuple(e); previous[n,prop]=e.copy()
    values.update(location=tuple(loc),scale=tuple(scale))
    for prop,vs in values.items():
     old=component(n,prop,frame)

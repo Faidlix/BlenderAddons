@@ -33,7 +33,7 @@ def tick():
    elif stage==5: event('NINE'); event('ZERO'); stage=6
    elif stage==6: event('RET'); stage=7
    elif stage==7:
-    if s.running or not s.last_result.startswith('已一起調整'): return .1
+    if s.running or not s.last_result.startswith('已多影格同步調整'): return .1
     ob=bpy.data.objects['Adjust']; current=a.adjust.bag_for(ob.animation_data.action,ob)
     for name in ('IKControl','PoleControl'):
      curves=[c for c in current.fcurves if name in c.data_path]

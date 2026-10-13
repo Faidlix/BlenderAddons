@@ -1,7 +1,7 @@
 """Viewport toolbar for the selected-key transform session."""
 import bpy,blf,gpu,time
 from gpu_extras.batch import batch_for_shader
-LABELS=(('toggle','動作一起調整'),('PATH','連同路徑'),('KEEP_PATH','保留路徑'),('settings','主控骨'),('close','關閉'))
+LABELS=(('toggle','多影格同步調整'),('PATH','連同路徑'),('KEEP_PATH','保留路徑'),('settings','主控骨'),('close','關閉'))
 TIPS={
  'PATH':('Transform with Path','依目前中心點調整選取骨骼；移動路徑一起轉向。'),
  'KEEP_PATH':('Preserve Path','以主控骨各影格位置為中心轉向；保留原本移動路徑。'),
@@ -10,14 +10,16 @@ TIPS={
 
 def bounds(region,state):
  scale=bpy.context.preferences.system.ui_scale; top=region.height-50*scale; h=30*scale
- rows=[[('toggle',150),('close',60)]]
+ width=230; x=max(8*scale,(region.width-(width+60)*scale)/2)
+ rows=[[('toggle',width),('close',60)]]
  if state.adjust_enabled:
-  rows.append([('PATH',90),('KEEP_PATH',90)]+([('settings',230)] if state.adjust_mode=='KEEP_PATH' else []))
+  rows.append([('PATH',width/2),('KEEP_PATH',width/2)])
+  if state.adjust_mode=='KEEP_PATH': rows.append([('settings',width)])
  result={}
  for row in rows:
-  x=max(8*scale,(region.width-sum(w for n,w in row)*scale)/2)
-  for name,width in row:
-   result[name]=(x,top-h,x+(width-2)*scale,top); x+=width*scale
+  left=x
+  for name,w in row:
+   result[name]=(left,top-h,left+(w-2)*scale,top); left+=w*scale
   top-=h+4*scale
  return result
 
@@ -33,11 +35,12 @@ def tooltip(owner,rects):
  return TIPS[name]
 
 def draw(owner):
- from . import adjust_ui
+ from . import adjust_ui, adjust_rotation
  context=bpy.context
  if not owner.area or context.area!=owner.area or not context.region or context.region.type!='WINDOW': return
  s=adjust_ui.state(context)
  if not s.adjust_toolbar_visible: return
+ adjust_rotation.draw(owner,context)
  shader=gpu.shader.from_builtin('UNIFORM_COLOR'); gpu.state.blend_set('ALPHA')
  try:
   for name,(x,y,right,top) in bounds(context.region,s).items():

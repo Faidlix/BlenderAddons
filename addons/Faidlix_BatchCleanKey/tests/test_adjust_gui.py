@@ -33,9 +33,13 @@ def tick():
    elif stage==1: event('R'); stage=2
    elif stage==2: event('Z'); stage=3
    elif stage==3: event('NINE'); event('ZERO'); stage=4
-   elif stage==4: event('RET'); stage=5
+   elif stage==4:
+    preview=a.adjust_ui.WATCH.rotation_preview
+    assert preview and abs(preview['degrees']-90)<.1,repr(preview)
+    bpy.ops.screen.screenshot(filepath=str(OUT/'rotation-preview-v160.png'))
+    event('RET'); stage=5
    elif stage==5:
-    if s.running or not s.last_result.startswith('已一起調整'): return .1
+    if s.running or not s.last_result.startswith('已多影格同步調整'): return .1
     ob=bpy.data.objects['Adjust']; act=ob.animation_data.action; curves=list(a.core.action_curves(act))
     x=next(c for c in curves if c.data_path=='pose.bones["Root"].location' and c.array_index==0)
     assert abs(x.evaluate(11)+10)<1e-4,(x.evaluate(11),s.last_result)
@@ -66,7 +70,7 @@ def tick():
     bpy.context.window.event_simulate(type='FIVE',value='PRESS',unicode='5',x=region.x+region.width//2,y=region.y+region.height//2); stage=11
    elif stage==11: event('RET'); stage=12
    elif stage==12:
-    if s.running or not s.last_result.startswith('已一起調整'): return .1
+    if s.running or not s.last_result.startswith('已多影格同步調整'): return .1
     ob=bpy.data.objects['Adjust']; current=a.adjust.bag_for(ob.animation_data.action,ob)
     assert bpy.context.scene.frame_current==11 and s.adjust_mode=='PATH'
     hand_x=current.fcurves.find('pose.bones["Hand"].rotation_euler',index=0)
@@ -75,7 +79,7 @@ def tick():
     s.last_result=''; event('R'); stage=13
    elif stage==13: event('ESC'); stage=14
    elif stage==14:
-    assert not s.running and not s.last_result.startswith('已一起調整')
+    assert not s.running and not s.last_result.startswith('已多影格同步調整')
     s.adjust_enabled=False; s.adjust_toolbar_visible=False; stage=15
    elif stage==15:
     assert a.adjust_ui.WATCH is None
