@@ -39,7 +39,7 @@ def tick():
      curves=[c for c in current.fcurves if name in c.data_path]
      assert curves and all({p.co.x for p in c.keyframe_points}<={1,11} for c in curves),name
      assert ob.pose.bones[name].select
-    s.adjust_enabled=False; stage=8
+    s.adjust_enabled=False; s.adjust_toolbar_visible=False; stage=8
    elif stage==8:
     assert a.adjust_ui.WATCH is None
     (OUT/'adjust-ik-gui-result.txt').write_text('ADJUST_IK_GUI_PASS native_prompt auto_join control_pole same_frame_keys',encoding='utf-8')

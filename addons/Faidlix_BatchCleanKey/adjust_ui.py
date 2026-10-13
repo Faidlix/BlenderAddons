@@ -3,7 +3,7 @@ import time, math
 import bpy
 from bpy.props import BoolProperty,EnumProperty,StringProperty
 from mathutils import Matrix
-from . import adjust
+from . import adjust, adjust_hud
 WATCH=None
 REQUEST=None
 IK_POLICY={}
@@ -17,11 +17,13 @@ def last_transform(context):
 def menu(self,context):
  if context.object and context.object.type=='ARMATURE' and context.object.mode=='POSE':
   self.layout.separator()
-  self.layout.operator('faidlix_batch_clean_key.adjust_toggle',text='關閉一起調整選取 Keys' if state(context).adjust_enabled else '一起調整選取 Keys',icon='ACTION')
+  self.layout.operator('faidlix_batch_clean_key.adjust_toggle',text='一起調整：開／關' if state(context).adjust_toolbar_visible else '一起調整選取 Keys',icon='ACTION')
 
 def draw(layout,context):
  s=state(context); box=layout.box()
- box.operator('faidlix_batch_clean_key.adjust_toggle',text='關閉一起調整模式' if s.adjust_enabled else '一起調整選取 Keys',depress=s.adjust_enabled,icon='ACTION')
+ row=box.row(align=True)
+ row.operator('faidlix_batch_clean_key.adjust_toggle',text='一起調整：開' if s.adjust_enabled else ('一起調整：關' if s.adjust_toolbar_visible else '一起調整選取 Keys'),depress=s.adjust_enabled,icon='ACTION')
+ if s.adjust_toolbar_visible: row.operator('faidlix_batch_clean_key.adjust_close',text='',icon='X')
  if s.adjust_enabled:
   box.prop(s,'adjust_mode',expand=True)
   if s.adjust_mode=='KEEP_PATH':
@@ -55,8 +57,8 @@ class BCK_OT_AdjustToggle(bpy.types.Operator):
   return bool(context.object and context.object.type=='ARMATURE' and context.object.mode=='POSE' and not state(context).running and not state(context).pending)
  def execute(self,context):
   s=state(context)
-  if s.adjust_enabled:
-   s.adjust_enabled=False
+  if s.adjust_toolbar_visible:
+   s.adjust_enabled=not s.adjust_enabled
    return {'FINISHED'}
   from . import ui
   if ui.rig(context)!=context.object:
@@ -64,7 +66,7 @@ class BCK_OT_AdjustToggle(bpy.types.Operator):
   try: adjust.capture(context,context.object)
   except ValueError as exc:
    self.report({'ERROR'},str(exc)); return {'CANCELLED'}
-  s.adjust_enabled=True
+  s.adjust_enabled=True; s.adjust_toolbar_visible=True
   IK_POLICY.clear()
   if not s.adjust_root:
    active=context.object.data.bones.active
@@ -78,7 +80,8 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
  def invoke(self,context,event):
   global WATCH
   WATCH=self; self.object_name=context.object.name; self.action_name=context.object.animation_data.action.name
-  self.window=context.window; self.screen=context.screen; self.request=None; self.auto=None
+  self.window=context.window; self.screen=context.screen; self.area=context.area; self.request=None; self.auto=None
+  self.hud=bpy.types.SpaceView3D.draw_handler_add(adjust_hud.draw,(self,),'WINDOW','POST_PIXEL')
   self.timer=context.window_manager.event_timer_add(.08,window=context.window)
   context.window_manager.modal_handler_add(self)
   return {'RUNNING_MODAL'}
@@ -88,15 +91,22 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
  def stop(self,context):
   global WATCH
   self.restore_auto(context); self.request=None
-  state(context).adjust_enabled=False
+  state(context).adjust_enabled=False; state(context).adjust_toolbar_visible=False
+  if self.hud: bpy.types.SpaceView3D.draw_handler_remove(self.hud,'WINDOW'); self.hud=None
   if self.timer: context.window_manager.event_timer_remove(self.timer); self.timer=None
   if WATCH==self: WATCH=None
  def modal(self,context,event):
   global REQUEST
   s=state(context); obj=bpy.data.objects.get(self.object_name)
   from . import ui
-  if not s.adjust_enabled or not obj or obj.mode!='POSE' or context.object!=obj or ui.rig(context)!=obj or context.screen!=self.screen or not obj.animation_data or not obj.animation_data.action or obj.animation_data.action.name!=self.action_name:
+  if not s.adjust_toolbar_visible or not obj or obj.mode!='POSE' or context.object!=obj or ui.rig(context)!=obj or context.screen!=self.screen or not obj.animation_data or not obj.animation_data.action or obj.animation_data.action.name!=self.action_name:
    self.stop(context); return {'FINISHED'}
+  if event.type=='LEFTMOUSE' and event.value=='PRESS':
+   button=adjust_hud.hit(context,event,self)
+   if button: adjust_hud.click(context,button); return {'RUNNING_MODAL'}
+  if not s.adjust_enabled:
+   self.restore_auto(context); self.request=None
+   return {'PASS_THROUGH'}
   if s.running or s.pending: return {'PASS_THROUGH'}
   if event.type in {'G','R','S','LEFTMOUSE'} and event.value=='PRESS' and not self.request and not event.ctrl and not event.alt:
    if context.area.type!='VIEW_3D' or not context.region or context.region.type!='WINDOW': return {'PASS_THROUGH'}
@@ -138,7 +148,7 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
       bpy.ops.ed.undo()
       restore_context(context,r)
       bpy.ops.ed.undo_push(message='一起調整（操作前）')
-      state(context).adjust_enabled=True
+      state(context).adjust_enabled=True; state(context).adjust_toolbar_visible=True
       REQUEST=r
       bpy.ops.faidlix_batch_clean_key.adjust_apply('INVOKE_DEFAULT')
     else:
@@ -196,6 +206,9 @@ class BCK_OT_AdjustApply(bpy.types.Operator):
   ui.refresh(context); ui.redraw(context)
  def modal(self,context,event):
   s=state(context)
+  if WATCH and event.type=='LEFTMOUSE' and event.value=='PRESS':
+   button=adjust_hud.hit(context,event,WATCH)
+   if button: adjust_hud.click(context,button)
   if event.type=='ESC' or s.cancel_requested:
    self.steps.close(); s.last_result='已取消一起調整，原 Keys 保留'; self.finish(context); return {'CANCELLED'}
   if event.type!='TIMER': return {'RUNNING_MODAL'}
@@ -220,7 +233,23 @@ class BCK_OT_AdjustApply(bpy.types.Operator):
   from . import ui
   ui.redraw(context); return {'RUNNING_MODAL'}
 
-CLASSES=(BCK_OT_AdjustIK,BCK_OT_AdjustToggle,BCK_OT_AdjustWatch,BCK_OT_AdjustApply)
+class BCK_OT_AdjustClose(bpy.types.Operator):
+ bl_idname='faidlix_batch_clean_key.adjust_close'
+ bl_label='關閉工具列與一起調整模式'
+ def execute(self,context):
+  adjust_hud.click(context,'close'); return {'FINISHED'}
+
+class BCK_OT_AdjustSettings(bpy.types.Operator):
+ bl_idname='faidlix_batch_clean_key.adjust_settings'
+ bl_label='一起調整設定'
+ def invoke(self,context,event): return context.window_manager.invoke_props_dialog(self,width=440)
+ def draw(self,context):
+  s=state(context); self.layout.prop(s,'adjust_mode',expand=True)
+  obj=bpy.data.objects.get(WATCH.object_name) if WATCH else context.object
+  if obj and s.adjust_mode=='KEEP_PATH': self.layout.prop_search(s,'adjust_root',obj.data,'bones',text='主控骨')
+ def execute(self,context): return {'FINISHED'}
+
+CLASSES=(BCK_OT_AdjustClose,BCK_OT_AdjustSettings,BCK_OT_AdjustIK,BCK_OT_AdjustToggle,BCK_OT_AdjustWatch,BCK_OT_AdjustApply)
 @bpy.app.handlers.persistent
 def reset_after_load(_):
  global WATCH,REQUEST
@@ -230,7 +259,7 @@ def reset_after_load(_):
   except Exception: WATCH=None
  REQUEST=None; IK_POLICY.clear()
  if hasattr(bpy.context.window_manager,'faidlix_batch_clean_key'):
-  state(bpy.context).adjust_enabled=False
+  state(bpy.context).adjust_enabled=False; state(bpy.context).adjust_toolbar_visible=False
 
 def register():
  for cls in CLASSES: bpy.utils.register_class(cls)

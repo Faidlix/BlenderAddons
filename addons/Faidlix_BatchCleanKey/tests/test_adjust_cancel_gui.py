@@ -41,7 +41,7 @@ def tick():
     assert s.last_result.startswith('已取消'),s.last_result
     assert digest()==before
     assert s.adjust_enabled
-    s.adjust_enabled=False; stage=7
+    s.adjust_enabled=False; s.adjust_toolbar_visible=False; stage=7
    elif stage==7:
     assert a.adjust_ui.WATCH is None
     (OUT/'adjust-cancel-gui-result.txt').write_text('ADJUST_CANCEL_GUI_PASS native_G progress Esc all_source_keys_preserved mode_continues',encoding='utf-8')

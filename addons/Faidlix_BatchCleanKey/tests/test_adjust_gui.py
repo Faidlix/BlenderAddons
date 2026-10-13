@@ -76,7 +76,7 @@ def tick():
    elif stage==13: event('ESC'); stage=14
    elif stage==14:
     assert not s.running and not s.last_result.startswith('已一起調整')
-    s.adjust_enabled=False; stage=15
+    s.adjust_enabled=False; s.adjust_toolbar_visible=False; stage=15
    elif stage==15:
     assert a.adjust_ui.WATCH is None
     (OUT/'adjust-gui-result.txt').write_text('ADJUST_GUI_PASS native_R_Z_90 persistent immediate_commit same_frame_keys Undo Redo reselect_Hand_frame11 native_Esc auto_key_restored',encoding='utf-8')

@@ -137,7 +137,7 @@ def steps(request,deltas,mode='LOCAL',root='',added=()):
   desired={}; desired_world={}
   for b in bones:
    n=b.name
-   if n in affected:
+   if n in names:
     d=Matrix(deltas.get(n,common)) if mode=='LOCAL' else common.copy()
     linear=d.to_3x3().to_4x4()
     if mode=='KEEP_PATH':
@@ -170,7 +170,9 @@ def steps(request,deltas,mode='LOCAL',root='',added=()):
    if rm=='QUATERNION':
     oldq=Quaternion(component(n,'rotation_quaternion',frame))
     if q.dot(previous.get(n,oldq))<0: q.negate()
-    values={'rotation_quaternion':tuple(q)}; previous[n]=q.copy()
+    if oldq.magnitude>1e-8:
+     q*=oldq.magnitude
+    values={'rotation_quaternion':tuple(q)}; previous[n]=q.normalized()
    elif rm=='AXIS_ANGLE':
     axis,angle=q.to_axis_angle(); original=component(n,'rotation_axis_angle',frame)
     if axis.dot(Vector(original[1:]))<0: axis=-axis; angle=-angle
@@ -185,7 +187,8 @@ def steps(request,deltas,mode='LOCAL',root='',added=()):
     for i,v in enumerate(vs):
      if not math.isfinite(v): raise ValueError('變換產生非有限數值')
      key=(n,prop,i); candidates.setdefault(key,{})[frame]=v
-     if abs(v-old[i])>1e-6: changed.add(key)
+     tolerance=1e-5 if prop=='scale' else 2e-6
+     if abs(v-old[i])>tolerance: changed.add(key)
    done+=1; yield done,total,'一起調整（計算選取 Key）'
  # The caller commits only after all calculations succeed.
  return {key:candidates[key] for key in changed}

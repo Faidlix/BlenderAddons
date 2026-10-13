@@ -40,7 +40,7 @@ def tick():
     assert abs(bg.fcurves.find('pose.bones["Root"].location',index=0).evaluate(11)-6)<1e-4
     assert abs(bg.fcurves.find('pose.bones["Root"].location',index=1).evaluate(11)-20)<1e-4
     assert next(p.co.y for p in bg.fcurves.find('pose.bones["Root"].location',index=0).keyframe_points if p.co.x==6)==5
-    s.adjust_enabled=False; stage=9
+    s.adjust_enabled=False; s.adjust_toolbar_visible=False; stage=9
    elif stage==9:
     assert a.adjust_ui.WATCH is None
     (OUT/'adjust-move-scale-gui-result.txt').write_text('ADJUST_MOVE_SCALE_GUI_PASS native_G_X_3 S_2 persistent selected_frames parent_once unselected_key',encoding='utf-8')
