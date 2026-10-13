@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror
 
-ADDON_VERSION = '1.4.2'
+ADDON_VERSION = '1.5.0'
 _sync_signature = None
 _refreshing = False
 _rig_choices={'CURRENT':('CURRENT','原骨架','使用目前工具指定的骨架')}
@@ -119,6 +119,9 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     ratio: FloatProperty(name='移除比例', default=0.5, min=0, max=1, subtype='FACTOR')
     error: FloatProperty(name='最大誤差', default=0.01, min=0, precision=5)
     last_result: StringProperty()
+    adjust_enabled: BoolProperty(default=False)
+    adjust_mode: EnumProperty(name='一起調整方式', items=[('PATH','整體轉向，連同路徑',''),('KEEP_PATH','整體轉向，保留路徑',''),('LOCAL','局部姿勢調整','')],default='LOCAL')
+    adjust_root: StringProperty(name='主控骨')
     running: BoolProperty(default=False)
     pending: BoolProperty(default=False)
     cancel_requested: BoolProperty(default=False)
@@ -923,6 +926,9 @@ class _Panel:
         obj=rig(context)
         col.label(text=f'目前選取骨骼：{sum(b.select for b in obj.pose.bones) if obj else 0}')
         col.operator('faidlix_batch_clean_key.batch', text='批次處理 Action Keys', icon='ACTION')
+        if self.bl_space_type=='VIEW_3D':
+            from . import adjust_ui
+            adjust_ui.draw(col,context)
         box=col.box()
         box.label(text='統一轉換旋轉座標')
         box.prop(state,'rotation_target',expand=True)
