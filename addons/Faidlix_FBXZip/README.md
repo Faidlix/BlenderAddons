@@ -16,6 +16,8 @@ The export dialog reads the current settings from Blender's native FBX exporter 
 
 The export dialog's top **Operator Presets** menu uses the same native `export_scene.fbx` preset folder as Blender's FBX exporter. Presets such as `ToUnity` and `ToUnityPackTexture` therefore appear in both places; the `+` button saves a shared FBX preset.
 
+When **帶入 Unity 設定** is enabled, the ZIP also contains an `.fbx.meta` file. Each selected Action has text toggles for Unity **Loop Time** and **Loop Pose**; Loop Pose is available only while Loop Time is enabled. Extract the FBX and its matching `.meta` file together into a Unity project's Assets folder to retain those clip settings.
+
 Materials always use **Keep Blender Materials**; the shader dropdown is removed. The original shader graph is retained. The default texture mode traces backwards from active material outputs on exported objects and used material slots, including nested node groups. The optional all-textures mode includes every image node in those materials while still excluding unrelated scene images. The texture dialog can include/exclude and rename package files; temporary image paths keep FBX references synchronized with renamed files.
 
 Packed and generated images are written before exporting FBX. Temporary file-backed images provide valid texture references and are restored afterwards. A required missing texture cancels export instead of silently creating an incomplete package. Collected textures use portable paths; Embed Textures is honored with native COPY mode. Batch export is currently rejected explicitly.
@@ -26,6 +28,7 @@ Packed and generated images are written before exporting FBX. Temporary file-bac
 - `打包貼圖` controls packaging. Its text mode button switches between connected textures and all image nodes in exported-object materials.
 - `貼圖設定…` supports per-image inclusion, ZIP filename editing, reset, and side-by-side duplicate-name resolution.
 - The Action list is rebuilt when export starts. Checked Actions become separate FBX AnimStacks whose Unity clip names exactly match the editable Action export names, without an `Armature|` prefix.
+- **帶入 Unity 設定** defaults to enabled and is saved in FBX presets. Disable it to export without any Unity-specific file.
 - Procedural textures are not image files and therefore cannot be collected automatically.
 - Generated/UV test images and packed images are exported as PNG files when collecting textures.
 - Presets are stored in Blender's user scripts preset folder; locked/portable installations use the add-on's `presets` folder as a fallback.

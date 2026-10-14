@@ -1,13 +1,14 @@
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 6),
+    "version": (1, 8, 7),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
     "category": "Import-Export",
 }
 
+import hashlib
 import json
 import os
 import shutil
@@ -32,7 +33,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 6)
+ADDON_VERSION = (1, 8, 7)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -484,6 +485,8 @@ class FBXZIP_PG_action_item(PropertyGroup):
     slot_identifier: StringProperty(name="Slot")
     include: BoolProperty(name="", default=True)
     export_name: StringProperty(name="Unity Clip")
+    unity_loop_time: BoolProperty(name="Loop Time", default=False)
+    unity_loop_pose: BoolProperty(name="Loop Pose", default=False)
     frame_start: FloatProperty()
     frame_end: FloatProperty()
 
@@ -525,13 +528,21 @@ class FBXZIP_PG_material_item(PropertyGroup):
 
 
 class FBXZIP_UL_actions(UIList):
-    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, index=0):
+    def draw_item(self, context, layout, _data, item, _icon, _active_data, _active_propname, index=0):
         row = layout.row(align=True)
         row.prop(item, "include", text="")
         row.label(text=item.object_name, icon="ARMATURE_DATA")
         row.label(text=item.action_name, icon="ACTION")
         row.prop(item, "export_name", text="")
         row.label(text=f"{item.frame_start:g}-{item.frame_end:g}")
+        operator = _active_export_operator(context)
+        unity_enabled = bool(operator and operator.unity_settings)
+        loop_time = row.row(align=True)
+        loop_time.enabled = unity_enabled
+        loop_time.prop(item, "unity_loop_time", text="Loop Time", toggle=True)
+        loop_pose = row.row(align=True)
+        loop_pose.enabled = unity_enabled and item.unity_loop_time
+        loop_pose.prop(item, "unity_loop_pose", text="Loop Pose", toggle=True)
 
 
 class FBXZIP_UL_textures(UIList):
@@ -656,7 +667,12 @@ def _unique_name(value, used):
 
 def _refresh_action_items(window_manager, objects, preserve=True):
     previous = {
-        (item.action_name, item.object_name, item.slot_identifier): (item.include, item.export_name)
+        (item.action_name, item.object_name, item.slot_identifier): (
+            item.include,
+            item.export_name,
+            item.unity_loop_time,
+            item.unity_loop_pose,
+        )
         for item in window_manager.fbxzip_action_items
     } if preserve else {}
     rows = []
@@ -673,9 +689,197 @@ def _refresh_action_items(window_manager, objects, preserve=True):
         item.object_name = target.name
         item.slot_identifier = slot_identifier
         item.frame_start, item.frame_end = action.frame_range
-        include, export_name = previous.get(key, (True, action.name))
+        include, export_name, loop_time, loop_pose = previous.get(
+            key, (True, action.name, False, False)
+        )
         item.include = include
         item.export_name = export_name
+        item.unity_loop_time = loop_time
+        item.unity_loop_pose = loop_pose
+
+
+def _unity_yaml_string(value):
+    """Return a YAML-safe scalar while retaining Unicode clip names."""
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _stable_unity_id(value):
+    digest = hashlib.sha256(value.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+def _unity_clip_rows(action_items):
+    """Merge duplicate multi-rig rows into the clips Unity imports by name."""
+    clips = {}
+    for item in action_items:
+        name = (item.export_name or item.action_name).strip() or item.action_name
+        clip = clips.setdefault(
+            name,
+            {
+                "name": name,
+                "first_frame": item.frame_start,
+                "last_frame": item.frame_end,
+                "loop_time": False,
+                "loop_pose": False,
+            },
+        )
+        clip["first_frame"] = min(clip["first_frame"], item.frame_start)
+        clip["last_frame"] = max(clip["last_frame"], item.frame_end)
+        clip["loop_time"] = clip["loop_time"] or item.unity_loop_time
+        clip["loop_pose"] = clip["loop_pose"] or item.unity_loop_pose
+    for clip in clips.values():
+        clip["loop_pose"] = clip["loop_time"] and clip["loop_pose"]
+    return list(clips.values())
+
+
+def _unity_meta_text(fbx_name, action_items, source_path=""):
+    clips = _unity_clip_rows(action_items)
+    guid_seed = f"{os.path.abspath(source_path)}|{fbx_name}".lower()
+    guid = hashlib.sha256(guid_seed.encode("utf-8")).hexdigest()[:32]
+    clip_lines = []
+    for clip in clips:
+        name = _unity_yaml_string(clip["name"])
+        internal_id = _stable_unity_id(f"{guid}|{clip['name']}")
+        clip_lines.extend([
+            "    - serializedVersion: 16",
+            f"      name: {name}",
+            f"      takeName: {name}",
+            f"      internalID: {internal_id}",
+            f"      firstFrame: {clip['first_frame']:g}",
+            f"      lastFrame: {clip['last_frame']:g}",
+            "      wrapMode: 0",
+            "      orientationOffsetY: 0",
+            "      level: 0",
+            "      cycleOffset: 0",
+            "      loop: 0",
+            "      hasAdditiveReferencePose: 0",
+            f"      loopTime: {int(clip['loop_time'])}",
+            f"      loopBlend: {int(clip['loop_pose'])}",
+            "      loopBlendOrientation: 0",
+            "      loopBlendPositionY: 0",
+            "      loopBlendPositionXZ: 0",
+            "      keepOriginalOrientation: 0",
+            "      keepOriginalPositionY: 1",
+            "      keepOriginalPositionXZ: 0",
+            "      heightFromFeet: 0",
+            "      mirror: 0",
+            "      bodyMask: 01000000010000000100000001000000010000000100000001000000010000000100000001000000010000000100000001000000",
+            "      curves: []",
+            "      events: []",
+            "      transformMask: []",
+            "      maskType: 3",
+            "      maskSource: {instanceID: 0}",
+            "      additiveReferencePoseFrame: 0",
+        ])
+    clip_block = "    clipAnimations: []" if not clip_lines else "    clipAnimations:\n" + "\n".join(clip_lines)
+    return f"""fileFormatVersion: 2
+guid: {guid}
+ModelImporter:
+  serializedVersion: 22200
+  internalIDToNameTable: []
+  externalObjects: {{}}
+  materials:
+    materialImportMode: 1
+    materialName: 0
+    materialSearch: 1
+    materialLocation: 1
+  animations:
+    legacyGenerateAnimations: 4
+    bakeSimulation: 0
+    resampleCurves: 1
+    optimizeGameObjects: 0
+    removeConstantScaleCurves: 0
+    motionNodeName:
+    animationImportErrors:
+    animationImportWarnings:
+    animationRetargetingWarnings:
+    animationDoRetargetingWarnings: 0
+    importAnimatedCustomProperties: 0
+    importConstraints: 0
+    animationCompression: 1
+    animationRotationError: 0.5
+    animationPositionError: 0.5
+    animationScaleError: 0.5
+    animationWrapMode: 0
+    extraExposedTransformPaths: []
+    extraUserProperties: []
+{clip_block}
+    isReadable: 0
+  meshes:
+    lODScreenPercentages: []
+    globalScale: 1
+    meshCompression: 0
+    addColliders: 0
+    useSRGBMaterialColor: 1
+    sortHierarchyByName: 1
+    importPhysicalCameras: 1
+    importVisibility: 1
+    importBlendShapes: 1
+    importCameras: 0
+    importLights: 0
+    nodeNameCollisionStrategy: 1
+    fileIdsGeneration: 2
+    swapUVChannels: 0
+    generateSecondaryUV: 0
+    useFileUnits: 1
+    keepQuads: 0
+    weldVertices: 1
+    bakeAxisConversion: 0
+    preserveHierarchy: 0
+    skinWeightsMode: 0
+    maxBonesPerVertex: 4
+    minBoneWeight: 0.001
+    optimizeBones: 1
+    meshOptimizationFlags: -1
+    indexFormat: 0
+    secondaryUVAngleDistortion: 8
+    secondaryUVAreaDistortion: 15.000001
+    secondaryUVHardAngle: 88
+    secondaryUVMarginMethod: 1
+    secondaryUVMinLightmapResolution: 40
+    secondaryUVMinObjectScale: 1
+    secondaryUVPackMargin: 4
+    useFileScale: 1
+    strictVertexDataChecks: 0
+  tangentSpace:
+    normalSmoothAngle: 60
+    normalImportMode: 0
+    tangentImportMode: 3
+    normalCalculationMode: 4
+    legacyComputeAllNormalsFromSmoothingGroupsWhenMeshHasBlendShapes: 0
+    blendShapeNormalImportMode: 1
+    normalSmoothingSource: 0
+  referencedClips: []
+  importAnimation: 1
+  humanDescription:
+    serializedVersion: 3
+    human: []
+    skeleton: []
+    armTwist: 0.5
+    foreArmTwist: 0.5
+    upperLegTwist: 0.5
+    legTwist: 0.5
+    armStretch: 0.05
+    legStretch: 0.05
+    feetSpacing: 0
+    globalScale: 1
+    rootMotionBoneName:
+    hasTranslationDoF: 0
+    hasExtraRoot: 0
+    skeletonHasParents: 1
+  lastHumanDescriptionAvatarSource: {{instanceID: 0}}
+  autoGenerateAvatarMappingIfUnspecified: 1
+  animationType: 2
+  humanoidOversampling: 1
+  avatarSetup: 0
+  addHumanoidExtraRootOnlyWhenUsingAvatar: 1
+  importBlendShapeDeformPercent: 1
+  remapMaterialsIfMaterialImportModeIsNone: 0
+  additionalBone: 0
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+"""
 
 
 def _used_materials(objects):
@@ -1063,6 +1267,7 @@ class FBXZIP_OT_export(Operator, ExportHelper):
     use_armature_deform_only: BoolProperty(name="Only Deform Bones", default=False)
     armature_nodetype: EnumProperty(name="Armature Node", items=[("NULL", "Null", ""), ("ROOT", "Root", ""), ("LIMBNODE", "Limb Node", "")], default="NULL")
     bake_anim: BoolProperty(name="Bake Animation", default=True)
+    unity_settings: BoolProperty(name="帶入 Unity 設定", default=True)
     bake_anim_use_all_bones: BoolProperty(name="Key All Bones", default=True)
     bake_anim_use_nla_strips: BoolProperty(name="NLA Strips", default=True)
     bake_anim_use_all_actions: BoolProperty(name="All Actions", default=True)
@@ -1147,7 +1352,11 @@ class FBXZIP_OT_export(Operator, ExportHelper):
             box.prop(self, name)
         box = layout.box()
         box.label(text="FBX: Animation")
-        box.prop(self, "bake_anim")
+        row = box.row(align=True)
+        row.prop(self, "bake_anim")
+        unity_row = row.row(align=True)
+        unity_row.enabled = self.bake_anim and self.select_actions and self.keep_fbx
+        unity_row.prop(self, "unity_settings")
         action_box = box.column()
         action_box.enabled = self.bake_anim
         action_box.prop(self, "select_actions")
@@ -1279,10 +1488,23 @@ class FBXZIP_OT_export(Operator, ExportHelper):
                 if "FINISHED" not in result or not os.path.isfile(fbx_path):
                     raise RuntimeError("FBX 匯出失敗")
                 progress.update(75, "FBX 輸出完成")
+                unity_meta_path = ""
+                if self.unity_settings and selected_actions and self.keep_fbx:
+                    progress.update(76, "建立 Unity 動畫設定")
+                    unity_meta_path = fbx_path + ".meta"
+                    with open(unity_meta_path, "w", encoding="utf-8", newline="\n") as handle:
+                        handle.write(_unity_meta_text(
+                            os.path.basename(fbx_path),
+                            selected_actions,
+                            bpy.data.filepath,
+                        ))
                 temporary_zip = output_zip + '.partial'
                 archive_entries = [
                     (full, os.path.basename(full))
-                    for full in ([fbx_path] if self.keep_fbx else []) + packaged
+                    for full in (
+                        ([fbx_path, unity_meta_path] if unity_meta_path else ([fbx_path] if self.keep_fbx else []))
+                        + packaged
+                    )
                 ]
                 # Native COPY references the companion .fbm directory.
                 if self.package_textures and self.embed_textures:
@@ -1343,7 +1565,8 @@ class FBXZIP_OT_preset_add(AddPresetBase, Operator):
     preset_subdir = 'operator/export_scene.fbx'
     preset_defines = ['op = bpy.context.active_operator']
     preset_values = ['op.' + name for name in _SYNC_PROPERTIES] + [
-        'op.package_textures', 'op.package_all_textures', 'op.keep_fbx', 'op.select_actions'
+        'op.package_textures', 'op.package_all_textures', 'op.keep_fbx', 'op.select_actions',
+        'op.unity_settings'
     ]
 
 
