@@ -1,9 +1,9 @@
 """Faidlix_BatchCleanKey, independent Blender extension."""
 from . import core, ui, compose, compose_ui, adjust, adjust_ui
 
-ADDON_VERSION = '1.6.1'
+ADDON_VERSION = '1.6.2'
 bl_info = {'name': 'Faidlix_BatchCleanKey', 'author': 'Faidlix',
-           'version': (1, 6, 1), 'blender': (5, 2, 0), 'category': 'Animation'}
+           'version': (1, 6, 2), 'blender': (5, 2, 0), 'category': 'Animation'}
 
 populate = ui.populate
 BCK_OT_Select = ui.BCK_OT_Select

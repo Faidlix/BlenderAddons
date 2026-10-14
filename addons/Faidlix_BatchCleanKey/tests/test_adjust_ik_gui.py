@@ -16,11 +16,13 @@ def event(t):
  for v in ('PRESS','RELEASE'):
   bpy.context.window.event_simulate(type=t,value=v,**({'unicode':{'NINE':'9','ZERO':'0'}.get(t,'')} if v=='PRESS' else {}),x=region.x+region.width//2,y=region.y+region.height//2)
 def choose(value,phase='BOTH'):
- window=bpy.context.window
- x=int(window.width*(.25 if value=='AUTO' else .45)); y=int(window.height*(.475 if value=='AUTO' else .535))
- if phase!='CLICK':window.event_simulate(type='MOUSEMOVE',value='NOTHING',x=x,y=y)
+ owner=a.adjust_ui.IK_CHOICE
+ assert owner is not None,'IK dialog must remain open until explicit choice'
+ left,bottom,right,top=a.adjust_hud.ik_bounds(region,owner)[value]
+ window=bpy.context.window; x=region.x+int((left+right)/2); y=region.y+int((bottom+top)/2)
+ if phase not in {'CLICK','RELEASE'}:window.event_simulate(type='MOUSEMOVE',value='NOTHING',x=x,y=y)
  if phase=='MOVE':return
- for v in ('PRESS','RELEASE'):window.event_simulate(type='LEFTMOUSE',value=v,x=x,y=y)
+ for v in (('RELEASE',) if phase=='RELEASE' else ('PRESS','RELEASE')):window.event_simulate(type='LEFTMOUSE',value=v,x=x,y=y)
 
 def tick():
  global stage
@@ -33,10 +35,18 @@ def tick():
     bpy.ops.ed.undo_push(message='IK fixture'); bpy.ops.faidlix_batch_clean_key.adjust_toggle(); stage=1
    elif stage==1: event('R'); stage=2
    elif stage==2:
-    assert not a.adjust_ui.IK_POLICY
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-ik-v161.png')); choose('AUTO'); stage=3
+    assert not a.adjust_ui.IK_POLICY and a.adjust_ui.IK_CHOICE
+    # The opening key release, mouse departure and Enter must never choose/dismiss.
+    bpy.context.window.event_simulate(type='MOUSEMOVE',value='NOTHING',x=100,y=200)
+    event('RET'); stage=201
+   elif stage==201:
+    assert not a.adjust_ui.IK_POLICY and a.adjust_ui.IK_CHOICE
+    stage=202;return 1.0
+   elif stage==202:
+    assert not a.adjust_ui.IK_POLICY and a.adjust_ui.IK_CHOICE
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-ik-v162.png')); choose('AUTO'); stage=3
    elif stage==3:
-    assert a.adjust_ui.IK_POLICY and set(a.adjust_ui.IK_POLICY.values())=={'AUTO'}
+    assert a.adjust_ui.IK_CHOICE is None and a.adjust_ui.IK_POLICY and set(a.adjust_ui.IK_POLICY.values())=={'AUTO'}
     event('R'); stage=4
    elif stage==4: event('Z'); stage=5
    elif stage==5: event('NINE'); event('ZERO'); stage=6
@@ -53,12 +63,12 @@ def tick():
     event('R');stage=71
    elif stage==71:
     assert not a.adjust_ui.IK_POLICY
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-ik-selected-v161.png'));choose('SELECTED','MOVE');stage=711
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-ik-selected-v162.png'));choose('SELECTED','MOVE');stage=711
    elif stage==711:
     choose('SELECTED','CLICK');stage=72
    elif stage==72:
-    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-ik-after-click-v161.png'))
-    assert set(a.adjust_ui.IK_POLICY.values())=={'SELECTED'},repr((a.adjust_ui.IK_POLICY,bpy.context.window.width,bpy.context.window.height))
+    bpy.ops.screen.screenshot(filepath=str(OUT/'adjust-ik-after-click-v162.png'))
+    assert a.adjust_ui.IK_CHOICE is None and set(a.adjust_ui.IK_POLICY.values())=={'SELECTED'}
     event('R');stage=73
    elif stage==73:
     assert any(op.bl_idname=='TRANSFORM_OT_rotate' for op in bpy.context.window.modal_operators),'selection popup must close after click'
@@ -71,10 +81,23 @@ def tick():
     assert not a.adjust_ui.IK_POLICY
     assert bpy.ops.faidlix_batch_clean_key.adjust_ik(signature='unset')=={'CANCELLED'}
     assert 'unset' not in a.adjust_ui.IK_POLICY
-    s.adjust_enabled=False; s.adjust_toolbar_visible=False; stage=8
+    # Mouse-driven opening: holding then releasing over AUTO must not choose it.
+    bpy.context.window.event_simulate(type='MOUSEMOVE',value='NOTHING',x=region.x+region.width//2,y=region.y+region.height//2)
+    bpy.context.window.event_simulate(type='LEFTMOUSE',value='PRESS',x=region.x+region.width//2,y=region.y+region.height//2);stage=77
+   elif stage==77:
+    assert a.adjust_ui.IK_CHOICE and a.adjust_ui.IK_CHOICE.wait_release
+    choose('AUTO','MOVE');stage=78
+   elif stage==78:
+    choose('AUTO','RELEASE');stage=79
+   elif stage==79:
+    assert a.adjust_ui.IK_CHOICE and not a.adjust_ui.IK_POLICY
+    choose('AUTO');stage=80
+   elif stage==80:
+    assert a.adjust_ui.IK_CHOICE is None and set(a.adjust_ui.IK_POLICY.values())=={'AUTO'}
+    s.adjust_enabled=False; s.adjust_toolbar_visible=False;stage=8
    elif stage==8:
     assert a.adjust_ui.WATCH is None
-    (OUT/'adjust-ik-gui-result.txt').write_text('ADJUST_IK_GUI_PASS direct_click_AUTO SELECTED no_default cancel_no_choice popup_closed control_pole same_frame_keys',encoding='utf-8')
+    (OUT/'adjust-ik-gui-result.txt').write_text('ADJUST_IK_GUI_PASS stable_mouse_departure Enter_ignored keyboard_and_held_mouse_opener_release_ignored explicit_AUTO SELECTED no_default cancel_no_choice dialog_closed control_pole same_frame_keys',encoding='utf-8')
     bpy.ops.wm.quit_blender(); return None
   return .4
  except Exception:

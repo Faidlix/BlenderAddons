@@ -7,6 +7,7 @@ from . import adjust, adjust_hud, adjust_rotation
 WATCH=None
 REQUEST=None
 IK_POLICY={}
+IK_CHOICE=None
 
 def state(context): return context.window_manager.faidlix_batch_clean_key
 
@@ -32,33 +33,69 @@ def draw(layout,context):
   box.label(text='G／R／S 或操作軸確認後，立即套用選取 Keys')
   box.label(text='必要軸只補同影格 Key；Esc 取消當次調整')
 
-def draw_ik_choice(layout,signature,names):
- layout.ui_units_x=23
- layout.label(text='IK Target／Pole 未選取，或沒有選到 Key：')
- for name in names.split('|'): layout.label(text=name)
- layout.operator_context='EXEC_DEFAULT'
- row=layout.row(align=True); row.emboss='NORMAL'
- for value,label in (('AUTO','自動加入'),('SELECTED','維持原選取')):
-  op=row.operator('faidlix_batch_clean_key.adjust_ik',text=label,depress=False)
-  op.choice=value; op.signature=signature
- layout.label(text='選擇後請重新開始 G／R／S 或操作軸調整')
-
 class BCK_OT_AdjustIK(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_ik'
  bl_label='多影格同步調整：未選取的 IK 控制骨'
+ bl_options={'INTERNAL'}
  choice: EnumProperty(items=[('NONE','尚未選擇',''),('AUTO','自動加入',''),('SELECTED','維持原選取','')],default='NONE')
  signature: StringProperty()
  names: StringProperty()
  def invoke(self,context,event):
-  signature,names=self.signature,self.names
-  def popup(menu,ctx): draw_ik_choice(menu.layout,signature,names)
-  context.window_manager.popup_menu(popup,title=self.bl_label)
-  return {'CANCELLED'}
+  global IK_CHOICE
+  if IK_CHOICE or not context.area or context.area.type!='VIEW_3D': return {'CANCELLED'}
+  self.area=context.area; self.region=next((r for r in self.area.regions if r.type=='WINDOW'),None)
+  if not self.region: return {'CANCELLED'}
+  self.object_name=context.object.name if context.object else ''
+  obj=context.object; self.action_name=obj.animation_data.action.name if obj and obj.animation_data and obj.animation_data.action else ''
+  self.window=context.window; self.screen=context.screen; self.choice='NONE'; self.pressed=None; self.hovered=None; self.scroll=0
+  self.started=time.monotonic(); self.trigger=event.type
+  self.wait_release=event.value=='PRESS' and event.type in {'LEFTMOUSE','RIGHTMOUSE','MIDDLEMOUSE'}
+  self.ready=False
+  self.hud=bpy.types.SpaceView3D.draw_handler_add(adjust_hud.draw_ik,(self,),'WINDOW','POST_PIXEL')
+  self.timer=context.window_manager.event_timer_add(.05,window=self.window)
+  IK_CHOICE=self; context.window_manager.modal_handler_add(self); self.area.tag_redraw()
+  return {'RUNNING_MODAL'}
+ def finish(self,context):
+  global IK_CHOICE
+  if self.hud: bpy.types.SpaceView3D.draw_handler_remove(self.hud,'WINDOW'); self.hud=None
+  if self.timer: context.window_manager.event_timer_remove(self.timer); self.timer=None
+  if IK_CHOICE==self: IK_CHOICE=None
+  try: self.area.tag_redraw()
+  except ReferenceError: pass
+ def modal(self,context,event):
+  obj=bpy.data.objects.get(self.object_name)
+  action=obj.animation_data.action if obj and obj.animation_data else None
+  if context.screen!=self.screen or not obj or obj.mode!='POSE' or context.object!=obj or not action or action.name!=self.action_name or (WATCH and not state(context).adjust_toolbar_visible):
+   self.finish(context); return {'CANCELLED'}
+  if event.type=='ESC' and event.value=='PRESS': self.finish(context); return {'CANCELLED'}
+  if self.wait_release and event.type==self.trigger and event.value=='RELEASE':
+   self.wait_release=False; self.pressed=None
+   return {'RUNNING_MODAL'}
+  if not self.wait_release and time.monotonic()-self.started>=.15: self.ready=True
+  hit=adjust_hud.ik_hit(self,event.mouse_x-self.region.x,event.mouse_y-self.region.y)
+  if event.type=='MOUSEMOVE': self.hovered=hit
+  if event.type in {'WHEELUPMOUSE','WHEELDOWNMOUSE'}:
+   limit=max(0,len(self.names.split('|'))-adjust_hud.ik_bounds(self.region,self)['visible'])
+   self.scroll=max(0,min(limit,self.scroll+(1 if event.type=='WHEELDOWNMOUSE' else -1)))
+  if self.ready and event.type=='LEFTMOUSE':
+   if event.value=='PRESS': self.pressed=hit or 'OUTSIDE'
+   elif event.value=='RELEASE':
+    pressed=self.pressed; self.pressed=None
+    if pressed and pressed==hit:
+     self.choice=hit; self.finish(context); return self.execute(context)
+    if pressed=='OUTSIDE' and not hit:
+     # Only a fresh click outside cancels; moving out or the opening release cannot.
+     box=adjust_hud.ik_bounds(self.region,self)['box']; x,y=event.mouse_x-self.region.x,event.mouse_y-self.region.y
+     if not (box[0]<=x<=box[2] and box[1]<=y<=box[3]):
+      self.finish(context); return {'CANCELLED'}
+  self.area.tag_redraw()
+  return {'RUNNING_MODAL'}
  def execute(self,context):
   if self.choice not in {'AUTO','SELECTED'}: return {'CANCELLED'}
   IK_POLICY[self.signature]=self.choice
   state(context).last_result='IK 設定已確認，請開始調整'
   return {'FINISHED'}
+ def cancel(self,context): self.finish(context)
 
 class BCK_OT_AdjustToggle(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_toggle'
@@ -305,6 +342,9 @@ CLASSES=(BCK_OT_AdjustClose,BCK_OT_AdjustSettings,BCK_OT_AdjustIK,BCK_OT_AdjustT
 @bpy.app.handlers.persistent
 def reset_after_load(_):
  global WATCH,REQUEST
+ if IK_CHOICE:
+  try: IK_CHOICE.finish(bpy.context)
+  except Exception: pass
  if WATCH:
   WATCH.auto=None
   try: WATCH.stop(bpy.context)
@@ -319,6 +359,9 @@ def register():
  bpy.app.handlers.load_post.append(reset_after_load)
 def unregister():
  global REQUEST
+ if IK_CHOICE:
+  try: IK_CHOICE.finish(bpy.context)
+  except Exception: pass
  if WATCH:
   try: WATCH.stop(bpy.context)
   except Exception: pass

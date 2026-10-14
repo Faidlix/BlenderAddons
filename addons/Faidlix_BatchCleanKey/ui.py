@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror
 
-ADDON_VERSION = '1.6.1'
+ADDON_VERSION = '1.6.2'
 _sync_signature = None
 _refreshing = False
 _rig_choices={'CURRENT':('CURRENT','原骨架','使用目前工具指定的骨架')}
