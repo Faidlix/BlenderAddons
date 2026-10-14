@@ -27,5 +27,5 @@ assert bpy.ops.faidlix_batch_clean_key.delete_action(action_name='Neighbor_A')==
 assert obj.animation_data.action==actions[2] and s.browser_index==0
 assert bpy.ops.faidlix_batch_clean_key.delete_action(action_name='Neighbor_C')=={'FINISHED'}
 assert not obj.animation_data.action and s.browser_index==-1 and not s.browser
-assert bpy.ops.faidlix_batch_clean_key.duplicate.get_rna_type().properties['destination'].name=='複製到'
+assert bpy.ops.faidlix_batch_clean_key.duplicate.get_rna_type().properties['destination'].name=='複製 Action 到'
 print('ACTION_NEIGHBORS_PASS previous first_next empty duplicate_selected refresh_index_stable')

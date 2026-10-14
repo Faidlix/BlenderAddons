@@ -32,19 +32,30 @@ def draw(layout,context):
   box.label(text='G／R／S 或操作軸確認後，立即套用選取 Keys')
   box.label(text='必要軸只補同影格 Key；Esc 取消當次調整')
 
+def draw_ik_choice(layout,signature,names):
+ layout.ui_units_x=23
+ layout.label(text='IK Target／Pole 未選取，或沒有選到 Key：')
+ for name in names.split('|'): layout.label(text=name)
+ layout.operator_context='EXEC_DEFAULT'
+ row=layout.row(align=True); row.emboss='NORMAL'
+ for value,label in (('AUTO','自動加入'),('SELECTED','維持原選取')):
+  op=row.operator('faidlix_batch_clean_key.adjust_ik',text=label,depress=False)
+  op.choice=value; op.signature=signature
+ layout.label(text='選擇後請重新開始 G／R／S 或操作軸調整')
+
 class BCK_OT_AdjustIK(bpy.types.Operator):
  bl_idname='faidlix_batch_clean_key.adjust_ik'
  bl_label='多影格同步調整：未選取的 IK 控制骨'
- choice: EnumProperty(items=[('AUTO','自動加入',''),('SELECTED','維持原選取','')],default='AUTO')
+ choice: EnumProperty(items=[('NONE','尚未選擇',''),('AUTO','自動加入',''),('SELECTED','維持原選取','')],default='NONE')
  signature: StringProperty()
  names: StringProperty()
- def invoke(self,context,event): return context.window_manager.invoke_props_dialog(self,width=460,confirm_text='確認選擇')
- def draw(self,context):
-  self.layout.label(text='IK Target／Pole 未選取，或沒有選到 Key：')
-  for n in self.names.split('|'): self.layout.label(text=n)
-  self.layout.prop(self,'choice',expand=True)
-  self.layout.label(text='確認後請重新開始 G／R／S 或操作軸調整')
+ def invoke(self,context,event):
+  signature,names=self.signature,self.names
+  def popup(menu,ctx): draw_ik_choice(menu.layout,signature,names)
+  context.window_manager.popup_menu(popup,title=self.bl_label)
+  return {'CANCELLED'}
  def execute(self,context):
+  if self.choice not in {'AUTO','SELECTED'}: return {'CANCELLED'}
   IK_POLICY[self.signature]=self.choice
   state(context).last_result='IK 設定已確認，請開始調整'
   return {'FINISHED'}

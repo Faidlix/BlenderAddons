@@ -4,7 +4,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror
 
-ADDON_VERSION = '1.6.0'
+ADDON_VERSION = '1.6.1'
 _sync_signature = None
 _refreshing = False
 _rig_choices={'CURRENT':('CURRENT','原骨架','使用目前工具指定的骨架')}
@@ -827,7 +827,7 @@ class BCK_OT_Duplicate(bpy.types.Operator):
     bl_label = '複製 Action'
     bl_options = {'UNDO'}
     action_name: StringProperty()
-    destination: EnumProperty(name='複製到',items=destination_items)
+    destination: EnumProperty(name='複製 Action 到',items=destination_items)
 
     @classmethod
     def poll(cls,context):
@@ -836,10 +836,12 @@ class BCK_OT_Duplicate(bpy.types.Operator):
 
     def invoke(self,context,event):
         self.destination='CURRENT'
-        return context.window_manager.invoke_props_dialog(self,width=260,confirm_text='複製')
+        return context.window_manager.invoke_props_dialog(self,width=260,title='',confirm_text='複製')
 
     def draw(self,context):
-        self.layout.prop(self,'destination')
+        row=self.layout.split(factor=.46)
+        row.label(text='複製 Action 到：')
+        row.prop(self,'destination',text='')
 
     def execute(self, context):
         source, obj = bpy.data.actions.get(self.action_name), rig(context)
