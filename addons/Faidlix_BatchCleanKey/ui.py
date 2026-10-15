@@ -1,12 +1,15 @@
-"""Action Editor UI. Enable the extension; use the Faidlix sidebar or Pose menu."""
+"""Action Editor UI. Enable the extension; use the Faidlix sidebar or Pose menu.
+Selected scene rigs populate the existing picker and Action list; picker changes enter Pose Mode.
+"""
 import time
 import bpy
 from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty,
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror, looping
 
-ADDON_VERSION = '1.7.0'
+ADDON_VERSION = '1.7.1'
 _sync_signature = None
+_observed_active = None
 _refreshing = False
 _rig_choices={'CURRENT':('CURRENT','原骨架','使用目前工具指定的骨架')}
 
@@ -65,9 +68,42 @@ def rig(context):
 
 
 def target_changed(state,context):
+    global _observed_active
     if not state.running and not state.pending:
+        obj=state.target_armature
+        if obj and not bpy.app.background:
+            try:
+                if context.area and context.area.type=='VIEW_3D':
+                    activate_pose_rig(context,obj)
+                else:
+                    window=context.window
+                    area=next((a for a in window.screen.areas if a.type=='VIEW_3D'),None) if window else None
+                    if area:
+                        region=next(r for r in area.regions if r.type=='WINDOW')
+                        with context.temp_override(window=window,area=area,region=region):
+                            activate_pose_rig(bpy.context,obj)
+                active=context.view_layer.objects.active
+                _observed_active=active.as_pointer() if active else 0
+            except (ValueError,RuntimeError) as exc:
+                state.last_result=str(exc)
         refresh(context,reset=True)
         redraw(context)
+
+
+def sync_selected_rig(context):
+    """Follow active-object changes, retaining the last rig while a mesh is active."""
+    global _observed_active
+    state=context.window_manager.faidlix_batch_clean_key
+    if state.running or state.pending: return
+    active=context.view_layer.objects.active if context.view_layer else None
+    pointer=active.as_pointer() if active else 0
+    if pointer==_observed_active: return
+    _observed_active=pointer
+    if active and active.type=='ARMATURE' and active.name in context.scene.objects:
+        if state.target_armature!=active:
+            state.target_armature=active
+        else:
+            target_changed(state,context)
 
 
 def rig_action(action,obj):
@@ -228,6 +264,7 @@ def sync_timer():
     try:
         if not hasattr(bpy.types.WindowManager, 'faidlix_batch_clean_key'):
             return None
+        sync_selected_rig(bpy.context)
         state = refresh(bpy.context)
         signature = (state.armature.as_pointer() if state.armature else 0,
                      tuple((b.name, b.selected) for b in state.bones),
@@ -917,8 +954,7 @@ class _Panel:
         draw_progress(layout, state)
         col = layout.column()
         col.enabled = not state.running and not state.pending
-        col.prop(state,'target_armature',text='骨架')
-        if not state.target_armature and rig(context): col.label(text='目前骨架：'+rig(context).name)
+        col.prop(state,'target_armature',text='目前骨架')
         if self.bl_space_type == 'VIEW_3D':
             row = col.row(align=True)
             row.enabled = bool(rig(context))
@@ -972,6 +1008,8 @@ CLASSES = (BCK_PG_Action, BCK_PG_Bone, BCK_PG_State, BCK_OT_Select, BCK_OT_Selec
 
 
 def register():
+    global _observed_active, _sync_signature
+    _observed_active=None; _sync_signature=None
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.WindowManager.faidlix_batch_clean_key = PointerProperty(type=BCK_PG_State)

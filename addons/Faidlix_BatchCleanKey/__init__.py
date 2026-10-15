@@ -1,9 +1,9 @@
 """Action Editor extension. Enable in Blender; open the Faidlix sidebar."""
 from . import core, ui, compose, compose_ui, adjust, adjust_ui
 
-ADDON_VERSION = '1.7.0'
+ADDON_VERSION = '1.7.1'
 bl_info = {'name': 'Action Editor', 'author': 'Faidlix',
-           'version': (1, 7, 0), 'blender': (5, 2, 0), 'category': 'Animation'}
+           'version': (1, 7, 1), 'blender': (5, 2, 0), 'category': 'Animation'}
 
 populate = ui.populate
 BCK_OT_Select = ui.BCK_OT_Select
