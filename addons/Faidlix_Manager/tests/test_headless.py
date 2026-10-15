@@ -1,20 +1,26 @@
+"""Run with Blender --background --factory-startup --python this_file.py to validate Manager registry/update behavior."""
 import importlib.util
 import json
 import pathlib
 import sys
 import tempfile
+import os
+import importlib
 from types import SimpleNamespace
 
 import bpy
 
 
 root = pathlib.Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("faidlix_manager", root / "__init__.py")
-addon = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = addon
-spec.loader.exec_module(addon)
+if os.environ.get('FAIDLIX_MANAGER_MODULE'):
+    addon=importlib.import_module(os.environ['FAIDLIX_MANAGER_MODULE'])
+else:
+    spec = importlib.util.spec_from_file_location("faidlix_manager", root / "__init__.py")
+    addon = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = addon
+    spec.loader.exec_module(addon)
 
-assert addon.ADDON_VERSION == (1, 1, 5)
+assert addon.ADDON_VERSION == (1, 1, 7)
 assert addon.PACKAGE_ID == "faidlix_manager"
 assert addon.REPOSITORY_URL.endswith("Faidlix/BlenderAddons/main/repository/index.json")
 registry = addon._addon_registry()

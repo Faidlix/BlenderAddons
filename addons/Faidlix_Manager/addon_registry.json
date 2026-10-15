@@ -51,7 +51,7 @@
     },
     {
       "package_id": "faidlix_batch_clean_key",
-      "display_name": "Faidlix_BatchCleanKey",
+      "display_name": "Action Editor",
       "common_features": ["update_all"],
       "update_order": 80
     },

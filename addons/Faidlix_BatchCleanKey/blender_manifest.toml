@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 id = "faidlix_batch_clean_key"
-version = "1.6.2"
-name = "Faidlix_BatchCleanKey"
+version = "1.7.0"
+name = "Action Editor"
 tagline = "Batch clean, delete or decimate keys for selected bones"
 maintainer = "Faidlix"
 type = "add-on"
@@ -9,4 +9,4 @@ blender_version_min = "5.2.0"
 license = ["SPDX:GPL-3.0-or-later"]
 
 [build]
-paths = ["__init__.py", "core.py", "ui.py", "automatic.py", "mirror.py", "compose.py", "compose_ui.py", "adjust.py", "adjust_ui.py", "adjust_hud.py", "adjust_rotation.py", "README.md"]
+paths = ["__init__.py", "core.py", "looping.py", "ui.py", "automatic.py", "mirror.py", "compose.py", "compose_ui.py", "adjust.py", "adjust_ui.py", "adjust_hud.py", "adjust_rotation.py", "README.md"]

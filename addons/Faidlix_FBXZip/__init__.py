@@ -7,7 +7,7 @@ Unity loop, material, and texture options there before exporting.
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 8),
+    "version": (1, 8, 9),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -39,7 +39,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 8)
+ADDON_VERSION = (1, 8, 9)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -667,6 +667,13 @@ def _unique_name(value, used):
     return candidate
 
 
+def _action_loop_state(action):
+    # Public data contract; no import/dependency on Action Editor.
+    if action is None: return None
+    if '_faidlix_action_loop' in action: return bool(action['_faidlix_action_loop'])
+    return True if getattr(action,'use_cyclic',False) else None
+
+
 def _refresh_action_items(window_manager, objects, preserve=True):
     previous = {
         (item.action_name, item.object_name, item.slot_identifier): (
@@ -693,6 +700,9 @@ def _refresh_action_items(window_manager, objects, preserve=True):
         include, export_name, loop_pose = previous.get(
             key, (True, action.name, True)
         )
+        source_loop=_action_loop_state(action)
+        if source_loop is not None:
+            loop_pose=source_loop
         item.include = include
         item.export_name = export_name
         item.unity_loop_pose = loop_pose
@@ -724,7 +734,9 @@ def _unity_clip_rows(action_items):
         )
         clip["first_frame"] = min(clip["first_frame"], item.frame_start)
         clip["last_frame"] = max(clip["last_frame"], item.frame_end)
-        clip["loop_pose"] = clip["loop_pose"] or item.unity_loop_pose
+        source_loop=_action_loop_state(bpy.data.actions.get(item.action_name))
+        loop_pose=item.unity_loop_pose if source_loop is None else source_loop
+        clip["loop_pose"] = clip["loop_pose"] or loop_pose
     return list(clips.values())
 
 

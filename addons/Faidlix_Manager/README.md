@@ -1,3 +1,5 @@
+1.1.7：登錄的批次動畫工具名稱更新為 Action Editor，保留原套件 ID 與獨立更新方式。
+
 # Faidlix Manager
 
 1.1.6：登錄 Faidlix_BatchCleanKey，支援已安裝套件的全部更新。

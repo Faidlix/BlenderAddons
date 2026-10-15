@@ -1,10 +1,11 @@
+"""Action Editor UI. Enable the extension; use the Faidlix sidebar or Pose menu."""
 import time
 import bpy
 from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty,
                        IntProperty, PointerProperty, StringProperty)
-from . import core, automatic, mirror
+from . import core, automatic, mirror, looping
 
-ADDON_VERSION = '1.6.2'
+ADDON_VERSION = '1.7.0'
 _sync_signature = None
 _refreshing = False
 _rig_choices={'CURRENT':('CURRENT','原骨架','使用目前工具指定的骨架')}
@@ -18,6 +19,18 @@ def destination_items(self,context):
     return [_rig_choices['CURRENT']]+[_rig_choices[n] for n in names if n!='CURRENT']
 
 
+def activate_pose_rig(context,obj):
+    if not context.area or context.area.type!='VIEW_3D': return
+    if obj.name not in context.view_layer.objects or not obj.visible_get(view_layer=context.view_layer):
+        raise ValueError('請先讓指定骨架顯示於目前 View Layer')
+    if context.object==obj and obj.mode=='POSE': return
+    if context.object and context.object.mode!='OBJECT': bpy.ops.object.mode_set(mode='OBJECT')
+    for other in context.selected_objects:
+        if other!=obj: other.select_set(False)
+    obj.select_set(True); context.view_layer.objects.active=obj
+    if bpy.ops.object.mode_set(mode='POSE')!={'FINISHED'}: raise ValueError('無法進入 Pose Mode')
+
+
 def browser_changed(state, context):
     if _refreshing or state.running or not 0 <= state.browser_index < len(state.browser):
         return
@@ -25,6 +38,7 @@ def browser_changed(state, context):
     obj = rig(context)
     if obj and action:
         try:
+            activate_pose_rig(context,obj)
             core.assign_action(context, obj, action)
             core.sync_scene_range(context.scene, action, obj)
             core.pad_bone_bounds(action,obj)
@@ -137,6 +151,7 @@ class BCK_PG_State(bpy.types.PropertyGroup):
     flip_keyed_only: BoolProperty(default=False)
     flip_kind: StringProperty(default='MIRROR')
     loop_job: BoolProperty(default=False)
+    loop_target: BoolProperty(default=False)
     loop_action: PointerProperty(type=bpy.types.Action)
     loop_smooth: BoolProperty(default=True)
     loop_step: IntProperty(default=1, min=1)
@@ -303,7 +318,7 @@ class BCK_UL_Browser(bpy.types.UIList):
                      icon='RADIOBUT_ON' if item.selected else 'RADIOBUT_OFF').action_name = action.name
         row.prop(action, 'name', text='', emboss=False)
         row.operator('faidlix_batch_clean_key.delete_action', text='', icon='TRASH').action_name = action.name
-        row.operator('faidlix_batch_clean_key.loop', text='', icon='FILE_REFRESH').action_name = action.name
+        row.operator('faidlix_batch_clean_key.loop', text='', icon='FILE_REFRESH', depress=looping.enabled(action)).action_name = action.name
         row.operator('faidlix_batch_clean_key.duplicate', text='', icon='DUPLICATE').action_name = action.name
         row.operator('faidlix_batch_clean_key.flip', text='', icon='MOD_MIRROR').action_name = action.name
 
@@ -370,7 +385,7 @@ def launch_batch(context):
 
 class BCK_OT_Batch(bpy.types.Operator):
     bl_idname = 'faidlix_batch_clean_key.batch'
-    bl_label = 'Faidlix_BatchCleanKey'
+    bl_label = 'Action Editor'
 
     @classmethod
     def poll(cls, context):
@@ -452,7 +467,7 @@ def result_text(result):
     if 'flip_action' in result:
         return '已翻轉 Action：'+result['flip_action']
     if 'loop_action' in result:
-        return '已建立循環副本：' + result['loop_action']
+        return ('已開啟循環：' if result.get('loop_enabled') else '已關閉循環：') + result['loop_action']
     if 'samples' in result:
         return f'{result["actions"]} Actions，{result["bones"]} 骨骼，{result["samples"]} 旋轉取樣'
     return f'{result["actions"]} Actions，移除 {result["removed"]} Keys，略過 {result["skipped"]} 項'
@@ -469,16 +484,8 @@ def processing_steps(context):
         action, obj = state.loop_action, rig(context)
         if not action or not obj or not obj.is_editable:
             raise ValueError('請選取可編輯骨架與 Action')
-        def loop_steps():
-            copied = yield from core.loop_copy_steps(action,obj,state.loop_smooth,state.loop_step,state.loop_keyed_only)
-            try:
-                core.assign_action(context,obj,copied)
-                core.sync_scene_range(context.scene,copied,obj)
-            except Exception:
-                bpy.data.actions.remove(copied)
-                raise
-            return {'loop_action':copied.name}
-        return loop_steps()
+        return looping.toggle_steps(context,obj,action,state.loop_target)
+
     args = batch_args(context)
     if state.rotation_job:
         if state.automatic_rotation:
@@ -664,6 +671,7 @@ class BCK_OT_Switch(bpy.types.Operator):
         if not obj or not action:
             return {'CANCELLED'}
         try:
+            activate_pose_rig(context,obj)
             core.assign_action(context, obj, action)
             core.sync_scene_range(context.scene, action, obj)
             core.pad_bone_bounds(action,obj)
@@ -705,63 +713,26 @@ class BCK_OT_Rotation(bpy.types.Operator):
 
 class BCK_OT_Loop(bpy.types.Operator):
     bl_idname = 'faidlix_batch_clean_key.loop'
-    bl_label = '銜接 Action 頭尾循環'
-    bl_description = '以最長曲線起訖補齊較短曲線，尾端接回開頭'
+    bl_label = '循環 開／關'
+    bl_description = '開啟時補已有動畫軌道的頭尾與接縫斜率；關閉保留 Key 和切線'
     bl_options = {'UNDO'}
     action_name: StringProperty()
-    smooth: BoolProperty(name='銜接頭尾斜率', default=True)
-    keyed_only: BoolProperty(name='只處理已有 Key', default=True)
-    bake_copy: BoolProperty(name='建立烘焙／解鎖循環副本', default=False)
-    sample_step: IntProperty(name='烘焙間隔',default=1,min=1)
 
-    def invoke(self, context, event):
-        try:
-            action = bpy.data.actions.get(self.action_name)
-            curves, start, end = core.loop_curves(action, rig(context))
-            self._summary = f'{len(curves)} 曲線 ｜ 起始 {start:g} ｜ 結束 {end:g}'
-        except Exception as exc:
-            if not action or not core.actual_range(action):
-                self.report({'ERROR'}, str(exc))
-                return {'CANCELLED'}
-            self.bake_copy = True
-            self._summary = '將在循環副本自動處理修飾器／取樣與鎖定'
-        return context.window_manager.invoke_props_dialog(self, width=460, confirm_text='建立循環')
+    @classmethod
+    def poll(cls,context):
+        s=context.window_manager.faidlix_batch_clean_key
+        return bool(rig(context)) and not s.running and not s.pending
 
-    def draw(self, context):
-        self.layout.label(text=self.action_name)
-        self.layout.label(text=getattr(self, '_summary', ''))
-        self.layout.prop(self, 'smooth')
-        self.layout.prop(self, 'keyed_only', toggle=True)
-        if not self.keyed_only:
-            self.layout.prop(self, 'bake_copy')
-        if self.bake_copy and not self.keyed_only:
-            self.layout.prop(self,'sample_step')
-            self.layout.label(text='保留來源，副本烘焙修飾器／取樣資料，解除鎖定並啟用停用曲線')
-        if self.keyed_only:
-            self.layout.label(text='保留原始 Key 位置，只補共同頭尾；副本自動移除 Cycles')
-            self.layout.label(text='其他修飾器只在原 Key 取值，影格之間為近似')
-        self.layout.label(text='較短曲線補頭尾 Key；尾端值改成開頭值')
-        self.layout.label(text='銜接斜率會調整接縫控制柄及鄰接段插值；Ctrl+Z 復原')
+    def invoke(self,context,event): return self.execute(context)
 
-    def execute(self, context):
-        if self.bake_copy or self.keyed_only:
-            state = context.window_manager.faidlix_batch_clean_key
-            state.loop_job, state.rotation_job = True, False
-            state.flip_job=False
-            state.loop_action = bpy.data.actions.get(self.action_name)
-            state.loop_smooth, state.loop_step = self.smooth, self.sample_step
-            state.loop_keyed_only = self.keyed_only
-            return run_sync(self,context) if bpy.app.background else launch_batch(context)
-        try:
-            action = bpy.data.actions.get(self.action_name)
-            count, added, start, end = core.make_loop(action, rig(context), self.smooth)
-        except Exception as exc:
-            self.report({'ERROR'}, str(exc))
-            return {'CANCELLED'}
-        self.report({'INFO'}, f'{count} 曲線，新增 {added} Keys，循環 {start:g}–{end:g}')
-        refresh(context)
-        redraw(context)
-        return {'FINISHED'}
+    def execute(self,context):
+        action=bpy.data.actions.get(self.action_name)
+        if not action: return {'CANCELLED'}
+        state=context.window_manager.faidlix_batch_clean_key
+        state.loop_job=True; state.loop_action=action; state.loop_target=not looping.enabled(action)
+        state.rotation_job=state.flip_job=False
+        state.automatic_rotation=False
+        return run_sync(self,context) if bpy.app.background else launch_batch(context)
 
 
 class BCK_OT_New(bpy.types.Operator):
@@ -931,7 +902,7 @@ class BCK_OT_Ranges(bpy.types.Operator):
 
 
 class _Panel:
-    bl_label = 'Faidlix_BatchCleanKey'
+    bl_label = 'Action Editor'
     bl_region_type = 'UI'
     bl_category = 'Faidlix'
 

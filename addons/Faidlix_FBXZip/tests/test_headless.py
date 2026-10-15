@@ -1,6 +1,6 @@
-"""Run in Blender --background --factory-startup --python tests/smoke_blender.py.
+"""Run in Blender --background --factory-startup --python tests/test_headless.py.
 
-FBXZIP_ADDON_PARENT can point to a downloaded/installed add-on's parent directory.
+FBXZIP_ADDON_PARENT and FBXZIP_ADDON_MODULE select a downloaded/installed add-on.
 """
 import bpy
 import importlib
@@ -17,10 +17,10 @@ addon_module = os.environ.get('FBXZIP_ADDON_MODULE', 'Faidlix_FBXZip')
 sys.path.insert(0, addon_parent)
 addon = importlib.import_module(addon_module)
 addon.register()
-assert addon.bl_info['version'] == (1, 8, 8)
-assert addon.ADDON_VERSION == (1, 8, 8)
+assert getattr(addon,'bl_info',{'version':addon.ADDON_VERSION})['version'] == (1, 8, 9)
+assert addon.ADDON_VERSION == (1, 8, 9)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
-assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
+assert getattr(addon,'bl_info',{'name':addon.FBXZIP_PT_panel.bl_label})['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
 assert hasattr(addon.FBXZIP_PT_panel, 'draw_header_preset')
 assert addon.FBXZIP_PT_panel.bl_category == 'Faidlix'
@@ -94,12 +94,12 @@ class _PanelLayoutProbe:
 
 
 panel_probe = type('_PanelProbe', (), {'layout': _PanelLayoutProbe()})()
-legacy_info = addon.bl_info
-del addon.bl_info
+legacy_info = getattr(addon,'bl_info',None)
+if legacy_info is not None: del addon.bl_info
 try:
     addon.FBXZIP_PT_panel.draw(panel_probe, bpy.context)
 finally:
-    addon.bl_info = legacy_info
+    if legacy_info is not None: addon.bl_info = legacy_info
 assert panel_probe.layout.labels == []
 assert panel_probe.layout.operators == [
     ('export_scene.fbx_zip', 'Export FBX + ZIP'),
@@ -292,6 +292,26 @@ with tempfile.TemporaryDirectory(prefix='fbxzip_action_') as folder:
     assert result == {'FINISHED'}, result
     with zipfile.ZipFile(no_unity_package) as archive:
         assert 'actions_without_unity.fbx.meta' not in archive.namelist()
+    actions[0]['_faidlix_action_loop']=True
+    actions[0].use_cyclic=True
+    actions[1]['_faidlix_action_loop']=False
+    copied=actions[0].copy(); copied.name='Fairy_Idle_Copy'; copied.use_fake_user=True
+    addon._refresh_action_items(bpy.context.window_manager,[armature],preserve=False)
+    items=bpy.context.window_manager.fbxzip_action_items
+    assert len(items)==3
+    assert {i.action_name:i.unity_loop_pose for i in items}=={'Fairy_Idle':True,'Fairy_Idle_Copy':True,'Fairy_Run':False}
+    for i in items: i.include=True; i.unity_loop_pose=not i.unity_loop_pose
+    tagged_package=Path(folder)/'actions_tagged.zip'
+    assert bpy.ops.export_scene.fbx_zip(filepath=str(tagged_package),use_selection=True,object_types={'ARMATURE'},package_textures=False,bake_anim=True,select_actions=True)=={'FINISHED'}
+    with zipfile.ZipFile(tagged_package) as archive:
+        meta=archive.read('actions_tagged.fbx.meta').decode('utf8')
+        for name,value in [('Fairy_Idle',1),('Fairy_Idle_Copy',1),('Fairy_Run',0)]:
+            block=meta.split('name: "'+name+'"',1)[1].split('    - serializedVersion:',1)[0]
+            assert f'loopTime: {value}' in block and f'loopBlend: {value}' in block,block
+    bpy.data.actions.remove(copied)
+    for action in actions:
+        del action['_faidlix_action_loop']; action.use_cyclic=False
+    addon._refresh_action_items(bpy.context.window_manager,[armature],preserve=False)
 assert armature.animation_data.action == original_action
 assert len(armature.animation_data.nla_tracks) == 1
 assert armature.animation_data.nla_tracks[0].name == 'ExistingTrack'
@@ -305,7 +325,7 @@ assert addon._action_conflicts(bpy.context.window_manager.fbxzip_action_items)
 addon._dedupe_action_names(bpy.context.window_manager.fbxzip_action_items)
 assert [item.export_name for item in bpy.context.window_manager.fbxzip_action_items] == ['Duplicate', 'Duplicate_001']
 
-report = {'result':'PASS','version':list(addon.bl_info['version']),'module':addon.__file__,'panel':addon.FBXZIP_PT_panel.bl_label,'category':'Faidlix','generated_texture':'PASS','dead_branch_excluded':'PASS','all_material_textures':'PASS','renamed_fbx_reference':'PASS','selected_action_only':'PASS','unity_clip_action_name':'PASS','unity_loop_settings':'PASS','unity_settings_optional':'PASS','state_restored':'PASS'}
+report = {'result':'PASS','version':list(addon.ADDON_VERSION),'module':addon.__file__,'panel':addon.FBXZIP_PT_panel.bl_label,'category':'Faidlix','generated_texture':'PASS','dead_branch_excluded':'PASS','all_material_textures':'PASS','renamed_fbx_reference':'PASS','selected_action_only':'PASS','unity_clip_action_name':'PASS','unity_loop_settings':'PASS','action_editor_loop_tags':'PASS','unity_settings_optional':'PASS','state_restored':'PASS'}
 output = root/'validation-output'
 output.mkdir(exist_ok=True)
 (output/'smoke.json').write_text(json.dumps(report, indent=2), encoding='utf8')

@@ -1,9 +1,9 @@
-"""Faidlix_BatchCleanKey, independent Blender extension."""
+"""Action Editor extension. Enable in Blender; open the Faidlix sidebar."""
 from . import core, ui, compose, compose_ui, adjust, adjust_ui
 
-ADDON_VERSION = '1.6.2'
-bl_info = {'name': 'Faidlix_BatchCleanKey', 'author': 'Faidlix',
-           'version': (1, 6, 2), 'blender': (5, 2, 0), 'category': 'Animation'}
+ADDON_VERSION = '1.7.0'
+bl_info = {'name': 'Action Editor', 'author': 'Faidlix',
+           'version': (1, 7, 0), 'blender': (5, 2, 0), 'category': 'Animation'}
 
 populate = ui.populate
 BCK_OT_Select = ui.BCK_OT_Select

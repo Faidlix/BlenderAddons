@@ -80,16 +80,16 @@
       "id": "faidlix_fbx_zip_exporter",
       "name": "Faidlix_Fbx ZipExporter",
       "tagline": "Export selected actions and material textures to FBX ZIP",
-      "version": "1.8.8",
+      "version": "1.8.9",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:MIT"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_fbx_zip_exporter-1.8.8.zip",
-      "archive_size": 20332,
-      "archive_hash": "sha256:138ae3561c3f564b642617596d51ccffafa87ed3fa4ca1ae0084980eaf4afb71"
+      "archive_url": "./faidlix_fbx_zip_exporter-1.8.9.zip",
+      "archive_size": 20720,
+      "archive_hash": "sha256:00cbf1c58ecbe5ff3c4a1ffc1e52e2785a41602d76ce0a0458ef436ceea41b26"
     },
     {
       "schema_version": "1.0.0",
@@ -142,34 +142,34 @@
     {
       "schema_version": "1.0.0",
       "id": "faidlix_batch_clean_key",
-      "name": "Faidlix_BatchCleanKey",
+      "name": "Action Editor",
       "tagline": "Batch clean, delete or decimate keys for selected bones",
-      "version": "1.6.2",
+      "version": "1.7.0",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:GPL-3.0-or-later"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_batch_clean_key-1.6.2.zip",
-      "archive_size": 64203,
-      "archive_hash": "sha256:e0f2c141755bfdafad7431adc39a2671dc76152aa8b10860f8352ff7321d40fc"
+      "archive_url": "./faidlix_batch_clean_key-1.7.0.zip",
+      "archive_size": 66900,
+      "archive_hash": "sha256:d16079b7ddd1098a003de4a26963ce98fee30b601d343769f60277d11c72d877"
     },
     {
       "schema_version": "1.0.0",
       "id": "faidlix_manager",
       "name": "Faidlix Manager",
       "tagline": "Update installed Faidlix Blender extensions together",
-      "version": "1.1.6",
+      "version": "1.1.7",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:GPL-3.0-or-later"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_manager-1.1.6.zip",
-      "archive_size": 5073,
-      "archive_hash": "sha256:ad6fb71f4bafae6f2b543b29821341c5c36efeb406349d27c4c407eda27c1b0c"
+      "archive_url": "./faidlix_manager-1.1.7.zip",
+      "archive_size": 5188,
+      "archive_hash": "sha256:7db50c2649b10a3872f924d0172f725bfe2d6e6409a4da529211351b4353efd8"
     }
   ]
 }

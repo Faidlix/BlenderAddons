@@ -1,10 +1,11 @@
+"""Check integer frame settings and untouched fractional keys; run with Blender --background --python this_file.py."""
 import bpy,sys,os,importlib
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 addon=importlib.import_module(os.environ.get('BCK_TEST_MODULE','Faidlix_BatchCleanKey'))
 if not hasattr(bpy.types.WindowManager,'faidlix_batch_clean_key'): addon.register()
 for cls,names in [(addon.ui.BCK_PG_State,('flip_step','loop_step','sample_step')),
- (addon.ui.BCK_OT_Flip,('sample_step',)),(addon.ui.BCK_OT_Loop,('sample_step',)),
+ (addon.ui.BCK_OT_Flip,('sample_step',)),
  (addon.compose_ui.BCK_OT_CombineSettings,('start','end','step','transition','source_start','source_end','position','duration'))]:
  for name in names:
   rna=cls.bl_rna if issubclass(cls,bpy.types.PropertyGroup) else getattr(bpy.ops.faidlix_batch_clean_key,cls.bl_idname.split('.')[1]).get_rna_type()

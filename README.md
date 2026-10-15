@@ -14,13 +14,13 @@ Blender Repository URL：
 - [Faidlix Texture Marge 1.5.8](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/blander_texture_marge-1.5.8.zip)：貼圖通道合併與材質串接。
 - [Faidlix BakeMap 2.3.11](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_bakemap-2.3.11.zip)：材質資訊烘焙。
 - [Faidlix Bone Remap 0.6.19](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_bone_remap-0.6.19.zip)：批次骨架動畫重定向。
-- [Faidlix_Fbx ZipExporter 1.8.8](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_fbx_zip_exporter-1.8.8.zip)：選擇 Actions 與材質貼圖後輸出 FBX ZIP，以單一 Loop Pose 按鈕一併設定 Unity 循環，並在狀態列顯示打包進度。
-- [Faidlix Manager 1.1.6](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_manager-1.1.6.zip)：選配的共通功能與固定於側邊欄頂端的「全部更新」控制列。
+- [Faidlix_Fbx ZipExporter 1.8.9](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_fbx_zip_exporter-1.8.9.zip)：選擇 Actions 與材質貼圖後輸出 FBX ZIP，以單一 Loop Pose 按鈕一併設定 Unity 循環，並在狀態列顯示打包進度。
+- [Faidlix Manager 1.1.7](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_manager-1.1.7.zip)：選配的共通功能與固定於側邊欄頂端的「全部更新」控制列。
 - [Faidlix_Outliner 0.2.17](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_outliner-0.2.17.zip)：階層選取與批次顯示控制。
 - [Faidlix Paint 0.4.8](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_paint-0.4.8.zip)：整層、遮罩與 UV 島填色。
 - [Faidlix_Weight 1.3.2](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_weight-1.3.2.zip)：選取點權重鏡射與左右名稱對應。
 
-- [Faidlix_BatchCleanKey 1.6.2](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_batch_clean_key-1.6.2.zip)：依選定骨骼，跨 Action 批次刪除、清理與縮減 Key。
+- [Action Editor 1.7.0](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_batch_clean_key-1.7.0.zip)：依選定骨骼，跨 Action 批次刪除、清理與縮減 Key。
 
 安裝 Manager 不是使用其他外掛的前提。Manager 只會更新已安裝的 Faidlix 套件，不會自動安裝其他外掛。
 

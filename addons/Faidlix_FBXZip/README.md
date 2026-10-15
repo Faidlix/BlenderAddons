@@ -1,3 +1,5 @@
+Action Editor 1.7.0 的循環開關會自動帶入 Unity Loop Pose／Loop Time；開啟與關閉都會覆蓋該 Action 的匯出預設。未設定循環標記的 Action 沿用匯出介面選項。原生複製的 Action 也會繼承設定，外掛可獨立使用。
+
 # Faidlix_Fbx ZipExporter
 
 Blender 5.2+ Extension. It exposes adjustable FBX export settings and packages the exported FBX plus selected Actions and material image textures into one ZIP file.
