@@ -1,4 +1,4 @@
-"""Verify direct loop toggle, Pose activation and Undo in an isolated GUI Blender.
+"""Verify direct loop toggle, Vector seams, Pose activation and Undo in an isolated GUI Blender.
 Run blender --factory-startup --enable-event-simulate --python this_file.py;
 BCK_TEST_MODULE may name a freshly installed package instead of the source.
 """
@@ -38,6 +38,11 @@ def test():
    elif stage==1:
     if s.pending or s.running:return .1
     assert a.ui.looping.enabled(bpy.data.actions['LoopGUI']),s.last_result
+    curve=a.ui.looping._bag(bpy.data.actions['LoopGUI'],obj).fcurves[0]
+    assert curve.keyframe_points[0].handle_right_type=='VECTOR'
+    assert curve.keyframe_points[-1].handle_left_type=='VECTOR'
+    assert a.ui.looping._slope(curve.keyframe_points[0],'right')>0
+    assert a.ui.looping._slope(curve.keyframe_points[-1],'left')>0
     bpy.ops.wm.call_panel(name='BCK_PT_view3d',keep_open=True);stage=10
    elif stage==10:
     bpy.ops.screen.screenshot(filepath=str(ROOT/'validation/action-editor-loop-on.png'))

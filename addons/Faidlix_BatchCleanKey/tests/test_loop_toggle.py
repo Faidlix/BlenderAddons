@@ -1,5 +1,5 @@
 """Run with Blender --background --factory-startup --python this_file.py.
-Checks sparse looping, C1 tangents, cancellation, copy state and foreign slots.
+Checks sparse looping, Vector crossings, smooth extrema, cancellation and copy state.
 """
 import bpy,sys,importlib,os,math,tempfile
 from pathlib import Path
@@ -41,11 +41,12 @@ for c in bag.fcurves:
  assert c.keyframe_points[0].co.x==0 and c.keyframe_points[-1].co.x==20
  assert c.keyframe_points[0].co.y==c.keyframe_points[-1].co.y
  assert len(c.keyframe_points)==4
- assert math.isclose(a.ui.looping._slope(c.keyframe_points[0],'right'),a.ui.looping._slope(c.keyframe_points[-1],'left'),abs_tol=1e-6)
+ if c.keyframe_points[0].handle_right_type!='VECTOR':
+  assert math.isclose(a.ui.looping._slope(c.keyframe_points[0],'right'),a.ui.looping._slope(c.keyframe_points[-1],'left'),abs_tol=1e-6)
  assert [m.type for m in c.modifiers]==['CYCLES']
 assert bag.fcurves[0].keyframe_points[0].handle_right_type=='VECTOR'
 assert abs(a.ui.looping._slope(bag.fcurves[1].keyframe_points[0],'right'))<1e-6
-assert bag.fcurves[2].keyframe_points[0].handle_right_type in {'ALIGNED','FREE'}
+assert bag.fcurves[2].keyframe_points[0].handle_right_type=='VECTOR'
 assert bag.fcurves[3].lock and bag.fcurves[3].mute
 assert bpy.ops.faidlix_batch_clean_key.duplicate(action_name='LoopToggle',destination='CURRENT')=={'FINISHED'}
 copy=obj.animation_data.action;copy_name=copy.name;assert a.ui.looping.enabled(copy)
@@ -58,7 +59,7 @@ for c in a.ui.looping._bag(action,obj).fcurves:
 assert a.ui.looping.enabled(bpy.data.actions[copy_name])
 assert bpy.ops.faidlix_batch_clean_key.duplicate(action_name='LoopToggle',destination='CURRENT')=={'FINISHED'}
 assert not a.ui.looping.enabled(obj.animation_data.action)
-print('LOOP_TOGGLE_PASS sparse_only C1 extrema_vector_asymmetric foreign_slot cancel copy_on_off off_keeps_geometry')
+print('LOOP_TOGGLE_PASS sparse_only extrema_vector_asymmetric foreign_slot cancel copy_on_off off_keeps_geometry')
 
 modified=bpy.data.actions.new('LoopModifiers');modified.use_fake_user=True
 ms=modified.slots.new('OBJECT',obj.name);mb=modified.layers.new('Layer').strips.new(type='KEYFRAME').channelbag(ms,ensure=True)

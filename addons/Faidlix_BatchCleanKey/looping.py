@@ -3,6 +3,7 @@
 Only the resolved rig slot is edited. A native Action copy stages all changes;
 closing the generator before commit leaves the source and all users untouched.
 The public _faidlix_action_loop boolean is also read by independent exporters.
+At a same-direction seam use native Vector handles; extrema use flat smooth handles.
 """
 import math
 import bpy
@@ -52,7 +53,6 @@ def _close_curve(curve, start, end):
     if len(points) == 1:
         return
     first, last = points[0], points[-1]
-    outgoing, incoming = _slope(first, 'right'), _slope(last, 'left')
     delta = first.co.y-last.co.y
     last.co.y = first.co.y
     last.handle_left.y += delta; last.handle_right.y += delta
@@ -62,24 +62,20 @@ def _close_curve(curve, start, end):
     left_span = end-points[-2].co.x
     right_secant = (points[1].co.y-first.co.y)/right_span
     left_secant = (last.co.y-points[-2].co.y)/left_span
-    if right_secant*left_secant <= 1e-12:
+    crossing = (right_secant > 0 and left_secant > 0) or (right_secant < 0 and left_secant < 0)
+    if not crossing:
         slope = 0.0
         first.handle_left_type = first.handle_right_type = 'AUTO_CLAMPED'
         last.handle_left_type = last.handle_right_type = 'AUTO_CLAMPED'
     else:
-        if outgoing*right_secant <= 1e-12: outgoing = right_secant
-        if incoming*left_secant <= 1e-12: incoming = left_secant
-        slope = 2/(1/outgoing+1/incoming)
-        slope = math.copysign(min(abs(slope), 3*min(abs(right_secant), abs(left_secant))), slope)
-        _handles(first, slope, right_span); _handles(last, slope, left_span)
-        if math.isclose(right_secant, left_secant, rel_tol=1e-5, abs_tol=1e-6):
-            first.handle_left_type = first.handle_right_type = 'VECTOR'
-            last.handle_left_type = last.handle_right_type = 'VECTOR'
-        else:
-            first.handle_left_type = first.handle_right_type = 'ALIGNED'
-            last.handle_left_type = last.handle_right_type = 'ALIGNED'
+        # Match Blender's V > Vector operation, including asymmetric slopes.
+        # Do not replace these with a shared slope or classify by amplitude.
+        first.handle_left_type = first.handle_right_type = 'VECTOR'
+        last.handle_left_type = last.handle_right_type = 'VECTOR'
+        curve.update()
+        return
     curve.update()
-    # Native auto handles can react to modifiers/smoothing. C1 continuity wins.
+    # Keep actual extrema horizontal if native smoothing reacts to modifiers.
     if not (math.isclose(_slope(first, 'right'), slope, rel_tol=1e-5, abs_tol=1e-6)
             and math.isclose(_slope(last, 'left'), slope, rel_tol=1e-5, abs_tol=1e-6)):
         _handles(first, slope, right_span); _handles(last, slope, left_span)
