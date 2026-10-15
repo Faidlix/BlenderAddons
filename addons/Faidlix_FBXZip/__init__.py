@@ -1,7 +1,13 @@
+"""Export selected Blender objects, Actions, and used textures as an FBX ZIP.
+
+Use the Faidlix sidebar button to open the export dialog; configure FBX, Action,
+Unity loop, material, and texture options there before exporting.
+"""
+
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 7),
+    "version": (1, 8, 8),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -33,7 +39,7 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 7)
+ADDON_VERSION = (1, 8, 8)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
@@ -485,8 +491,7 @@ class FBXZIP_PG_action_item(PropertyGroup):
     slot_identifier: StringProperty(name="Slot")
     include: BoolProperty(name="", default=True)
     export_name: StringProperty(name="Unity Clip")
-    unity_loop_time: BoolProperty(name="Loop Time", default=False)
-    unity_loop_pose: BoolProperty(name="Loop Pose", default=False)
+    unity_loop_pose: BoolProperty(name="Loop Pose", default=True)
     frame_start: FloatProperty()
     frame_end: FloatProperty()
 
@@ -537,11 +542,8 @@ class FBXZIP_UL_actions(UIList):
         row.label(text=f"{item.frame_start:g}-{item.frame_end:g}")
         operator = _active_export_operator(context)
         unity_enabled = bool(operator and operator.unity_settings)
-        loop_time = row.row(align=True)
-        loop_time.enabled = unity_enabled
-        loop_time.prop(item, "unity_loop_time", text="Loop Time", toggle=True)
         loop_pose = row.row(align=True)
-        loop_pose.enabled = unity_enabled and item.unity_loop_time
+        loop_pose.enabled = unity_enabled
         loop_pose.prop(item, "unity_loop_pose", text="Loop Pose", toggle=True)
 
 
@@ -670,7 +672,6 @@ def _refresh_action_items(window_manager, objects, preserve=True):
         (item.action_name, item.object_name, item.slot_identifier): (
             item.include,
             item.export_name,
-            item.unity_loop_time,
             item.unity_loop_pose,
         )
         for item in window_manager.fbxzip_action_items
@@ -689,12 +690,11 @@ def _refresh_action_items(window_manager, objects, preserve=True):
         item.object_name = target.name
         item.slot_identifier = slot_identifier
         item.frame_start, item.frame_end = action.frame_range
-        include, export_name, loop_time, loop_pose = previous.get(
-            key, (True, action.name, False, False)
+        include, export_name, loop_pose = previous.get(
+            key, (True, action.name, True)
         )
         item.include = include
         item.export_name = export_name
-        item.unity_loop_time = loop_time
         item.unity_loop_pose = loop_pose
 
 
@@ -719,16 +719,12 @@ def _unity_clip_rows(action_items):
                 "name": name,
                 "first_frame": item.frame_start,
                 "last_frame": item.frame_end,
-                "loop_time": False,
                 "loop_pose": False,
             },
         )
         clip["first_frame"] = min(clip["first_frame"], item.frame_start)
         clip["last_frame"] = max(clip["last_frame"], item.frame_end)
-        clip["loop_time"] = clip["loop_time"] or item.unity_loop_time
         clip["loop_pose"] = clip["loop_pose"] or item.unity_loop_pose
-    for clip in clips.values():
-        clip["loop_pose"] = clip["loop_time"] and clip["loop_pose"]
     return list(clips.values())
 
 
@@ -753,7 +749,7 @@ def _unity_meta_text(fbx_name, action_items, source_path=""):
             "      cycleOffset: 0",
             "      loop: 0",
             "      hasAdditiveReferencePose: 0",
-            f"      loopTime: {int(clip['loop_time'])}",
+            f"      loopTime: {int(clip['loop_pose'])}",
             f"      loopBlend: {int(clip['loop_pose'])}",
             "      loopBlendOrientation: 0",
             "      loopBlendPositionY: 0",

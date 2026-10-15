@@ -16,7 +16,7 @@ The export dialog reads the current settings from Blender's native FBX exporter 
 
 The export dialog's top **Operator Presets** menu uses the same native `export_scene.fbx` preset folder as Blender's FBX exporter. Presets such as `ToUnity` and `ToUnityPackTexture` therefore appear in both places; the `+` button saves a shared FBX preset.
 
-When **帶入 Unity 設定** is enabled, the ZIP also contains an `.fbx.meta` file. Each selected Action has text toggles for Unity **Loop Time** and **Loop Pose**; Loop Pose is available only while Loop Time is enabled. Extract the FBX and its matching `.meta` file together into a Unity project's Assets folder to retain those clip settings.
+When **帶入 Unity 設定** is enabled, the ZIP also contains an `.fbx.meta` file. Each selected Action has one **Loop Pose** text toggle, enabled by default. Turning it on writes both Unity **Loop Time** and **Loop Pose** as enabled; turning it off disables both. Extract the FBX and its matching `.meta` file together into a Unity project's Assets folder to retain those clip settings.
 
 Materials always use **Keep Blender Materials**; the shader dropdown is removed. The original shader graph is retained. The default texture mode traces backwards from active material outputs on exported objects and used material slots, including nested node groups. The optional all-textures mode includes every image node in those materials while still excluding unrelated scene images. The texture dialog can include/exclude and rename package files; temporary image paths keep FBX references synchronized with renamed files.
 

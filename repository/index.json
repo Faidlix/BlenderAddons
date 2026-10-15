@@ -80,16 +80,16 @@
       "id": "faidlix_fbx_zip_exporter",
       "name": "Faidlix_Fbx ZipExporter",
       "tagline": "Export selected actions and material textures to FBX ZIP",
-      "version": "1.8.7",
+      "version": "1.8.8",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:MIT"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_fbx_zip_exporter-1.8.7.zip",
-      "archive_size": 20302,
-      "archive_hash": "sha256:b5fa5d04d03e413a57e15b68c97b5db97fdfe1cf64c284f945247ba7f4f320cb"
+      "archive_url": "./faidlix_fbx_zip_exporter-1.8.8.zip",
+      "archive_size": 20332,
+      "archive_hash": "sha256:138ae3561c3f564b642617596d51ccffafa87ed3fa4ca1ae0084980eaf4afb71"
     },
     {
       "schema_version": "1.0.0",

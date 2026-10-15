@@ -17,8 +17,8 @@ addon_module = os.environ.get('FBXZIP_ADDON_MODULE', 'Faidlix_FBXZip')
 sys.path.insert(0, addon_parent)
 addon = importlib.import_module(addon_module)
 addon.register()
-assert addon.bl_info['version'] == (1, 8, 7)
-assert addon.ADDON_VERSION == (1, 8, 7)
+assert addon.bl_info['version'] == (1, 8, 8)
+assert addon.ADDON_VERSION == (1, 8, 8)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert addon.bl_info['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
@@ -26,6 +26,9 @@ assert hasattr(addon.FBXZIP_PT_panel, 'draw_header_preset')
 assert addon.FBXZIP_PT_panel.bl_category == 'Faidlix'
 assert addon.FBXZIP_PT_panel.bl_order == 20
 assert 'DEFAULT_CLOSED' in addon.FBXZIP_PT_panel.bl_options
+action_properties = addon.FBXZIP_PG_action_item.bl_rna.properties
+assert 'unity_loop_time' not in action_properties
+assert action_properties['unity_loop_pose'].default is True
 assert hasattr(bpy.types, 'EXPORT_SCENE_OT_fbx_zip_online_update')
 assert addon.REPOSITORY_URL == 'https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json'
 assert addon._normalized_url(addon._fresh_repository_url()) == addon._normalized_url(addon.REPOSITORY_URL)
@@ -225,9 +228,9 @@ for item in bpy.context.window_manager.fbxzip_action_items:
     item.include = item.action_name == 'Fairy_Run'
 addon._refresh_action_items(bpy.context.window_manager, [armature], preserve=False)
 for item in bpy.context.window_manager.fbxzip_action_items:
+    assert item.unity_loop_pose is True
     item.include = True
     item.export_name = item.action_name
-    item.unity_loop_time = True
     item.unity_loop_pose = item.action_name == 'Fairy_Run'
 with tempfile.TemporaryDirectory(prefix='fbxzip_action_') as folder:
     package = Path(folder)/'actions_all.zip'
@@ -255,7 +258,7 @@ with tempfile.TemporaryDirectory(prefix='fbxzip_action_') as folder:
         assert 'name: "Fairy_Run"' in unity_meta
         idle_meta = unity_meta.split('name: "Fairy_Idle"', 1)[1].split('name: "Fairy_Run"', 1)[0]
         run_meta = unity_meta.split('name: "Fairy_Run"', 1)[1]
-        assert 'loopTime: 1' in idle_meta and 'loopBlend: 0' in idle_meta
+        assert 'loopTime: 0' in idle_meta and 'loopBlend: 0' in idle_meta
         assert 'loopTime: 1' in run_meta and 'loopBlend: 1' in run_meta
     for item in bpy.context.window_manager.fbxzip_action_items:
         item.include = item.action_name == 'Fairy_Idle'
