@@ -1,5 +1,5 @@
 """Regression for native Vector loop seams; run Blender --background --python this_file.py.
-BCK_TEST_MODULE optionally chooses an installed extension. Includes tiny and offset curves.
+BCK_TEST_MODULE optionally chooses an installed extension. Tests tiny/offset seams and interior keyed extrema.
 """
 import bpy,importlib,os,sys,math
 from pathlib import Path
@@ -26,3 +26,26 @@ for name,offset,amp,direction in cases:
  else:
   assert abs(a.ui.looping._slope(p[0],'right'))<1e-7 and abs(a.ui.looping._slope(p[-1],'left'))<1e-7,name
 print('LOOP_VECTOR_SEAMS_PASS rising falling offset tiny asymmetric extrema sparse')
+# Interior tilted handles reproduce the screenshot: extrema drift away from keys.
+act=bpy.data.actions.new('InteriorExtrema');slot=act.slots.new('OBJECT','Fixture')
+bag=act.layers.new('L').strips.new(type='KEYFRAME').channelbag(slot,ensure=True)
+c=bag.fcurves.new('location',index=0)
+for frame,value in ((0,10),(5,7),(12,3),(17,5),(23,9),(28,14),(35,10)):
+ p=c.keyframe_points.insert(frame,value);p.interpolation='BEZIER'
+c.update()
+for p in c.keyframe_points:
+ p.handle_left_type=p.handle_right_type='FREE'
+ p.handle_left=(p.co.x-1,p.co.y-1);p.handle_right=(p.co.x+1,p.co.y+1)
+old=[tuple(p.co) for p in c.keyframe_points]
+unchanged={i:(tuple(c.keyframe_points[i].handle_left),tuple(c.keyframe_points[i].handle_right)) for i in (1,3,4)}
+a.ui.looping._smooth_interior_extrema(c)
+assert [tuple(p.co) for p in c.keyframe_points]==old
+for i in (2,5):
+ p=c.keyframe_points[i]
+ assert p.handle_left.y==p.co.y==p.handle_right.y
+ for dt in (-.05,.05):
+  value=c.evaluate(p.co.x+dt)
+  assert (value>=p.co.y if i==2 else value<=p.co.y)
+for i,handles in unchanged.items():
+ assert (tuple(c.keyframe_points[i].handle_left),tuple(c.keyframe_points[i].handle_right))==handles
+print('LOOP_INTERIOR_EXTREMA_PASS keyed_extrema horizontal no_key_moves monotonic_handles_preserved')

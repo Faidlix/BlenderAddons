@@ -1,5 +1,5 @@
 """Run with Blender --background --factory-startup --python this_file.py.
-Checks sparse looping, Vector crossings, smooth extrema, cancellation and copy state.
+Checks sparse looping, Vector crossings, interior horizontal extrema, cancellation and copy state.
 """
 import bpy,sys,importlib,os,math,tempfile
 from pathlib import Path
@@ -47,6 +47,10 @@ for c in bag.fcurves:
 assert bag.fcurves[0].keyframe_points[0].handle_right_type=='VECTOR'
 assert abs(a.ui.looping._slope(bag.fcurves[1].keyframe_points[0],'right'))<1e-6
 assert bag.fcurves[2].keyframe_points[0].handle_right_type=='VECTOR'
+for curve in (bag.fcurves[0],bag.fcurves[2]):
+ for point in list(curve.keyframe_points)[1:-1]:
+  assert abs(a.ui.looping._slope(point,'left'))<1e-6
+  assert abs(a.ui.looping._slope(point,'right'))<1e-6
 assert bag.fcurves[3].lock and bag.fcurves[3].mute
 assert bpy.ops.faidlix_batch_clean_key.duplicate(action_name='LoopToggle',destination='CURRENT')=={'FINISHED'}
 copy=obj.animation_data.action;copy_name=copy.name;assert a.ui.looping.enabled(copy)

@@ -4,6 +4,7 @@ Only the resolved rig slot is edited. A native Action copy stages all changes;
 closing the generator before commit leaves the source and all users untouched.
 The public _faidlix_action_loop boolean is also read by independent exporters.
 At a same-direction seam use native Vector handles; extrema use flat smooth handles.
+Enabling looping also flattens interior keyed extrema without moving their keys.
 """
 import math
 import bpy
@@ -36,6 +37,26 @@ def _handles(point, slope, span):
     point.handle_left_type = point.handle_right_type = 'FREE'
     point.handle_left = (point.co.x-distance, point.co.y-slope*distance)
     point.handle_right = (point.co.x+distance, point.co.y+slope*distance)
+
+
+def _smooth_interior_extrema(curve):
+    points = curve.keyframe_points
+    for i in range(1, len(points)-1):
+        point = points[i]
+        incoming = point.co.y-points[i-1].co.y
+        outgoing = points[i+1].co.y-point.co.y
+        if not ((incoming > 0 and outgoing < 0) or (incoming < 0 and outgoing > 0)):
+            continue
+        # Keep horizontal handle lengths inside the adjacent key intervals.
+        left = min(point.co.x-points[i-1].co.x, abs(point.co.x-point.handle_left.x))
+        right = min(points[i+1].co.x-point.co.x, abs(point.handle_right.x-point.co.x))
+        if left == 0: left = (point.co.x-points[i-1].co.x)/3
+        if right == 0: right = (points[i+1].co.x-point.co.x)/3
+        point.handle_left_type = point.handle_right_type = 'ALIGNED'
+        point.handle_left = (point.co.x-left, point.co.y)
+        point.handle_right = (point.co.x+right, point.co.y)
+        point.interpolation = points[i-1].interpolation = 'BEZIER'
+    curve.update()
 
 
 def _close_curve(curve, start, end):
@@ -124,6 +145,7 @@ def toggle_steps(context, obj, action, turn_on):
                 modifier = curve.modifiers.new('CYCLES')
                 modifier.mode_before = modifier.mode_after = 'REPEAT'
                 _close_curve(curve, start, end)
+                _smooth_interior_extrema(curve)
             else:
                 # Freeze seam geometry before removing cyclic auto-handle context.
                 if curve.keyframe_points and any(m.type == 'CYCLES' for m in curve.modifiers):
