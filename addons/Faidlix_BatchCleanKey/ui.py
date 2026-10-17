@@ -8,7 +8,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror, looping
 
-ADDON_VERSION = '1.8.6'
+ADDON_VERSION = '1.8.7'
 _sync_signature = None
 _observed_active = None
 _refreshing = False
