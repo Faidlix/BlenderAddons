@@ -52,11 +52,11 @@ def test():
     assert math.isclose(curve().evaluate(3),math.radians(30),abs_tol=1e-5),mode
     assert bpy.ops.faidlix_batch_clean_key.pose_hold(anchor='FIRST')=={'FINISHED'}
     assert math.isclose(curve().evaluate(2.5),math.radians(20),abs_tol=1e-5),mode
-    assert bpy.ops.faidlix_batch_clean_key.rotation_align('INVOKE_DEFAULT')=={'RUNNING_MODAL'}
+    assert bpy.ops.faidlix_batch_clean_key.rotation_align('INVOKE_DEFAULT')=={'INTERFACE'}
    elif stage==3:
     for value in ('PRESS','RELEASE'):bpy.context.window.event_simulate(type='ESC',value=value)
    elif stage==4:
-    assert bpy.ops.faidlix_batch_clean_key.pose_hold('INVOKE_DEFAULT')=={'RUNNING_MODAL'}
+    assert bpy.ops.faidlix_batch_clean_key.pose_hold('INVOKE_DEFAULT')=={'INTERFACE'}
    elif stage==5:
     for value in ('PRESS','RELEASE'):bpy.context.window.event_simulate(type='ESC',value=value)
    elif stage==6:

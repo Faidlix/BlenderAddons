@@ -1,3 +1,7 @@
+# Action Editor 1.8.3
+
+「固定姿勢」與「旋轉對齊」改用點選即關閉的原生選單，執行一次後選項立即消失；Esc 或點選外部可取消，不修改 Key。
+
 # Action Editor 1.8.2
 
 「旋轉對齊」與「固定姿勢」也可從 Dope Sheet（含 Action Editor）、Timeline、Graph Editor 的 Key 右鍵選單呼叫，直接點選前／後或第一／最後基準。保持目前骨架在 Pose 模式並選取骨頭與 Key，無須移回 3D View。

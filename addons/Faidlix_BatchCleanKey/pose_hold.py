@@ -2,6 +2,7 @@
 
 Hold selected bones in their local pose coordinates at existing selected times.
 Sample every bone at the shared boundary before editing; never bake new frames.
+Choices use a native dismiss-on-click menu; opening it never edits keys.
 """
 import bpy
 from bpy.props import EnumProperty
@@ -89,12 +90,8 @@ class BCK_OT_PoseHold(bpy.types.Operator):
         return bool(context.object and context.object.type=='ARMATURE' and context.object.mode=='POSE')
 
     def invoke(self,context,event):
-        return context.window_manager.invoke_popup(self,width=250)
-
-    def draw(self,context):
-        self.layout.operator_context='EXEC_DEFAULT'
-        for value,label in (('FIRST','以第一個 Key 為準'),('LAST','以最後一個 Key 為準')):
-            self.layout.operator(self.bl_idname,text=label).anchor=value
+        context.window_manager.popup_menu(draw_choices, title='')
+        return {'INTERFACE'}
 
     def execute(self,context):
         try: held,skipped,reference=hold(context,self.anchor)
@@ -103,6 +100,12 @@ class BCK_OT_PoseHold(bpy.types.Operator):
         self.report({'WARNING'} if skipped else {'INFO'},f'已固定 {len(held)} 根骨頭；基準影格 {reference:g}'+
                     ('；跳過鎖定、停用或修飾器／取樣骨頭：'+'、'.join(skipped) if skipped else ''))
         return {'FINISHED'}
+
+
+def draw_choices(self,context):
+    self.layout.operator_context='EXEC_DEFAULT'
+    for value,label in (('FIRST','以第一個 Key 為準'),('LAST','以最後一個 Key 為準')):
+        self.layout.operator(BCK_OT_PoseHold.bl_idname,text=label).anchor=value
 
 
 def menu(self,context):

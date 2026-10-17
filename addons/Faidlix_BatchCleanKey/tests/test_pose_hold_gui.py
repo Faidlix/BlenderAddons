@@ -1,4 +1,4 @@
-"""Isolated Blender GUI test for Pose pose-hold popup, cancellation and Undo/Redo.
+"""Isolated Blender GUI test for Pose pose-hold dismiss-on-click menu, cancellation and Undo/Redo.
 Run --factory-startup --enable-event-simulate --python this_file.py; BCK_TEST_MODULE selects installation.
 """
 import bpy,sys,os,importlib,time,traceback,math
@@ -29,7 +29,7 @@ def test():
    if stage==0:
     bpy.context.window.cursor_warp(area.x+area.width//2,area.y+area.height//2)
     bpy.ops.ed.undo_push(message='Before hold')
-    assert bpy.ops.faidlix_batch_clean_key.pose_hold('INVOKE_DEFAULT')=={'RUNNING_MODAL'}
+    assert bpy.ops.faidlix_batch_clean_key.pose_hold('INVOKE_DEFAULT')=={'INTERFACE'}
    elif stage==1:
     assert math.isclose(value(),math.radians(390),abs_tol=1e-5)
     bpy.ops.screen.screenshot(filepath=str(ROOT/'validation/pose-hold-popup.png'))
@@ -42,11 +42,11 @@ def test():
     bpy.ops.faidlix_batch_clean_key.pose_hold('INVOKE_DEFAULT')
     stage=20;return .7
    elif stage==20:
-    x=area.x+area.width//2+80;y=area.y+area.height//2-15
+    x=area.x+area.width//2-100;y=area.y+area.height//2+60
     bpy.context.window.event_simulate(type='MOUSEMOVE',value='NOTHING',x=x,y=y)
     stage=21;return .7
    elif stage==21:
-    x=area.x+area.width//2+80;y=area.y+area.height//2-15
+    x=area.x+area.width//2-100;y=area.y+area.height//2+60
     bpy.ops.screen.screenshot(filepath=str(ROOT/'validation/pose-hold-hover.png'))
     for val in ('PRESS','RELEASE'):bpy.context.window.event_simulate(type='LEFTMOUSE',value=val,x=x,y=y)
     stage=3;return .7

@@ -2,6 +2,7 @@
 
 Align selected rotation keys to one reference outside the shared selection range.
 Only equivalent Euler/axis-angle turns and quaternion signs are changed.
+Choices use a native dismiss-on-click menu; opening it never edits keys.
 """
 import math
 import bpy
@@ -108,12 +109,8 @@ class BCK_OT_RotationAlign(bpy.types.Operator):
         return bool(context.object and context.object.type=='ARMATURE' and context.object.mode=='POSE')
 
     def invoke(self,context,event):
-        return context.window_manager.invoke_popup(self,width=230)
-
-    def draw(self,context):
-        self.layout.operator_context='EXEC_DEFAULT'
-        for direction,label in (('PREVIOUS','對齊前方'),('NEXT','對齊後方')):
-            self.layout.operator(self.bl_idname,text=label).direction=direction
+        context.window_manager.popup_menu(draw_choices, title='')
+        return {'INTERFACE'}
 
     def execute(self,context):
         try:
@@ -122,6 +119,12 @@ class BCK_OT_RotationAlign(bpy.types.Operator):
             self.report({'WARNING'},str(exc)); return {'CANCELLED'}
         self.report({'WARNING'} if skipped else {'INFO'},f'已對齊 {changed} 個旋轉 Key'+('；跳過：'+'、'.join(skipped) if skipped else ''))
         return {'FINISHED'}
+
+
+def draw_choices(self,context):
+    self.layout.operator_context='EXEC_DEFAULT'
+    for value,label in (('PREVIOUS','對齊前方'),('NEXT','對齊後方')):
+        self.layout.operator(BCK_OT_RotationAlign.bl_idname,text=label).direction=value
 
 
 def menu(self,context):

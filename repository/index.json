@@ -144,16 +144,16 @@
       "id": "faidlix_batch_clean_key",
       "name": "Action Editor",
       "tagline": "Batch clean, delete or decimate keys for selected bones",
-      "version": "1.8.2",
+      "version": "1.8.3",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
         "SPDX:GPL-3.0-or-later"
       ],
       "blender_version_min": "5.2.0",
-      "archive_url": "./faidlix_batch_clean_key-1.8.2.zip",
-      "archive_size": 73895,
-      "archive_hash": "sha256:465c7b717af62ba361a585ce07fdccc7e23f8784ed1b164af5b5d8fa41f17625"
+      "archive_url": "./faidlix_batch_clean_key-1.8.3.zip",
+      "archive_size": 74066,
+      "archive_hash": "sha256:35c503d3d6a54e36ba0b3aaf43d3b98b3855ea0554fdc346f66bc05a743dd085"
     },
     {
       "schema_version": "1.0.0",
