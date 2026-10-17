@@ -1,3 +1,4 @@
+# Verify sparse mirror script API; run with Blender --background --python this_file.py.
 """Sparse channels must stay sparse after a mirrored Action swap."""
 import bpy, importlib, os, sys
 from types import SimpleNamespace
@@ -73,18 +74,5 @@ consume(addon.ui.mirror.steps(bpy.context,obj,a,'IN_PLACE',1,True))
 assert strip.action==obj.animation_data.action and strip.action.name==name
 assert {(c.data_path,c.array_index) for c in addon.core.action_curves(strip.action)}==expected
 check_times(strip.action)
-# Check both layouts, so the hidden interval cannot be accidentally drawn again.
-class Layout:
-    def __init__(self,log,row=False): self.log,self.is_row=log,row
-    def row(self,**kwargs): return Layout(self.log,True)
-    def prop(self,owner,name,**kwargs): self.log.append((name,self.is_row,kwargs))
-    def label(self,**kwargs): pass
-for enabled in (False,True):
-    log=[]
-    addon.ui.BCK_OT_Flip.draw(SimpleNamespace(layout=Layout(log),action_name=name,keyed_only=enabled,kind='MIRROR'),bpy.context)
-    button=next(item for item in log if item[0]=='keyed_only')
-    assert button[1] and button[2].get('toggle')
-    interval=[item for item in log if item[0]=='sample_step']
-    assert bool(interval)==(not enabled)
-    if interval: assert interval[0][1] and log.index(button)<log.index(interval[0])
+# Native two-choice UI is covered by test_flip_menu_gui.py; keyed API remains supported.
 print('MIRROR_KEYED_PASS per_curve_times subframes no_resampling Bezier sparse_components static_values empty_curves source_preserved cancel operator_option NLA')

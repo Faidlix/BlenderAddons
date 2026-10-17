@@ -1,4 +1,5 @@
 """Action Editor UI. Enable the extension; use the Faidlix sidebar or Pose menu.
+Flip opens two immediate copy-only choices, dismissed after selection.
 Selected scene rigs populate the existing picker and Action list; picker changes enter Pose Mode.
 """
 import time
@@ -7,7 +8,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror, looping
 
-ADDON_VERSION = '1.8.3'
+ADDON_VERSION = '1.8.4'
 _sync_signature = None
 _observed_active = None
 _refreshing = False
@@ -893,26 +894,24 @@ class BCK_OT_Flip(bpy.types.Operator):
     mode: EnumProperty(items=[('COPY', '建立翻轉副本', '保留原 Action'),
                               ('IN_PLACE', '修改原 Action', '原 Action 的所有使用者都會受到影響')], default='COPY')
 
-    def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self, width=460, confirm_text='翻轉')
+    @classmethod
+    def poll(cls, context):
+        state=context.window_manager.faidlix_batch_clean_key
+        return not state.running and not state.pending
 
-    def draw(self, context):
-        self.layout.label(text=self.action_name)
-        self.layout.prop(self,'kind',expand=True)
-        self.layout.prop(self, 'mode', expand=True)
-        if self.kind=='TIME':
-            self.layout.label(text='依指定骨架 Slot 的實際起訖反轉時間與貝茲控制柄')
-            self.layout.label(text='一般修飾器以原 Key 影格烘焙；取樣曲線轉為貝茲 Key')
-            return
-        row=self.layout.row(align=True)
-        row.prop(self, 'keyed_only', toggle=True)
-        if not self.keyed_only:
-            row.prop(self, 'sample_step')
-        if self.keyed_only:
-            self.layout.label(text='僅交換有 Key 的分量；未打 Key 的分量保留目前姿勢')
-        self.layout.label(text='以骨架 X 軸翻轉，依 Blender 左右骨骼名稱配對')
-        self.layout.label(text='保留各曲線原有 Key 影格，不補取樣 Key' if self.keyed_only else '依骨骼靜止軸向換算；保留原 Key 時間並加入間隔取樣')
-        self.layout.label(text='翻轉結果使用 Bezier 貝茲曲線')
+    def invoke(self, context, event):
+        action_name=self.action_name
+        def choices(menu, context):
+            menu.layout.operator_context='EXEC_DEFAULT'
+            for kind,label in (('MIRROR','左右翻轉'),('TIME','時間前後翻轉')):
+                op=menu.layout.operator(BCK_OT_Flip.bl_idname,text=label)
+                op.action_name=action_name
+                op.kind=kind
+                op.mode='COPY'
+                op.sample_step=1
+                op.keyed_only=False
+        context.window_manager.popup_menu(choices,title='')
+        return {'INTERFACE'}
 
     def execute(self, context):
         source, obj = bpy.data.actions.get(self.action_name), rig(context)
