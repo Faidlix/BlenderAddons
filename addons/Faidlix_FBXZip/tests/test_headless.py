@@ -17,8 +17,8 @@ addon_module = os.environ.get('FBXZIP_ADDON_MODULE', 'Faidlix_FBXZip')
 sys.path.insert(0, addon_parent)
 addon = importlib.import_module(addon_module)
 addon.register()
-assert getattr(addon,'bl_info',{'version':addon.ADDON_VERSION})['version'] == (1, 8, 9)
-assert addon.ADDON_VERSION == (1, 8, 9)
+assert getattr(addon,'bl_info',{'version':addon.ADDON_VERSION})['version'] == (1, 8, 10)
+assert addon.ADDON_VERSION == (1, 8, 10)
 assert addon.PACKAGE_ID == 'faidlix_fbx_zip_exporter'
 assert getattr(addon,'bl_info',{'name':addon.FBXZIP_PT_panel.bl_label})['name'] == 'Faidlix_Fbx ZipExporter'
 assert addon.FBXZIP_PT_panel.bl_label == 'Faidlix_Fbx ZipExporter'
@@ -28,7 +28,7 @@ assert addon.FBXZIP_PT_panel.bl_order == 20
 assert 'DEFAULT_CLOSED' in addon.FBXZIP_PT_panel.bl_options
 action_properties = addon.FBXZIP_PG_action_item.bl_rna.properties
 assert 'unity_loop_time' not in action_properties
-assert action_properties['unity_loop_pose'].default is True
+assert action_properties['unity_loop_pose'].default is False
 assert hasattr(bpy.types, 'EXPORT_SCENE_OT_fbx_zip_online_update')
 assert addon.REPOSITORY_URL == 'https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json'
 assert addon._normalized_url(addon._fresh_repository_url()) == addon._normalized_url(addon.REPOSITORY_URL)
@@ -201,6 +201,10 @@ for name, value in [('Fairy_Idle', 0.25), ('Fairy_Run', 1.0)]:
     action.name = name
     actions.append(action)
 original_action = actions[0]
+actions[0][addon.ACTION_LOOP_KEY] = True
+actions[0].use_cyclic = True
+actions[1][addon.ACTION_LOOP_KEY] = False
+actions[1].use_cyclic = False
 armature.animation_data.action = original_action
 bpy.ops.object.mode_set(mode='OBJECT')
 existing_track = armature.animation_data.nla_tracks.new()
@@ -213,6 +217,10 @@ run_channelbag = actions[1].layers[0].strips[0].channelbags[0]
 run_channelbag.fcurves.new('pose.bones["RemovedBone"].location', index=0)
 addon._refresh_action_items(bpy.context.window_manager, [armature], preserve=False)
 assert {item.action_name for item in bpy.context.window_manager.fbxzip_action_items} == {'Fairy_Idle', 'Fairy_Run'}
+assert {item.action_name: item.unity_loop_pose for item in bpy.context.window_manager.fbxzip_action_items} == {
+    'Fairy_Idle': True,
+    'Fairy_Run': False,
+}
 accessory_data = bpy.data.armatures.new('AccessoryRigData')
 accessory = bpy.data.objects.new('AccessoryRig', accessory_data)
 bpy.context.scene.collection.objects.link(accessory)
@@ -224,11 +232,20 @@ assert {(item.object_name, item.slot_identifier) for item in run_rows} == {
     ('ActionRig', actions[1].slots[0].identifier),
     ('AccessoryRig', accessory_slot.identifier),
 }
+run_rows[0].unity_loop_pose = True
+assert actions[1][addon.ACTION_LOOP_KEY] is True and actions[1].use_cyclic is True
+assert all(item.unity_loop_pose for item in run_rows)
+run_rows[1].unity_loop_pose = False
+assert actions[1][addon.ACTION_LOOP_KEY] is False and actions[1].use_cyclic is False
+assert not any(item.unity_loop_pose for item in run_rows)
 for item in bpy.context.window_manager.fbxzip_action_items:
     item.include = item.action_name == 'Fairy_Run'
 addon._refresh_action_items(bpy.context.window_manager, [armature], preserve=False)
+assert {item.action_name: item.unity_loop_pose for item in bpy.context.window_manager.fbxzip_action_items} == {
+    'Fairy_Idle': True,
+    'Fairy_Run': False,
+}
 for item in bpy.context.window_manager.fbxzip_action_items:
-    assert item.unity_loop_pose is True
     item.include = True
     item.export_name = item.action_name
     item.unity_loop_pose = item.action_name == 'Fairy_Run'
@@ -292,25 +309,30 @@ with tempfile.TemporaryDirectory(prefix='fbxzip_action_') as folder:
     assert result == {'FINISHED'}, result
     with zipfile.ZipFile(no_unity_package) as archive:
         assert 'actions_without_unity.fbx.meta' not in archive.namelist()
-    actions[0]['_faidlix_action_loop']=True
+    actions[0][addon.ACTION_LOOP_KEY]=True
     actions[0].use_cyclic=True
-    actions[1]['_faidlix_action_loop']=False
+    actions[1][addon.ACTION_LOOP_KEY]=False
     copied=actions[0].copy(); copied.name='Fairy_Idle_Copy'; copied.use_fake_user=True
     addon._refresh_action_items(bpy.context.window_manager,[armature],preserve=False)
     items=bpy.context.window_manager.fbxzip_action_items
     assert len(items)==3
     assert {i.action_name:i.unity_loop_pose for i in items}=={'Fairy_Idle':True,'Fairy_Idle_Copy':True,'Fairy_Run':False}
     for i in items: i.include=True; i.unity_loop_pose=not i.unity_loop_pose
+    assert actions[0][addon.ACTION_LOOP_KEY] is False and actions[0].use_cyclic is False
+    assert copied[addon.ACTION_LOOP_KEY] is False and copied.use_cyclic is False
+    assert actions[1][addon.ACTION_LOOP_KEY] is True and actions[1].use_cyclic is True
+    addon._refresh_action_items(bpy.context.window_manager,[armature],preserve=True)
+    assert {i.action_name:i.unity_loop_pose for i in bpy.context.window_manager.fbxzip_action_items}=={'Fairy_Idle':False,'Fairy_Idle_Copy':False,'Fairy_Run':True}
     tagged_package=Path(folder)/'actions_tagged.zip'
     assert bpy.ops.export_scene.fbx_zip(filepath=str(tagged_package),use_selection=True,object_types={'ARMATURE'},package_textures=False,bake_anim=True,select_actions=True)=={'FINISHED'}
     with zipfile.ZipFile(tagged_package) as archive:
         meta=archive.read('actions_tagged.fbx.meta').decode('utf8')
-        for name,value in [('Fairy_Idle',1),('Fairy_Idle_Copy',1),('Fairy_Run',0)]:
+        for name,value in [('Fairy_Idle',0),('Fairy_Idle_Copy',0),('Fairy_Run',1)]:
             block=meta.split('name: "'+name+'"',1)[1].split('    - serializedVersion:',1)[0]
             assert f'loopTime: {value}' in block and f'loopBlend: {value}' in block,block
     bpy.data.actions.remove(copied)
     for action in actions:
-        del action['_faidlix_action_loop']; action.use_cyclic=False
+        del action[addon.ACTION_LOOP_KEY]; action.use_cyclic=False
     addon._refresh_action_items(bpy.context.window_manager,[armature],preserve=False)
 assert armature.animation_data.action == original_action
 assert len(armature.animation_data.nla_tracks) == 1

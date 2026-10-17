@@ -1,4 +1,4 @@
-Action Editor 1.7.0 的循環開關會自動帶入 Unity Loop Pose／Loop Time；開啟與關閉都會覆蓋該 Action 的匯出預設。未設定循環標記的 Action 沿用匯出介面選項。原生複製的 Action 也會繼承設定，外掛可獨立使用。
+Action Editor 的循環開關會自動帶入 Unity Loop Pose／Loop Time。FBX ZIP 清單可直接調整每個 Action，並同步寫回 Action Editor 共用的 Action 設定；同一 Action 出現在多套骨架時會一起更新。未設定循環標記且未啟用 Blender `use_cyclic` 的 Action 預設不循環，原生複製的 Action 會繼承設定，兩個外掛仍可獨立使用。
 
 # Faidlix_Fbx ZipExporter
 
@@ -18,7 +18,7 @@ The export dialog reads the current settings from Blender's native FBX exporter 
 
 The export dialog's top **Operator Presets** menu uses the same native `export_scene.fbx` preset folder as Blender's FBX exporter. Presets such as `ToUnity` and `ToUnityPackTexture` therefore appear in both places; the `+` button saves a shared FBX preset.
 
-When **帶入 Unity 設定** is enabled, the ZIP also contains an `.fbx.meta` file. Each selected Action has one **Loop Pose** text toggle, enabled by default. Turning it on writes both Unity **Loop Time** and **Loop Pose** as enabled; turning it off disables both. Extract the FBX and its matching `.meta` file together into a Unity project's Assets folder to retain those clip settings.
+When **帶入 Unity 設定** is enabled, the ZIP also contains an `.fbx.meta` file. Each selected Action has one **Loop Pose** text toggle initialized from that Action's saved loop state. Changing it immediately updates the Action and every row that references the same Action. Turning it on writes both Unity **Loop Time** and **Loop Pose** as enabled; turning it off disables both. Extract the FBX and its matching `.meta` file together into a Unity project's Assets folder to retain those clip settings.
 
 Materials always use **Keep Blender Materials**; the shader dropdown is removed. The original shader graph is retained. The default texture mode traces backwards from active material outputs on exported objects and used material slots, including nested node groups. The optional all-textures mode includes every image node in those materials while still excluding unrelated scene images. The texture dialog can include/exclude and rename package files; temporary image paths keep FBX references synchronized with renamed files.
 

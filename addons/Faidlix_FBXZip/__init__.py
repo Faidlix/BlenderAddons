@@ -7,7 +7,7 @@ Unity loop, material, and texture options there before exporting.
 bl_info = {
     "name": "Faidlix_Fbx ZipExporter",
     "author": "Faidlix",
-    "version": (1, 8, 9),
+    "version": (1, 8, 10),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > Faidlix",
     "description": "Export FBX with adjustable Blender FBX options and package used textures into a ZIP.",
@@ -39,8 +39,9 @@ from bpy_extras.io_utils import ExportHelper
 from bl_operators.presets import AddPresetBase
 
 
-ADDON_VERSION = (1, 8, 9)
+ADDON_VERSION = (1, 8, 10)
 PACKAGE_ID = "faidlix_fbx_zip_exporter"
+ACTION_LOOP_KEY = "_faidlix_action_loop"
 REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/"
     "BlenderAddons/main/repository/index.json"
@@ -485,13 +486,55 @@ def _write_packed_image(image, destination):
             bpy.data.images.remove(copied)
 
 
+_ACTION_LOOP_UPDATE = False
+
+
+def _action_loop_state(action):
+    """Read the loop flag shared with Faidlix Action Editor."""
+    if action is None:
+        return False
+    return bool(action.get(ACTION_LOOP_KEY, getattr(action, "use_cyclic", False)))
+
+
+def _store_action_loop_state(action, enabled):
+    """Persist one Action loop flag without importing another Faidlix add-on."""
+    if action is None or not getattr(action, "is_editable", action.library is None):
+        return False
+    enabled = bool(enabled)
+    action[ACTION_LOOP_KEY] = enabled
+    action.use_cyclic = enabled
+    action.update_tag()
+    return True
+
+
+def _update_action_loop(item, context):
+    """Save UI changes and keep duplicate rows for the same Action synchronized."""
+    global _ACTION_LOOP_UPDATE
+    if _ACTION_LOOP_UPDATE:
+        return
+    action = bpy.data.actions.get(item.action_name)
+    if not _store_action_loop_state(action, item.unity_loop_pose):
+        return
+    window_manager = getattr(context, "window_manager", None)
+    if window_manager is None:
+        return
+    _ACTION_LOOP_UPDATE = True
+    try:
+        for sibling in window_manager.fbxzip_action_items:
+            if sibling != item and sibling.action_name == item.action_name:
+                sibling.unity_loop_pose = item.unity_loop_pose
+    finally:
+        _ACTION_LOOP_UPDATE = False
+
+
 class FBXZIP_PG_action_item(PropertyGroup):
     action_name: StringProperty(name="Action")
     object_name: StringProperty(name="Object")
     slot_identifier: StringProperty(name="Slot")
     include: BoolProperty(name="", default=True)
     export_name: StringProperty(name="Unity Clip")
-    unity_loop_pose: BoolProperty(name="Loop Pose", default=True)
+    unity_loop_pose: BoolProperty(name="Loop Pose", default=False, update=_update_action_loop)
+    loop_read_only: BoolProperty(default=False)
     frame_start: FloatProperty()
     frame_end: FloatProperty()
 
@@ -543,7 +586,7 @@ class FBXZIP_UL_actions(UIList):
         operator = _active_export_operator(context)
         unity_enabled = bool(operator and operator.unity_settings)
         loop_pose = row.row(align=True)
-        loop_pose.enabled = unity_enabled
+        loop_pose.enabled = unity_enabled and not item.loop_read_only
         loop_pose.prop(item, "unity_loop_pose", text="Loop Pose", toggle=True)
 
 
@@ -667,19 +710,12 @@ def _unique_name(value, used):
     return candidate
 
 
-def _action_loop_state(action):
-    # Public data contract; no import/dependency on Action Editor.
-    if action is None: return None
-    if '_faidlix_action_loop' in action: return bool(action['_faidlix_action_loop'])
-    return True if getattr(action,'use_cyclic',False) else None
-
-
 def _refresh_action_items(window_manager, objects, preserve=True):
+    global _ACTION_LOOP_UPDATE
     previous = {
         (item.action_name, item.object_name, item.slot_identifier): (
             item.include,
             item.export_name,
-            item.unity_loop_pose,
         )
         for item in window_manager.fbxzip_action_items
     } if preserve else {}
@@ -688,24 +724,24 @@ def _refresh_action_items(window_manager, objects, preserve=True):
         for target, slot in _action_targets(action, objects):
             rows.append((action, target, slot))
     rows.sort(key=lambda row: (row[1].name.lower(), row[0].name.lower(), getattr(row[2], 'identifier', '')))
-    window_manager.fbxzip_action_items.clear()
-    for action, target, slot in rows:
-        slot_identifier = getattr(slot, "identifier", "") if slot is not True else ""
-        key = (action.name, target.name, slot_identifier)
-        item = window_manager.fbxzip_action_items.add()
-        item.action_name = action.name
-        item.object_name = target.name
-        item.slot_identifier = slot_identifier
-        item.frame_start, item.frame_end = action.frame_range
-        include, export_name, loop_pose = previous.get(
-            key, (True, action.name, True)
-        )
-        source_loop=_action_loop_state(action)
-        if source_loop is not None:
-            loop_pose=source_loop
-        item.include = include
-        item.export_name = export_name
-        item.unity_loop_pose = loop_pose
+    _ACTION_LOOP_UPDATE = True
+    try:
+        window_manager.fbxzip_action_items.clear()
+        for action, target, slot in rows:
+            slot_identifier = getattr(slot, "identifier", "") if slot is not True else ""
+            key = (action.name, target.name, slot_identifier)
+            item = window_manager.fbxzip_action_items.add()
+            item.action_name = action.name
+            item.object_name = target.name
+            item.slot_identifier = slot_identifier
+            item.frame_start, item.frame_end = action.frame_range
+            include, export_name = previous.get(key, (True, action.name))
+            item.include = include
+            item.export_name = export_name
+            item.unity_loop_pose = _action_loop_state(action)
+            item.loop_read_only = not getattr(action, "is_editable", action.library is None)
+    finally:
+        _ACTION_LOOP_UPDATE = False
 
 
 def _unity_yaml_string(value):
@@ -734,9 +770,7 @@ def _unity_clip_rows(action_items):
         )
         clip["first_frame"] = min(clip["first_frame"], item.frame_start)
         clip["last_frame"] = max(clip["last_frame"], item.frame_end)
-        source_loop=_action_loop_state(bpy.data.actions.get(item.action_name))
-        loop_pose=item.unity_loop_pose if source_loop is None else source_loop
-        clip["loop_pose"] = clip["loop_pose"] or loop_pose
+        clip["loop_pose"] = clip["loop_pose"] or item.unity_loop_pose
     return list(clips.values())
 
 
