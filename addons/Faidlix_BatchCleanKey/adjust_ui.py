@@ -1,4 +1,7 @@
-"""Observe native pose transforms, then apply one atomic selected-key edit."""
+"""Observe native pose transforms and apply atomic selected-key edits.
+Enable from Pose right-click or the Action Editor sidebar; failures release the watcher
+and restore auto-key so the mode can be started again.
+"""
 import time, math
 import bpy
 from bpy.props import BoolProperty,EnumProperty,StringProperty
@@ -138,13 +141,33 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
   if self.auto is not None:
    context.scene.tool_settings.use_keyframe_insert_auto=self.auto; self.auto=None
  def stop(self,context):
-  global WATCH
-  self.restore_auto(context); self.request=None; self.rotation_preview=None
+  global WATCH,REQUEST
+  self.restore_auto(context); self.request=None; self.rotation_preview=None; self.rotation_track=None
   state(context).adjust_enabled=False; state(context).adjust_toolbar_visible=False
-  if self.hud: bpy.types.SpaceView3D.draw_handler_remove(self.hud,'WINDOW'); self.hud=None
-  if self.timer: context.window_manager.event_timer_remove(self.timer); self.timer=None
+  REQUEST=None
   if WATCH==self: WATCH=None
+  # RNA handles can already be invalidated by undo/load; still release everything else.
+  for name,remove in (('hud',lambda h:bpy.types.SpaceView3D.draw_handler_remove(h,'WINDOW')),
+                      ('timer',context.window_manager.event_timer_remove)):
+   handle=getattr(self,name,None); setattr(self,name,None)
+   if handle is not None:
+    try: remove(handle)
+    except (ReferenceError,ValueError,RuntimeError): pass
+  if IK_CHOICE: IK_CHOICE.finish(context)
+  IK_POLICY.clear()
+  if self.area:
+   try: self.area.tag_redraw()
+   except ReferenceError: pass
  def modal(self,context,event):
+  try: return self.observe(context,event)
+  except Exception as exc:
+   import traceback
+   traceback.print_exc()
+   self.stop(context)
+   state(context).last_result='多影格同步調整已停止，可重新開啟：'+str(exc)
+   self.report({'WARNING'},state(context).last_result)
+   return {'CANCELLED'}
+ def observe(self,context,event):
   global REQUEST
   s=state(context); obj=bpy.data.objects.get(self.object_name)
   from . import ui
@@ -197,9 +220,14 @@ class BCK_OT_AdjustWatch(bpy.types.Operator):
     adjust_rotation.update(self,context,obj)
     return {'PASS_THROUGH'}
    self.rotation_preview=None
-   pointer=last_transform(context)
+   ops=context.window_manager.operators
+   op=ops[-1] if ops else None
+   if op is None:
+    # Undo or a property change can clear operator history after capture.
+    self.restore_auto(context); self.request=None; self.rotation_track=None
+    return {'PASS_THROUGH'}
+   pointer=op.as_pointer()
    if pointer!=self.operator_pointer:
-    op=context.window_manager.operators[-1]
     if op.bl_idname in {'TRANSFORM_OT_translate','TRANSFORM_OT_rotate','TRANSFORM_OT_resize'}:
      r=self.request; deltas=adjust.native_deltas(r,obj)
      unchanged=all(max(abs(d[i][j]-Matrix.Identity(4)[i][j]) for i in range(4) for j in range(4))<1e-6 for d in deltas.values())
