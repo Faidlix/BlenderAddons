@@ -1,4 +1,4 @@
-"""Pose context menu > Rotation Align > Previous/Next.
+"""Pose / Dope Sheet / Timeline / Graph Editor context menu > Rotation Align > Previous/Next.
 
 Align selected rotation keys to one reference outside the shared selection range.
 Only equivalent Euler/axis-angle turns and quaternion signs are changed.
@@ -7,6 +7,8 @@ import math
 import bpy
 from bpy.props import EnumProperty
 from . import core, adjust
+
+MENUS = (bpy.types.VIEW3D_MT_pose_context_menu, bpy.types.DOPESHEET_MT_context_menu, bpy.types.GRAPH_MT_context_menu)
 
 
 def align(context, direction):
@@ -123,14 +125,16 @@ class BCK_OT_RotationAlign(bpy.types.Operator):
 
 
 def menu(self,context):
-    self.layout.operator(BCK_OT_RotationAlign.bl_idname,text='旋轉對齊')
+    row = self.layout.row()
+    row.operator_context = 'INVOKE_REGION_WIN'
+    row.operator(BCK_OT_RotationAlign.bl_idname,text='旋轉對齊')
 
 
 def register():
     bpy.utils.register_class(BCK_OT_RotationAlign)
-    bpy.types.VIEW3D_MT_pose_context_menu.append(menu)
+    for target in MENUS: target.append(menu)
 
 
 def unregister():
-    bpy.types.VIEW3D_MT_pose_context_menu.remove(menu)
+    for target in reversed(MENUS): target.remove(menu)
     bpy.utils.unregister_class(BCK_OT_RotationAlign)

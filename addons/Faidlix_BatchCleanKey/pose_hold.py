@@ -1,4 +1,4 @@
-"""Pose context menu > Fixed Pose > First/Last selected key.
+"""Pose / Dope Sheet / Timeline / Graph Editor context menu > Fixed Pose > First/Last selected key.
 
 Hold selected bones in their local pose coordinates at existing selected times.
 Sample every bone at the shared boundary before editing; never bake new frames.
@@ -6,6 +6,8 @@ Sample every bone at the shared boundary before editing; never bake new frames.
 import bpy
 from bpy.props import EnumProperty
 from . import core, adjust
+
+MENUS = (bpy.types.VIEW3D_MT_pose_context_menu, bpy.types.DOPESHEET_MT_context_menu, bpy.types.GRAPH_MT_context_menu)
 
 
 def hold(context, anchor):
@@ -104,14 +106,16 @@ class BCK_OT_PoseHold(bpy.types.Operator):
 
 
 def menu(self,context):
-    self.layout.operator(BCK_OT_PoseHold.bl_idname,text='固定姿勢')
+    row = self.layout.row()
+    row.operator_context = 'INVOKE_REGION_WIN'
+    row.operator(BCK_OT_PoseHold.bl_idname,text='固定姿勢')
 
 
 def register():
     bpy.utils.register_class(BCK_OT_PoseHold)
-    bpy.types.VIEW3D_MT_pose_context_menu.append(menu)
+    for target in MENUS: target.append(menu)
 
 
 def unregister():
-    bpy.types.VIEW3D_MT_pose_context_menu.remove(menu)
+    for target in reversed(MENUS): target.remove(menu)
     bpy.utils.unregister_class(BCK_OT_PoseHold)
