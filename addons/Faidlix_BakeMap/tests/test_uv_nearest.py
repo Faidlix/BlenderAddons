@@ -55,6 +55,7 @@ for polygon, uv_values in zip(mesh.polygons, face_uvs):
         vertex_index = mesh.loops[loop_index].vertex_index
         uv_layer.data[loop_index].uv = uv_values[vertex_index]
 
+bpy.context.scene.tool_settings.use_uv_select_sync = False
 bpy.context.scene.tool_settings.uv_select_mode = 'EDGE'
 bpy.ops.object.mode_set(mode='EDIT')
 bm = bmesh.from_edit_mesh(mesh)
@@ -77,6 +78,20 @@ assert close(source_edge['endpoints'][0][1], (0.0, 0.0))
 assert close(source_edge['endpoints'][1][1], (1.0, 0.0))
 assert close(targets[0]['endpoints'][0][1], (2.0, 0.0))
 assert close(targets[0]['endpoints'][1][1], (4.0, 0.0))
+
+# Sync uses the mesh selection buttons. A face counterpart is a segment.
+settings = SimpleNamespace(use_uv_select_sync=True, mesh_select_mode=(False, False, True),
+                           uv_select_mode='VERTEX')
+assert addon._uv_selection_mode(settings) == 'FACE'
+bm.faces[0].select = True
+bm.faces[1].select = False
+coords = addon._uv_overlay_coordinates(obj, 'FACE', True)
+assert len(coords) == 2 and set(coords) == {(2.0, 0.0), (4.0, 0.0)}, coords
+assert addon._uv_overlay_coordinates(obj, 'FACE', True) is coords
+addon._invalidate_uv_overlay()
+bm.faces[0].select = False
+assert addon._uv_overlay_coordinates(obj, 'FACE', True) == ()
+addon._invalidate_uv_overlay()
 
 class RedrawArea:
     def tag_redraw(self):

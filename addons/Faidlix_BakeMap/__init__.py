@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 15),
+    "version": (2, 3, 16),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 15)
+ADDON_VERSION = (2, 3, 16)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -59,6 +59,7 @@ BACKGROUND_ROOT = os.path.join(tempfile.gettempdir(), "Faidlix_BakeMap")
 _BACKGROUND_PROCESSES = {}
 _UV_MATERIAL_MAP_MSGBUS_OWNER = object()
 _UV_COUNTERPART_DRAW_HANDLE = None
+_UV_OVERLAY_CACHE = {}
 _UV_EPSILON = 1.0e-6
 BAKE_PASSES = (
     ('Diffuse', 'DIFFUSE', 'bake_diffuse'),
@@ -441,11 +442,22 @@ def _uv_vertex_groups(bm, uv_layer):
     return list(groups.values())
 
 
-def _uv_edge_groups(bm, uv_layer):
+def _uv_selection_mode(tool_settings):
+    if tool_settings.use_uv_select_sync:
+        for mode, enabled in zip(('FACE', 'EDGE', 'VERTEX'), reversed(tool_settings.mesh_select_mode)):
+            if enabled:
+                return mode
+    return tool_settings.uv_select_mode
+
+
+def _uv_edge_groups(bm, uv_layer, mode='EDGE', sync=False):
     groups = {}
     for face in bm.faces:
         if face.hide:
             continue
+        face_selected = mode == 'FACE' and (
+            face.select if sync else all(corner.uv_select_vert for corner in face.loops)
+        )
         for loop in face.loops:
             endpoints = _uv_edge_endpoints(loop, uv_layer)
             key = (
@@ -465,16 +477,19 @@ def _uv_edge_groups(bm, uv_layer):
                 },
             )
             group['loops'].append(loop)
-            group['selected'] = group['selected'] or bool(loop.uv_select_edge)
+            if mode == 'FACE':
+                group['selected'] += int(face_selected)
+            else:
+                group['selected'] = group['selected'] or bool(loop.uv_select_edge)
     return list(groups.values())
 
 
-def _uv_counterpart_pairs(obj, mode=None):
+def _uv_counterpart_pairs(obj, mode=None, sync=False):
     """Pair selected UV representations with every unselected seam counterpart."""
     bm, uv_layer = _active_uv_bmesh(obj)
     if bm is None:
         return bm, uv_layer, []
-    mode = mode or bpy.context.scene.tool_settings.uv_select_mode
+    mode = mode or _uv_selection_mode(bpy.context.scene.tool_settings)
     pairs = []
     if mode == 'VERTEX':
         groups = _uv_vertex_groups(bm, uv_layer)
@@ -491,13 +506,13 @@ def _uv_counterpart_pairs(obj, mode=None):
             ]
             if candidates:
                 pairs.append((source, candidates))
-    elif mode == 'EDGE':
-        groups = _uv_edge_groups(bm, uv_layer)
+    elif mode in {'EDGE', 'FACE'}:
+        groups = _uv_edge_groups(bm, uv_layer, mode, sync)
         by_edge = {}
         for group in groups:
             by_edge.setdefault(group['edge_index'], []).append(group)
         for source in groups:
-            if not source['selected']:
+            if not source['selected'] or (mode == 'FACE' and source['selected'] != 1):
                 continue
             candidates = [
                 candidate for candidate in by_edge[source['edge_index']]
@@ -584,6 +599,45 @@ def _uv_to_region(context, coord):
     return context.region.view2d.view_to_region(*coord, clip=False)
 
 
+@persistent
+def _invalidate_uv_overlay(_scene=None, _depsgraph=None):
+    if _depsgraph is None:
+        _UV_OVERLAY_CACHE.clear()
+        return
+    mesh_pointers = {
+        update.id.original.as_pointer()
+        for update in _depsgraph.updates if isinstance(update.id, bpy.types.Mesh)
+    }
+    for key in tuple(_UV_OVERLAY_CACHE):
+        if key[1] in mesh_pointers:
+            del _UV_OVERLAY_CACHE[key]
+
+
+def _uv_overlay_coordinates(obj, mode, sync):
+    layer = obj.data.uv_layers.active
+    key = (obj.as_pointer(), obj.data.as_pointer(), layer.name if layer else None, mode, sync)
+    now = time.monotonic()
+    cached = _UV_OVERLAY_CACHE.get(key)
+    if cached and now - cached[0] < 0.35:
+        return cached[1]
+    # Some Edit Mode selection changes only notify the editor. Bound the
+    # cache lifetime so those changes also appear without another mesh edit.
+    _bm, _layer, pairs = _uv_counterpart_pairs(obj, mode, sync)
+    coordinates = {}
+    for _source, candidates in pairs:
+        for candidate in candidates:
+            if mode == 'VERTEX':
+                points = (candidate['coord'],)
+            else:
+                points = tuple(endpoint[1] for endpoint in candidate['endpoints'])
+            coordinates[tuple(sorted(points))] = points
+    positions = tuple(point for points in coordinates.values() for point in points)
+    if len(_UV_OVERLAY_CACHE) >= 16:
+        _UV_OVERLAY_CACHE.clear()
+    _UV_OVERLAY_CACHE[key] = (now, positions)
+    return positions
+
+
 def _draw_uv_counterparts():
     """Draw seam counterparts in blue while leaving Blender's orange selection untouched."""
     context = bpy.context
@@ -598,28 +652,14 @@ def _draw_uv_counterparts():
     obj = _uv_material_map_object(context)
     if settings is None or not settings.show_uv_counterparts or obj is None:
         return
-    mode = context.scene.tool_settings.uv_select_mode
-    _bm, _uv_layer, pairs = _uv_counterpart_pairs(obj, mode)
-    if not pairs:
+    tool_settings = context.scene.tool_settings
+    mode = _uv_selection_mode(tool_settings)
+    if mode not in {'VERTEX', 'EDGE', 'FACE'}:
         return
-    line_positions = []
-    point_positions = []
-    seen = set()
-    for _source, candidates in pairs:
-        for candidate in candidates:
-            if mode == 'VERTEX':
-                key = _uv_key(candidate['coord'])
-                if key not in seen:
-                    seen.add(key)
-                    point_positions.append(_uv_to_region(context, candidate['coord']))
-            elif mode == 'EDGE':
-                endpoints = candidate['endpoints']
-                key = tuple(_uv_key(item[1]) for item in endpoints)
-                if key not in seen:
-                    seen.add(key)
-                    line_positions.extend(_uv_to_region(context, item[1]) for item in endpoints)
-    if not line_positions and not point_positions:
+    coords = _uv_overlay_coordinates(obj, mode, tool_settings.use_uv_select_sync)
+    if not coords:
         return
+    positions = [_uv_to_region(context, point) for point in coords]
     import gpu
     from gpu_extras.batch import batch_for_shader
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
@@ -627,12 +667,12 @@ def _draw_uv_counterparts():
         gpu.state.blend_set('ALPHA')
         shader.bind()
         shader.uniform_float('color', (0.08, 0.45, 1.0, 1.0))
-        if line_positions:
-            gpu.state.line_width_set(3.0)
-            batch_for_shader(shader, 'LINES', {'pos': line_positions}).draw(shader)
-        if point_positions:
+        if mode == 'VERTEX':
             gpu.state.point_size_set(8.0)
-            batch_for_shader(shader, 'POINTS', {'pos': point_positions}).draw(shader)
+            batch_for_shader(shader, 'POINTS', {'pos': positions}).draw(shader)
+        else:
+            gpu.state.line_width_set(3.0)
+            batch_for_shader(shader, 'LINES', {'pos': positions}).draw(shader)
     finally:
         gpu.state.line_width_set(1.0)
         gpu.state.point_size_set(1.0)
@@ -2769,7 +2809,7 @@ def _uv_nearest_merge_poll(context):
         and context.area.type == 'IMAGE_EDITOR'
         and _is_uv_editor_space(context.space_data)
         and _uv_material_map_object(context)
-        and context.scene.tool_settings.uv_select_mode in {'VERTEX', 'EDGE'}
+        and _uv_selection_mode(context.scene.tool_settings) in {'VERTEX', 'EDGE'}
     )
 
 
@@ -2788,7 +2828,10 @@ class FAIDLIX_OT_uv_merge_self_to_nearest(Operator):
 
     def execute(self, context):
         obj = _uv_material_map_object(context)
-        mode = context.scene.tool_settings.uv_select_mode
+        if obj.data.users > 1:
+            self.report({'WARNING'}, "Make the active object's mesh single-user before merging UVs")
+            return {'CANCELLED'}
+        mode = _uv_selection_mode(context.scene.tool_settings)
         bm, uv_layer, pairs = _uv_counterpart_pairs(obj, mode)
         if not pairs:
             self.report({'WARNING'}, "No unselected UV seam counterpart was found")
@@ -2820,6 +2863,7 @@ class FAIDLIX_OT_uv_merge_self_to_nearest(Operator):
                     loop[uv_layer].uv = target_coord
                     changed += 1
         bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+        _invalidate_uv_overlay()
         context.area.tag_redraw()
         self.report({'INFO'}, f"Merged {len(assignments)} selected UV point(s) to nearest counterparts")
         return {'FINISHED'} if changed else {'CANCELLED'}
@@ -2840,7 +2884,10 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
 
     def execute(self, context):
         obj = _uv_material_map_object(context)
-        mode = context.scene.tool_settings.uv_select_mode
+        if obj.data.users > 1:
+            self.report({'WARNING'}, "Make the active object's mesh single-user before merging UVs")
+            return {'CANCELLED'}
+        mode = _uv_selection_mode(context.scene.tool_settings)
         bm, uv_layer, pairs = _uv_counterpart_pairs(obj, mode)
         if not pairs:
             self.report({'WARNING'}, "No unselected UV seam counterpart was found")
@@ -2899,6 +2946,7 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
                         )
                     loop[uv_layer].uv = transformed
         bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+        _invalidate_uv_overlay()
         context.area.tag_redraw()
         self.report({'INFO'}, f"Merged {len(proposals)} UV island(s) to nearest counterparts")
         return {'FINISHED'}
@@ -3723,6 +3771,9 @@ def register():
         bpy.app.handlers.load_post.append(_background_load_post)
     bpy.types.IMAGE_HT_header.append(_draw_uv_material_maps)
     bpy.types.IMAGE_MT_uvs_merge.append(_draw_uv_merge_to_nearest)
+    for handlers in (bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load_post,
+                     bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+        handlers.append(_invalidate_uv_overlay)
     if _UV_COUNTERPART_DRAW_HANDLE is None:
         _UV_COUNTERPART_DRAW_HANDLE = bpy.types.SpaceImageEditor.draw_handler_add(
             _draw_uv_counterparts,
@@ -3747,6 +3798,10 @@ def register():
 def unregister():
     global _UV_COUNTERPART_DRAW_HANDLE
     bpy.msgbus.clear_by_owner(_UV_MATERIAL_MAP_MSGBUS_OWNER)
+    for handlers in (bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load_post,
+                     bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+        handlers.remove(_invalidate_uv_overlay)
+    _invalidate_uv_overlay()
     if _UV_COUNTERPART_DRAW_HANDLE is not None:
         bpy.types.SpaceImageEditor.draw_handler_remove(_UV_COUNTERPART_DRAW_HANDLE, 'WINDOW')
         _UV_COUNTERPART_DRAW_HANDLE = None
