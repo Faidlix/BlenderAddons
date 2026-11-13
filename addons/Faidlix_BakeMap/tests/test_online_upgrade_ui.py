@@ -1,3 +1,9 @@
+"""Exercise an interactive online upgrade from an older BakeMap package.
+
+Run with Blender 5.2 using a test profile that has the previous version
+installed from the shared Faidlix repository.
+"""
+
 import importlib
 import os
 import time
@@ -12,7 +18,7 @@ repo = next(
     if repo.remote_url.split('?', 1)[0].rstrip('/') == REPOSITORY_URL
 )
 MODULE = f"bl_ext.{repo.module}.faidlix_bakemap"
-EXPECTED_VERSION = (2, 3, 11)
+EXPECTED_VERSION = (2, 3, 12)
 started_at = time.monotonic()
 version_before = None
 

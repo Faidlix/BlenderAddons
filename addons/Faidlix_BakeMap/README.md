@@ -1,4 +1,4 @@
-# Faidlix_BakeMap 2.3.11
+# Faidlix_BakeMap 2.3.12
 
 Canonical source and updates: https://github.com/Faidlix/BlenderAddons
 
@@ -14,6 +14,13 @@ The main N-panel is collapsed by default. Online installation is deferred until
 the update button event has finished. The add-on never accesses its own Blender
 RNA after asking Blender to install its replacement and never manually reloads
 itself inside the running UI. Restart Blender after an installed update.
+
+New Bake Material, Re Bake Map, and Background Bake now leave mesh Edit Mode
+before validation and remain in Object Mode, so baking does not require a mode
+warning dialog. In UV Edit Mode, the UV Editor header adds a **Material Maps**
+menu containing only image textures connected to the active mesh's material
+output paths. Entering Edit Mode displays the first linked map when the current
+UV Editor image is unrelated; the native all-images selector remains available.
 
 Bake map choices, roughness output, image sizes, diffuse contributions, and
 source scopes use direct toggle buttons in the sidebar. Size labels are

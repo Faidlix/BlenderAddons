@@ -1,7 +1,14 @@
+"""Bake material maps in Blender 5.2 and expose linked maps in the UV Editor.
+
+Enable the extension, configure ReferenceObject/TargetObject in the 3D View
+sidebar, then run New Bake Material, Re Bake Map, or Background Bake. In UV
+Edit Mode, use the Material Maps menu in the UV Editor header.
+"""
+
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 11),
+    "version": (2, 3, 12),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -32,14 +39,14 @@ from bpy.props import (
     PointerProperty,
     StringProperty,
 )
-from bpy.types import Operator, Panel, PropertyGroup
+from bpy.types import Menu, Operator, Panel, PropertyGroup
 from bpy.app.handlers import persistent
 from bpy_extras.io_utils import ImportHelper
 from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 11)
+ADDON_VERSION = (2, 3, 12)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -48,6 +55,7 @@ GITHUB_REPOSITORY_URL = (
 IMPORT_COLLECTION = "Faidlix_Imports"
 BACKGROUND_ROOT = os.path.join(tempfile.gettempdir(), "Faidlix_BakeMap")
 _BACKGROUND_PROCESSES = {}
+_UV_MATERIAL_MAP_MSGBUS_OWNER = object()
 BAKE_PASSES = (
     ('Diffuse', 'DIFFUSE', 'bake_diffuse'),
     ('Normal', 'NORMAL', 'bake_normal'),
@@ -176,6 +184,17 @@ def _remember_context(context):
     }
 
 
+def _leave_edit_mode(context):
+    """Leave mesh Edit Mode before a bake and intentionally stay in Object Mode."""
+    obj = context.object
+    if obj is None or obj.mode != 'EDIT':
+        return True
+    if not bpy.ops.object.mode_set.poll():
+        return False
+    bpy.ops.object.mode_set(mode='OBJECT')
+    return obj.mode == 'OBJECT'
+
+
 def _restore_context(context, state):
     try:
         if context.object and context.object.mode != 'OBJECT':
@@ -266,6 +285,134 @@ def _activate_target(context, target, edit=False):
     if edit:
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_all(action='SELECT')
+
+
+def _linked_images_from_node_tree(node_tree, visited_trees=None):
+    """Return image textures that can reach an active output in node order."""
+    if node_tree is None:
+        return []
+    visited_trees = visited_trees if visited_trees is not None else set()
+    tree_key = node_tree.as_pointer()
+    if tree_key in visited_trees:
+        return []
+    visited_trees.add(tree_key)
+
+    outputs = [
+        node for node in node_tree.nodes
+        if node.type == 'OUTPUT_MATERIAL' and getattr(node, 'is_active_output', False)
+    ]
+    if not outputs:
+        outputs = [node for node in node_tree.nodes if node.type == 'OUTPUT_MATERIAL']
+    if not outputs:
+        outputs = [node for node in node_tree.nodes if node.type == 'GROUP_OUTPUT']
+
+    reachable = set(outputs)
+    stack = list(outputs)
+    while stack:
+        node = stack.pop()
+        for socket in node.inputs:
+            for link in socket.links:
+                upstream = link.from_node
+                if upstream not in reachable:
+                    reachable.add(upstream)
+                    stack.append(upstream)
+
+    images = []
+    seen_images = set()
+    for node in node_tree.nodes:
+        if node not in reachable:
+            continue
+        if node.type == 'TEX_IMAGE' and node.image:
+            image_key = node.image.as_pointer()
+            if image_key not in seen_images:
+                seen_images.add(image_key)
+                images.append(node.image)
+        elif node.type == 'GROUP' and node.node_tree:
+            for image in _linked_images_from_node_tree(node.node_tree, visited_trees):
+                image_key = image.as_pointer()
+                if image_key not in seen_images:
+                    seen_images.add(image_key)
+                    images.append(image)
+    return images
+
+
+def _linked_material_images(obj):
+    """Collect output-connected material images, with the active material first."""
+    if obj is None or obj.type != 'MESH':
+        return []
+    materials = []
+    active_material = obj.active_material
+    if active_material:
+        materials.append(active_material)
+    for slot in obj.material_slots:
+        material = slot.material
+        if material and material not in materials:
+            materials.append(material)
+
+    images = []
+    seen_images = set()
+    for material in materials:
+        if not material.use_nodes or material.node_tree is None:
+            continue
+        for image in _linked_images_from_node_tree(material.node_tree):
+            image_key = image.as_pointer()
+            if image_key not in seen_images:
+                seen_images.add(image_key)
+                images.append(image)
+    return images
+
+
+def _uv_material_map_object(context):
+    obj = context.edit_object or context.active_object
+    return obj if obj and obj.type == 'MESH' and obj.mode == 'EDIT' else None
+
+
+def _sync_uv_edit_material_images():
+    """On Edit Mode entry, show the first linked material image in UV Editors."""
+    if bpy.app.background:
+        return
+    window_manager = getattr(bpy.context, 'window_manager', None)
+    if window_manager is None:
+        return
+    for window in window_manager.windows:
+        obj = window.view_layer.objects.active
+        if obj is None or obj.type != 'MESH' or obj.mode != 'EDIT':
+            continue
+        images = _linked_material_images(obj)
+        if not images:
+            continue
+        for area in window.screen.areas:
+            if area.type != 'IMAGE_EDITOR':
+                continue
+            space = area.spaces.active
+            if getattr(space, 'ui_mode', 'UV') != 'UV':
+                continue
+            if space.image not in images:
+                space.image = images[0]
+            area.tag_redraw()
+
+
+def _on_object_mode_changed():
+    _sync_uv_edit_material_images()
+
+
+def _draw_uv_material_maps(self, context):
+    if context.area is None or context.area.type != 'IMAGE_EDITOR':
+        return
+    if getattr(context.space_data, 'ui_mode', 'UV') != 'UV':
+        return
+    obj = _uv_material_map_object(context)
+    if obj is None:
+        return
+    images = _linked_material_images(obj)
+    row = self.layout.row(align=True)
+    row.separator()
+    if not images:
+        row.label(text="No Linked Material Maps", icon='INFO')
+        return
+    current = context.space_data.image
+    label = current.name if current in images else "Material Maps"
+    row.menu("FAIDLIX_MT_uv_material_maps", text=label, icon='IMAGE_DATA')
 
 
 def _find_bake_material(target):
@@ -2285,6 +2432,54 @@ def _background_load_post(_unused):
             _recover_background_job(scene)
 
 
+class FAIDLIX_OT_uv_material_map_select(Operator):
+    bl_idname = "faidlix.uv_material_map_select"
+    bl_label = "Select Material Map"
+    bl_description = "Display a material-linked image in the UV Editor"
+    bl_options = {'INTERNAL'}
+
+    image_name: StringProperty()
+
+    @classmethod
+    def poll(cls, context):
+        return bool(
+            context.area
+            and context.area.type == 'IMAGE_EDITOR'
+            and _uv_material_map_object(context)
+        )
+
+    def execute(self, context):
+        image = bpy.data.images.get(self.image_name)
+        obj = _uv_material_map_object(context)
+        if image is None or image not in _linked_material_images(obj):
+            self.report({'ERROR'}, "The image is no longer linked to the active object's material")
+            return {'CANCELLED'}
+        context.space_data.image = image
+        context.area.tag_redraw()
+        return {'FINISHED'}
+
+
+class FAIDLIX_MT_uv_material_maps(Menu):
+    bl_idname = "FAIDLIX_MT_uv_material_maps"
+    bl_label = "Material Maps"
+
+    def draw(self, context):
+        layout = self.layout
+        obj = _uv_material_map_object(context)
+        images = _linked_material_images(obj)
+        if not images:
+            layout.label(text="No Linked Material Maps", icon='INFO')
+            return
+        current = context.space_data.image
+        for image in images:
+            operator = layout.operator(
+                "faidlix.uv_material_map_select",
+                text=image.name,
+                icon='RADIOBUT_ON' if image == current else 'IMAGE_DATA',
+            )
+            operator.image_name = image.name
+
+
 class FAIDLIX_OT_bake(Operator):
     bl_idname = "faidlix.bake"
     bl_label = "BAKE"
@@ -2299,6 +2494,9 @@ class FAIDLIX_OT_bake(Operator):
         return bool(settings.reference_object or any(item.object for item in settings.references))
 
     def execute(self, context):
+        if not _leave_edit_mode(context):
+            self.report({'ERROR'}, "Could not leave Edit Mode before baking")
+            return {'CANCELLED'}
         settings = _get_settings(context)
         reference_items = _valid_reference_items(settings)
         target = settings.target_object
@@ -2517,6 +2715,9 @@ class FAIDLIX_OT_background_bake(Operator):
         return bool(settings and not settings.background_running)
 
     def execute(self, context):
+        if not _leave_edit_mode(context):
+            self.report({'ERROR'}, "Could not leave Edit Mode before background baking")
+            return {'CANCELLED'}
         settings = _get_settings(context)
         reference_items = _valid_reference_items(settings)
         target = settings.target_object
@@ -3060,6 +3261,8 @@ classes = (
     FAIDLIX_OT_import_external,
     FAIDLIX_OT_add_uv,
     FAIDLIX_OT_uv_action,
+    FAIDLIX_OT_uv_material_map_select,
+    FAIDLIX_MT_uv_material_maps,
     FAIDLIX_OT_bake,
     FAIDLIX_OT_background_bake,
     FAIDLIX_OT_cancel_background_bake,
@@ -3075,6 +3278,15 @@ def register():
     bpy.types.Scene.faidlix_bakemap = PointerProperty(type=FaidlixBakeMapSettings)
     if _background_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_background_load_post)
+    bpy.types.IMAGE_HT_header.append(_draw_uv_material_maps)
+    bpy.msgbus.clear_by_owner(_UV_MATERIAL_MAP_MSGBUS_OWNER)
+    bpy.msgbus.subscribe_rna(
+        key=(bpy.types.Object, "mode"),
+        owner=_UV_MATERIAL_MAP_MSGBUS_OWNER,
+        args=(),
+        notify=_on_object_mode_changed,
+        options={'PERSISTENT'},
+    )
     bpy.app.timers.register(
         lambda: [_recover_background_job(scene) for scene in bpy.data.scenes] and None,
         first_interval=0.5,
@@ -3082,6 +3294,11 @@ def register():
 
 
 def unregister():
+    bpy.msgbus.clear_by_owner(_UV_MATERIAL_MAP_MSGBUS_OWNER)
+    try:
+        bpy.types.IMAGE_HT_header.remove(_draw_uv_material_maps)
+    except (AttributeError, ValueError):
+        pass
     if _background_load_post in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_background_load_post)
     if bpy.app.timers.is_registered(_background_timer):

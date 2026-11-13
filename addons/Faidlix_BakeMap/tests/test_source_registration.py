@@ -1,3 +1,9 @@
+"""Register BakeMap from source and verify its core UI and data helpers.
+
+Run with Blender 5.2 in background mode and set FAIDLIX_BAKEMAP_SOURCE to the
+add-on's __init__.py path.
+"""
+
 import importlib.util
 import os
 
@@ -9,7 +15,7 @@ spec = importlib.util.spec_from_file_location("faidlix_bakemap_source_test", sou
 addon = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(addon)
 
-assert addon.ADDON_VERSION == (2, 3, 11)
+assert addon.ADDON_VERSION == (2, 3, 12)
 assert hasattr(addon.FAIDLIX_PT_bakemap, "draw_header_preset")
 assert addon._version_tuple("2.3") == (2, 3, 0)
 assert addon._version_tuple("bad") == ()
@@ -22,6 +28,8 @@ addon.register()
 try:
     assert hasattr(bpy.types.Scene, "faidlix_bakemap")
     assert hasattr(bpy.types, "FAIDLIX_OT_online_update")
+    assert hasattr(bpy.types, "FAIDLIX_OT_uv_material_map_select")
+    assert hasattr(bpy.types, "FAIDLIX_MT_uv_material_maps")
     assert not hasattr(bpy.types, "FAIDLIX_PT_bakemap_updates")
     assert 'DEFAULT_CLOSED' in addon.FAIDLIX_PT_bakemap.bl_options
     assert hasattr(addon, "_schedule_online_update_install")
@@ -39,6 +47,41 @@ try:
         assert bpy.context.scene.faidlix_bakemap.update_status == "需開啟網路權限"
 
     settings = bpy.context.scene.faidlix_bakemap
+
+    linked_a = bpy.data.images.new("FaidlixLinkedA", 1, 1)
+    linked_b = bpy.data.images.new("FaidlixLinkedB", 1, 1)
+    unlinked = bpy.data.images.new("FaidlixUnlinked", 1, 1)
+    mesh = bpy.data.meshes.new("FaidlixMaterialMapMesh")
+    material_object = bpy.data.objects.new("FaidlixMaterialMapObject", mesh)
+    bpy.context.scene.collection.objects.link(material_object)
+    materials = []
+    for index, image in enumerate((linked_a, linked_b)):
+        material = bpy.data.materials.new(f"FaidlixMaterial{index}")
+        material.use_nodes = True
+        principled = next(node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED')
+        image_node = material.node_tree.nodes.new('ShaderNodeTexImage')
+        image_node.image = image
+        material.node_tree.links.new(image_node.outputs['Color'], principled.inputs['Base Color'])
+        if index == 0:
+            unused_node = material.node_tree.nodes.new('ShaderNodeTexImage')
+            unused_node.image = unlinked
+        mesh.materials.append(material)
+        materials.append(material)
+    material_object.active_material_index = 1
+    assert addon._linked_material_images(material_object) == [linked_b, linked_a]
+    bpy.ops.object.select_all(action='DESELECT')
+    material_object.select_set(True)
+    bpy.context.view_layer.objects.active = material_object
+    bpy.ops.object.mode_set(mode='EDIT')
+    assert addon._leave_edit_mode(bpy.context)
+    assert material_object.mode == 'OBJECT'
+    bpy.data.objects.remove(material_object, do_unlink=True)
+    bpy.data.meshes.remove(mesh)
+    for material in materials:
+        bpy.data.materials.remove(material)
+    for image in (linked_a, linked_b, unlinked):
+        bpy.data.images.remove(image)
+
     assert bpy.ops.wm.context_set_enum(
         data_path="scene.faidlix_bakemap.diffuse_size",
         value="256",
