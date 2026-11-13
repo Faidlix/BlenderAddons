@@ -27,12 +27,15 @@ _default, enabled = addon_utils.check(addon_module)
 assert enabled, addon_module
 
 addon = importlib.import_module(addon_module)
-assert addon.ADDON_VERSION == (2, 3, 13)
+assert addon.ADDON_VERSION == (2, 3, 14)
 assert addon.GITHUB_REPOSITORY_URL == REPOSITORY_URL
 assert hasattr(bpy.types.Scene, "faidlix_bakemap")
 assert hasattr(bpy.types, "FAIDLIX_OT_online_update")
 assert hasattr(bpy.types, "FAIDLIX_OT_uv_material_map_select")
 assert hasattr(bpy.types, "FAIDLIX_MT_uv_material_maps")
+assert hasattr(bpy.types, "FAIDLIX_OT_uv_merge_self_to_nearest")
+assert hasattr(bpy.types, "FAIDLIX_OT_uv_merge_island_to_nearest")
+assert hasattr(bpy.types, "FAIDLIX_MT_uv_merge_to_nearest")
 assert not hasattr(bpy.types, "FAIDLIX_PT_bakemap_updates")
 assert 'DEFAULT_CLOSED' in addon.FAIDLIX_PT_bakemap.bl_options
 assert not hasattr(addon, "_schedule_updated_addon_reload")

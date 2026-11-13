@@ -15,7 +15,7 @@ spec = importlib.util.spec_from_file_location("faidlix_bakemap_source_test", sou
 addon = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(addon)
 
-assert addon.ADDON_VERSION == (2, 3, 13)
+assert addon.ADDON_VERSION == (2, 3, 14)
 assert 'UV' in bpy.types.SpaceImageEditor.bl_rna.properties['mode'].enum_items.keys()
 assert hasattr(addon.FAIDLIX_PT_bakemap, "draw_header_preset")
 assert addon._version_tuple("2.3") == (2, 3, 0)
@@ -31,6 +31,10 @@ try:
     assert hasattr(bpy.types, "FAIDLIX_OT_online_update")
     assert hasattr(bpy.types, "FAIDLIX_OT_uv_material_map_select")
     assert hasattr(bpy.types, "FAIDLIX_MT_uv_material_maps")
+    assert hasattr(bpy.types, "FAIDLIX_OT_uv_merge_self_to_nearest")
+    assert hasattr(bpy.types, "FAIDLIX_OT_uv_merge_island_to_nearest")
+    assert hasattr(bpy.types, "FAIDLIX_MT_uv_merge_to_nearest")
+    assert addon._UV_COUNTERPART_DRAW_HANDLE is not None
     assert not hasattr(bpy.types, "FAIDLIX_PT_bakemap_updates")
     assert 'DEFAULT_CLOSED' in addon.FAIDLIX_PT_bakemap.bl_options
     assert hasattr(addon, "_schedule_online_update_install")
@@ -112,6 +116,7 @@ try:
     assert settings.bake_diffuse
     assert settings.texture_name == ""
     assert settings.update_status == ""
+    assert settings.show_uv_counterparts
     assert len(settings.references) == 0
     bpy.data.images.remove(preserved_image)
     bpy.data.materials.remove(preserved_material)
@@ -119,4 +124,5 @@ finally:
     addon.unregister()
 
 assert not hasattr(bpy.types.Scene, "faidlix_bakemap")
+assert addon._UV_COUNTERPART_DRAW_HANDLE is None
 print("FAIDLIX_BAKEMAP_SOURCE_TEST=PASS")

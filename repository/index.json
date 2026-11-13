@@ -56,6 +56,26 @@
     },
     {
       "schema_version": "1.0.0",
+      "id": "faidlix_bakemap",
+      "name": "Faidlix BakeMap",
+      "tagline": "Bake material information from a reference mesh to a target mesh",
+      "version": "2.3.14",
+      "type": "add-on",
+      "maintainer": "Faidlix",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "blender_version_min": "5.2.0",
+      "website": "https://github.com/Faidlix/BlenderAddons",
+      "permissions": {
+        "network": "Check and install Faidlix BakeMap updates from GitHub"
+      },
+      "archive_url": "./faidlix_bakemap-2.3.14.zip",
+      "archive_size": 40374,
+      "archive_hash": "sha256:d41a41ec85cf486cd901cf3febb7833db1b8c404e40a6ae47ab170038da6237e"
+    },
+    {
+      "schema_version": "1.0.0",
       "id": "faidlix_bone_remap",
       "name": "Faidlix Bone Remap",
       "tagline": "Batch import and retarget armature actions",

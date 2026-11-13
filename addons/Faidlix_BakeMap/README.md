@@ -1,4 +1,4 @@
-# Faidlix_BakeMap 2.3.13
+# Faidlix_BakeMap 2.3.14
 
 Canonical source and updates: https://github.com/Faidlix/BlenderAddons
 
@@ -23,6 +23,15 @@ output paths. Entering Edit Mode displays the first linked map when the current
 UV Editor image is unrelated; the native all-images selector remains available.
 UV Editor detection uses Blender's `SpaceImageEditor.mode == 'UV'`, so the menu
 is visible in the UV Editing workspace even though its `ui_mode` remains View.
+
+The UV Editor header also provides a **UV Counterparts** toggle. In vertex or
+edge select mode, the add-on draws other UV representations of the same mesh
+vertex or edge in blue without changing Blender's orange, editable selection.
+The native `M > To Nearest` submenu adds **Self To Nearest** for moving only
+the selected UV vertex/edge and **Island To Nearest** for moving its complete
+UV island. Island vertex alignment translates the island; island edge alignment
+translates, rotates, and uniformly scales it without mirroring. Multiple
+selected islands are transformed independently in one undo step.
 
 Bake map choices, roughness output, image sizes, diffuse contributions, and
 source scopes use direct toggle buttons in the sidebar. Size labels are
