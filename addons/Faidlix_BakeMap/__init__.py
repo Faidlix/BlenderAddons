@@ -8,7 +8,7 @@ Edit Mode, use the Material Maps menu in the UV Editor header.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 12),
+    "version": (2, 3, 13),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -46,7 +46,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 12)
+ADDON_VERSION = (2, 3, 13)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -367,6 +367,10 @@ def _uv_material_map_object(context):
     return obj if obj and obj.type == 'MESH' and obj.mode == 'EDIT' else None
 
 
+def _is_uv_editor_space(space):
+    return bool(space and space.type == 'IMAGE_EDITOR' and getattr(space, 'mode', None) == 'UV')
+
+
 def _sync_uv_edit_material_images():
     """On Edit Mode entry, show the first linked material image in UV Editors."""
     if bpy.app.background:
@@ -385,7 +389,7 @@ def _sync_uv_edit_material_images():
             if area.type != 'IMAGE_EDITOR':
                 continue
             space = area.spaces.active
-            if getattr(space, 'ui_mode', 'UV') != 'UV':
+            if not _is_uv_editor_space(space):
                 continue
             if space.image not in images:
                 space.image = images[0]
@@ -399,7 +403,7 @@ def _on_object_mode_changed():
 def _draw_uv_material_maps(self, context):
     if context.area is None or context.area.type != 'IMAGE_EDITOR':
         return
-    if getattr(context.space_data, 'ui_mode', 'UV') != 'UV':
+    if not _is_uv_editor_space(context.space_data):
         return
     obj = _uv_material_map_object(context)
     if obj is None:
