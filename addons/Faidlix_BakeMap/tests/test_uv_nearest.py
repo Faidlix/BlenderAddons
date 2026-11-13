@@ -6,6 +6,7 @@ add-on's __init__.py path. The test creates two triangles split at one UV seam.
 
 import importlib.util
 import os
+from types import SimpleNamespace
 
 import bmesh
 import bpy
@@ -15,6 +16,15 @@ source = os.environ["FAIDLIX_BAKEMAP_SOURCE"]
 spec = importlib.util.spec_from_file_location("faidlix_bakemap_uv_test", source)
 addon = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(addon)
+
+# View2D accepts normalized UVs even when an image is loaded and the
+# coordinates are outside the first tile. Its RNA exposes no cur rectangle.
+view = SimpleNamespace(view_to_region=lambda u, v, *, clip: (u, v, clip))
+context = SimpleNamespace(
+    region=SimpleNamespace(view2d=view),
+    space_data=SimpleNamespace(image=SimpleNamespace(size=(4096, 2048))),
+)
+assert addon._uv_to_region(context, (0.25, 1.35)) == (0.25, 1.35, False)
 
 
 def close(first, second, epsilon=1.0e-5):

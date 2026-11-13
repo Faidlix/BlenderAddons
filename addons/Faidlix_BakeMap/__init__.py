@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 14),
+    "version": (2, 3, 15),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 14)
+ADDON_VERSION = (2, 3, 15)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -415,6 +415,8 @@ def _active_uv_bmesh(obj):
     bm.faces.ensure_lookup_table()
     bm.edges.ensure_lookup_table()
     bm.verts.ensure_lookup_table()
+    bm.verts.index_update()
+    bm.edges.index_update()
     return bm, uv_layer
 
 
@@ -578,14 +580,8 @@ def _uv_similarity_point(point, source_start, source_end, target_start, target_e
 
 
 def _uv_to_region(context, coord):
-    x, y = coord
-    image = getattr(context.space_data, 'image', None)
-    bounds = context.region.view2d.cur
-    uses_pixels = max(abs(bounds.xmin), abs(bounds.xmax), abs(bounds.ymin), abs(bounds.ymax)) > 2.0
-    if uses_pixels and image:
-        x *= max(1, image.size[0])
-        y *= max(1, image.size[1])
-    return context.region.view2d.view_to_region(x, y, clip=False)
+    # Image Editor View2D uses normalized UVs, even outside the first tile.
+    return context.region.view2d.view_to_region(*coord, clip=False)
 
 
 def _draw_uv_counterparts():
@@ -2850,6 +2846,9 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
             self.report({'WARNING'}, "No unselected UV seam counterpart was found")
             return {'CANCELLED'}
         components, component_faces = _uv_face_components(bm, uv_layer)
+        moving_components = {
+            components[loop.face] for source, _candidates in pairs for loop in source['loops']
+        }
         proposals = {}
         for source, candidates in pairs:
             source_component = components.get(source['loops'][0].face)
@@ -2857,8 +2856,16 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
                 continue
             valid_candidates = [
                 candidate for candidate in candidates
-                if any(components.get(loop.face) != source_component for loop in candidate['loops'])
+                if any(components[loop.face] not in moving_components for loop in candidate['loops'])
             ]
+            if mode == 'EDGE':
+                def has_length(edge):
+                    start, end = edge['endpoints']
+                    return _uv_distance_squared(start[1], end[1]) > _UV_EPSILON ** 2
+
+                if not has_length(source):
+                    continue
+                valid_candidates = [candidate for candidate in valid_candidates if has_length(candidate)]
             if not valid_candidates:
                 continue
             target = _nearest_uv_candidate(source, valid_candidates, mode)
