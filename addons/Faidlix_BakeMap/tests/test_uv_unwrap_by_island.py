@@ -25,6 +25,10 @@ def check_neighbor_seam_rule(addon):
     assert len(islands) == 1
     seams = dict(addon["_uv_unwrap_seams"](bm.edges, set(bm.faces), components, layer))
     assert [seams[loop.edge] for loop in corners] == [False, False, True, False]
+    initial = dict(addon["_uv_unwrap_seams"](bm.edges, set(bm.faces), components, layer, 0))
+    assert [initial[loop.edge] for loop in corners] == [False, True, True, True]
+    twice = dict(addon["_uv_unwrap_seams"](bm.edges, set(bm.faces), components, layer, 2))
+    assert twice == dict(addon["_uv_unwrap_seams"](bm.edges, set(bm.faces), components, layer, 1000000))
     bm.free()
 
 addon = runpy.run_path(str(Path(__file__).resolve().parents[1] / "__init__.py"))
@@ -39,8 +43,11 @@ region = next(region for region in area.regions if region.type == 'WINDOW')
 class MenuRecorder:
     def __init__(self):
         self.labels = []
+        self.operator_context = 'EXEC_DEFAULT'
 
     def operator(self, identifier, *, text=None):
+        if identifier == 'faidlix.uv_unwrap_by_island':
+            assert self.operator_context == 'INVOKE_DEFAULT'
         self.labels.append(text)
         return SimpleNamespace()
 

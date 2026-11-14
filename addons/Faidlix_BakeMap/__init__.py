@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 24),
+    "version": (2, 3, 25),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 24)
+ADDON_VERSION = (2, 3, 25)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -3068,8 +3068,8 @@ _UV_ISLAND_UNWRAP_METHODS = (
 )
 
 
-def _uv_unwrap_seams(edges, included, components, layer):
-    """Find neighboring cuts from the original island connectivity in one pass."""
+def _uv_unwrap_seams(edges, included, components, layer, stitch_rounds=1):
+    """Expand stitches in rounds without crossing the original island boundaries."""
     joined = set()
     cuts = {}
     for edge in edges:
@@ -3080,22 +3080,35 @@ def _uv_unwrap_seams(edges, included, components, layer):
             joined.add(edge)
         else:
             cuts[edge] = loops
-    for edge, loops in cuts.items():
-        stitch = (
+    candidates = {
+        edge: loops for edge, loops in cuts.items()
+        if (
             edge.is_manifold and len(loops) == 2
             and components[loops[0].face] == components[loops[1].face]
-            and any(
+        )
+    }
+    for _ in range(stitch_rounds):
+        stitched = {
+            edge for edge, loops in candidates.items()
+            if any(
                 sum(corner.edge in joined for corner in loop.face.loops) == 1
                 and (loop.link_loop_prev.edge in joined or loop.link_loop_next.edge in joined)
                 for loop in loops
             )
-        )
-        yield edge, not stitch
+        }
+        if not stitched:
+            break
+        joined.update(stitched)
+        for edge in stitched:
+            del candidates[edge]
+    for edge in cuts:
+        if edge not in joined:
+            yield edge, True
     for edge in joined:
         yield edge, False
 
 
-def _unwrap_existing_uv_islands(context, method):
+def _unwrap_existing_uv_islands(context, method, stitch_rounds):
     settings = context.scene.tool_settings
     sync = settings.use_uv_select_sync
     mode = _uv_selection_mode(settings)
@@ -3131,7 +3144,7 @@ def _unwrap_existing_uv_islands(context, method):
             edges = [(edge, edge.seam, edge.select) for edge in bm.edges]
             verts = [(vert, vert.select) for vert in bm.verts]
             states.append((obj, faces, edges, verts, bool(included)))
-            for edge, seam in _uv_unwrap_seams(bm.edges, included, components, layer):
+            for edge, seam in _uv_unwrap_seams(bm.edges, included, components, layer, stitch_rounds):
                 edge.seam = seam
             for face, _, _ in faces:
                 face.hide = face not in included
@@ -3168,13 +3181,25 @@ class FAIDLIX_OT_uv_unwrap_by_island(Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     method: EnumProperty(items=_UV_ISLAND_UNWRAP_METHODS)
+    stitch_rounds: IntProperty(
+        name="Stitch Rounds / 補黏輪數",
+        description="Number of neighboring seam stitch passes before unwrapping",
+        default=1,
+        min=0,
+    )
 
     @classmethod
     def poll(cls, context):
         return _is_uv_editor_space(context.space_data) and _uv_material_map_object(context) is not None
 
+    def draw(self, _context):
+        self.layout.prop(self, "stitch_rounds")
+
+    def invoke(self, context, _event):
+        return context.window_manager.invoke_props_dialog(self)
+
     def execute(self, context):
-        return _unwrap_existing_uv_islands(context, self.method)
+        return _unwrap_existing_uv_islands(context, self.method, self.stitch_rounds)
 
 
 def _restore_uv_island_transform(corners, original):
@@ -3223,7 +3248,12 @@ class _UVUnwrapMenuLayout:
             label = kwargs.get('text')
             for method, name, _ in _UV_ISLAND_UNWRAP_METHODS:
                 if label == f"Unwrap {name}":
-                    self.layout.operator("faidlix.uv_unwrap_by_island", text=f"{label} ByIsland").method = method
+                    previous = self.layout.operator_context
+                    try:
+                        self.layout.operator_context = 'INVOKE_DEFAULT'
+                        self.layout.operator("faidlix.uv_unwrap_by_island", text=f"{label} ByIsland").method = method
+                    finally:
+                        self.layout.operator_context = previous
                     break
         return properties
 
