@@ -2,6 +2,7 @@
 
 import runpy
 from pathlib import Path
+from types import SimpleNamespace
 
 import bmesh
 import bpy
@@ -12,6 +13,34 @@ area = next(area for area in bpy.context.screen.areas if area.type == 'VIEW_3D')
 area.type = 'IMAGE_EDITOR'
 area.spaces.active.mode = 'UV'
 region = next(region for region in area.regions if region.type == 'WINDOW')
+
+
+class MenuRecorder:
+    def __init__(self):
+        self.labels = []
+
+    def operator(self, identifier, *, text=None):
+        self.labels.append(text)
+        return SimpleNamespace()
+
+    def separator(self):
+        pass
+
+
+menu = MenuRecorder()
+with bpy.context.temp_override(area=area, region=region):
+    bpy.types.IMAGE_MT_uvs_unwrap.draw(SimpleNamespace(layout=menu), bpy.context)
+assert menu.labels[:6] == [
+    f"Unwrap {label}{suffix}"
+    for _, label, _ in addon["_UV_ISLAND_UNWRAP_METHODS"]
+    for suffix in ("", " ByIsland")
+]
+
+
+def bounds_center(coords):
+    return tuple((min(p[i] for p in coords) + max(p[i] for p in coords)) / 2 for i in range(2))
+
+
 bpy.context.tool_settings.mesh_select_mode = (False, False, True)
 
 for method, _, _ in addon["_UV_ISLAND_UNWRAP_METHODS"]:
@@ -47,6 +76,8 @@ for method, _, _ in addon["_UV_ISLAND_UNWRAP_METHODS"]:
         after = [tuple(tuple(loop[layer].uv) for loop in face.loops) for face in bm.faces]
         assert before[0] != after[0]
         assert (before[1] == after[1]) == partial, (method, partial)
+        for old, new in zip(before, after):
+            assert all(abs(a - b) < 1e-6 for a, b in zip(bounds_center(old), bounds_center(new)))
         bpy.ops.object.mode_set(mode='OBJECT')
         bpy.data.objects.remove(obj, do_unlink=True)
         bpy.data.meshes.remove(mesh)

@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 20),
+    "version": (2, 3, 21),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 20)
+ADDON_VERSION = (2, 3, 21)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -2993,6 +2993,7 @@ def _unwrap_existing_uv_islands(context, method):
     sync = settings.use_uv_select_sync
     mode = _uv_selection_mode(settings)
     states = []
+    anchors = []
     try:
         for obj in context.objects_in_mode_unique_data:
             bm, layer = _active_uv_bmesh(obj)
@@ -3015,6 +3016,9 @@ def _unwrap_existing_uv_islands(context, method):
 
             selected = {components[face] for face in components if is_selected(face)}
             included = {face for index in selected for face in islands[index]}
+            for index in selected:
+                corners = [loop[layer] for face in islands[index] for loop in face.loops]
+                anchors.append((corners, _uv_bounds_center(corners)))
             # Preserve original state even if the native solver cancels.
             faces = [(face, face.hide, face.select) for face in bm.faces]
             edges = [(edge, edge.seam, edge.select) for edge in bm.edges]
@@ -3034,7 +3038,14 @@ def _unwrap_existing_uv_islands(context, method):
         # Use Blender's mesh-face unwrap across all isolated charts in one pass.
         # An Image Editor context would additionally filter by UV corner flags.
         with context.temp_override(area=None, region=None):
-            return bpy.ops.uv.unwrap('EXEC_DEFAULT', False, method=method)
+            result = bpy.ops.uv.unwrap('EXEC_DEFAULT', False, method=method)
+        if 'FINISHED' in result:
+            for corners, original in anchors:
+                current = _uv_bounds_center(corners)
+                for corner in corners:
+                    corner.uv.x += original[0] - current[0]
+                    corner.uv.y += original[1] - current[1]
+        return result
     finally:
         for obj, faces, edges, verts, _ in states:
             for face, hidden, selected in faces:
@@ -3065,11 +3076,46 @@ class FAIDLIX_OT_uv_unwrap_by_island(Operator):
         return _unwrap_existing_uv_islands(context, self.method)
 
 
+def _uv_bounds_center(corners):
+    return tuple((min(corner.uv[axis] for corner in corners)
+                  + max(corner.uv[axis] for corner in corners)) * 0.5 for axis in range(2))
+
+
+_UV_UNWRAP_ORIGINAL_DRAW = None
+
+
+class _UVUnwrapMenuLayout:
+    """Forward Blender's native menu and insert the matching ByIsland rows."""
+
+    def __init__(self, layout):
+        self.layout = layout
+
+    def __getattr__(self, name):
+        return getattr(self.layout, name)
+
+    def __setattr__(self, name, value):
+        if name == 'layout':
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self.layout, name, value)
+
+    def operator(self, operator, *args, **kwargs):
+        properties = self.layout.operator(operator, *args, **kwargs)
+        if operator == 'uv.unwrap':
+            label = kwargs.get('text')
+            for method, name, _ in _UV_ISLAND_UNWRAP_METHODS:
+                if label == f"Unwrap {name}":
+                    self.layout.operator("faidlix.uv_unwrap_by_island", text=f"{label} ByIsland").method = method
+                    break
+        return properties
+
+
 def _draw_uv_unwrap_by_island(self, context):
     if _is_uv_editor_space(context.space_data):
-        self.layout.separator()
-        for method, label, _ in _UV_ISLAND_UNWRAP_METHODS:
-            self.layout.operator("faidlix.uv_unwrap_by_island", text=f"Unwrap {label} ByIsland").method = method
+        from types import SimpleNamespace
+        _UV_UNWRAP_ORIGINAL_DRAW(SimpleNamespace(layout=_UVUnwrapMenuLayout(self.layout)), context)
+    else:
+        _UV_UNWRAP_ORIGINAL_DRAW(self, context)
 
 
 class FAIDLIX_MT_uv_merge_to_nearest(Menu):
@@ -3885,6 +3931,7 @@ classes = (
 
 def register():
     global _UV_COUNTERPART_DRAW_HANDLE
+    global _UV_UNWRAP_ORIGINAL_DRAW
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.faidlix_bakemap = PointerProperty(type=FaidlixBakeMapSettings)
@@ -3892,7 +3939,8 @@ def register():
         bpy.app.handlers.load_post.append(_background_load_post)
     bpy.types.IMAGE_HT_header.append(_draw_uv_material_maps)
     bpy.types.IMAGE_MT_uvs_merge.append(_draw_uv_merge_to_nearest)
-    bpy.types.IMAGE_MT_uvs_unwrap.append(_draw_uv_unwrap_by_island)
+    _UV_UNWRAP_ORIGINAL_DRAW = bpy.types.IMAGE_MT_uvs_unwrap.draw
+    bpy.types.IMAGE_MT_uvs_unwrap.draw = _draw_uv_unwrap_by_island
     for handlers in (bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load_post,
                      bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         handlers.append(_invalidate_uv_overlay)
@@ -3919,8 +3967,10 @@ def register():
 
 def unregister():
     global _UV_COUNTERPART_DRAW_HANDLE
+    global _UV_UNWRAP_ORIGINAL_DRAW
     bpy.msgbus.clear_by_owner(_UV_MATERIAL_MAP_MSGBUS_OWNER)
-    bpy.types.IMAGE_MT_uvs_unwrap.remove(_draw_uv_unwrap_by_island)
+    if bpy.types.IMAGE_MT_uvs_unwrap.draw is _draw_uv_unwrap_by_island:
+        bpy.types.IMAGE_MT_uvs_unwrap.draw = _UV_UNWRAP_ORIGINAL_DRAW
     for handlers in (bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load_post,
                      bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         handlers.remove(_invalidate_uv_overlay)
