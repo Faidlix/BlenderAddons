@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 31),
+    "version": (2, 3, 32),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 31)
+ADDON_VERSION = (2, 3, 32)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -3230,22 +3230,21 @@ def _unwrap_existing_uv_islands(context, method, stitch_rounds):
             included = {face for index in selected for face in islands[index]}
             for index in selected:
                 corners = [loop[layer] for face in islands[index] for loop in face.loops]
-                anchors.append((corners, [corner.uv.copy() for corner in corners]))
+                faces_in_island = islands[index]
+                joined = [(loop, other) for face in faces_in_island for loop in face.loops
+                          if loop.edge.is_manifold
+                          for other in loop.edge.link_loops
+                          if other.face in faces_in_island and other.face != face
+                          and _uv_faces_share_representation(loop, other, layer)]
+                anchors.append((corners, [corner.uv.copy() for corner in corners], joined, layer))
             # Preserve original state even if the native solver cancels.
             faces = [(face, face.hide, face.select) for face in bm.faces]
             edges = [(edge, edge.seam, edge.select) for edge in bm.edges]
             verts = [(vert, vert.select) for vert in bm.verts]
             states.append((obj, faces, edges, verts, bool(included)))
-            if method == 'CONFORMAL':
-                # Keep native Conformal's seam constraints inside each island.
-                # Separate input islands even when no mesh seam marks their boundary.
-                for edge, seam, _ in edges:
-                    adjacent = {components[loop.face] for loop in edge.link_loops
-                                if loop.face in included}
-                    edge.seam = seam or len(adjacent) > 1
-            else:
-                for edge, seam in _uv_unwrap_seams(bm.edges, included, components, layer, stitch_rounds):
-                    edge.seam = seam
+            rounds = 0 if method == 'CONFORMAL' else stitch_rounds
+            for edge, seam in _uv_unwrap_seams(bm.edges, included, components, layer, rounds):
+                edge.seam = seam
             for face, _, _ in faces:
                 face.hide = face not in included
                 face.select = face in included
@@ -3257,7 +3256,11 @@ def _unwrap_existing_uv_islands(context, method, stitch_rounds):
         with context.temp_override(area=None, region=None):
             result = bpy.ops.uv.unwrap('EXEC_DEFAULT', False, method=method)
         if 'FINISHED' in result:
-            for corners, original in anchors:
+            for corners, original, joined, layer in anchors:
+                if any(not _uv_faces_share_representation(a, b, layer) for a, b in joined):
+                    for corner, point in zip(corners, original):
+                        corner.uv = point
+                    continue
                 _restore_uv_island_transform(corners, original)
         return result
     finally:
