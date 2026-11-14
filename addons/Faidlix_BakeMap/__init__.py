@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 22),
+    "version": (2, 3, 23),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 22)
+ADDON_VERSION = (2, 3, 23)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -2823,6 +2823,57 @@ class FAIDLIX_MT_uv_material_maps(Menu):
             operator.image_name = image.name
 
 
+def _adjacent_seam_pair(source, target, pairs, components, moving):
+    """Find the closest compatible second edge at the same UV corner."""
+    def endpoints(edge):
+        return {(vertex, _uv_key(point)) for vertex, point in edge['endpoints']}
+
+    source_island = components[source['loops'][0].face]
+    target_islands = {components[loop.face] for loop in target['loops']} - moving
+    matches = []
+    for other, candidates in pairs:
+        shared = endpoints(source) & endpoints(other)
+        if len(shared) != 1 or components[other['loops'][0].face] != source_island:
+            continue
+        for candidate in candidates:
+            target_shared = endpoints(target) & endpoints(candidate)
+            if (len(target_shared) == 1
+                    and next(iter(shared))[0] == next(iter(target_shared))[0]
+                    and any(components[loop.face] in target_islands for loop in candidate['loops'])):
+                matches.append((other, candidate))
+    return min(matches, key=lambda pair: _uv_edge_score(*pair), default=None)
+
+
+def _seam_corner_transform(source, target, adjacent):
+    other, candidate = adjacent
+    source_uv = dict(source['endpoints'])
+    target_uv = dict(target['endpoints'])
+    source_uv.update(other['endpoints'])
+    target_uv.update(candidate['endpoints'])
+    if len(source_uv) != 3 or source_uv.keys() != target_uv.keys():
+        return None
+    a, b, c = source_uv
+    x, y = source_uv[a]
+    ux, uy = source_uv[b][0] - x, source_uv[b][1] - y
+    vx, vy = source_uv[c][0] - x, source_uv[c][1] - y
+    determinant = ux * vy - uy * vx
+    anchors = {_uv_key(point): target_uv[key] for key, point in source_uv.items()}
+
+    def transform(point, fallback):
+        key = _uv_key(point)
+        if key in anchors:
+            return anchors[key]
+        if abs(determinant) <= 1e-15:
+            return fallback
+        dx, dy = point[0] - x, point[1] - y
+        u = (dx * vy - dy * vx) / determinant
+        v = (ux * dy - uy * dx) / determinant
+        return tuple(target_uv[a][i] + u * (target_uv[b][i] - target_uv[a][i])
+                     + v * (target_uv[c][i] - target_uv[a][i]) for i in range(2))
+
+    return transform
+
+
 def _uv_nearest_merge_poll(context):
     return bool(
         context.area
@@ -2866,7 +2917,14 @@ class FAIDLIX_OT_uv_merge_self_to_nearest(Operator):
                     score = _uv_edge_score(source, target)
                     if island not in nearest or score < nearest[island][0]:
                         nearest[island] = (score, source, target)
-            pairs = [(source, [target]) for _, source, target in nearest.values()]
+            selected_pairs = []
+            for _, source, target in nearest.values():
+                selected_pairs.append((source, [target]))
+                adjacent = _adjacent_seam_pair(source, target, pairs, components, moving)
+                if adjacent:
+                    other, candidate = adjacent
+                    selected_pairs.append((other, [candidate]))
+            pairs = selected_pairs
             source_faces = {face for island in nearest for face in islands[island]}
         if not pairs:
             self.report({'WARNING'}, "No unselected UV seam counterpart was found")
@@ -2964,6 +3022,11 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
             return {'CANCELLED'}
         for component_id, (_score, source, target) in proposals.items():
             mirror = False
+            corner_transform = None
+            if mode == 'FACE':
+                adjacent = _adjacent_seam_pair(source, target, pairs, components, moving_components)
+                if adjacent:
+                    corner_transform = _seam_corner_transform(source, target, adjacent)
             if mode != 'VERTEX':
                 target_loop = next(loop for loop in target['loops']
                                    if components[loop.face] not in moving_components)
@@ -2988,6 +3051,8 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
                             target['endpoints'][1][1],
                             mirror=mirror,
                         )
+                        if corner_transform:
+                            transformed = corner_transform(point, transformed)
                     loop[uv_layer].uv = transformed
         bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
         _invalidate_uv_overlay()
