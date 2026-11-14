@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 16),
+    "version": (2, 3, 17),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 16)
+ADDON_VERSION = (2, 3, 17)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -615,7 +615,11 @@ def _invalidate_uv_overlay(_scene=None, _depsgraph=None):
 
 def _uv_overlay_coordinates(obj, mode, sync):
     layer = obj.data.uv_layers.active
-    key = (obj.as_pointer(), obj.data.as_pointer(), layer.name if layer else None, mode, sync)
+    bm = bmesh.from_edit_mesh(obj.data)
+    # Y changes edit-mesh topology before a dependency-graph notification
+    # necessarily arrives. Include cheap live counts in the cache signature.
+    topology = (len(bm.verts), len(bm.edges), len(bm.faces))
+    key = (obj.as_pointer(), obj.data.as_pointer(), layer.name if layer else None, mode, sync, topology)
     now = time.monotonic()
     cached = _UV_OVERLAY_CACHE.get(key)
     if cached and now - cached[0] < 0.35:
