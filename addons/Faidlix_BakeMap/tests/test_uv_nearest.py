@@ -72,12 +72,8 @@ _bm, _layer, pairs = addon._uv_counterpart_pairs(obj, 'EDGE')
 assert len(pairs) == 1, pairs
 source_edge, targets = pairs[0]
 assert len(targets) == 1, targets
-assert source_edge['endpoints'][0][0] == 0
-assert source_edge['endpoints'][1][0] == 1
-assert close(source_edge['endpoints'][0][1], (0.0, 0.0))
-assert close(source_edge['endpoints'][1][1], (1.0, 0.0))
-assert close(targets[0]['endpoints'][0][1], (2.0, 0.0))
-assert close(targets[0]['endpoints'][1][1], (4.0, 0.0))
+assert dict(source_edge['endpoints']) == {hash(bm.verts[0]): (0.0, 0.0), hash(bm.verts[1]): (1.0, 0.0)}
+assert dict(targets[0]['endpoints']) == {hash(bm.verts[0]): (2.0, 0.0), hash(bm.verts[1]): (4.0, 0.0)}
 
 # Sync uses the mesh selection buttons. A face counterpart is a segment.
 settings = SimpleNamespace(use_uv_select_sync=True, mesh_select_mode=(False, False, True),
@@ -119,8 +115,7 @@ source_loop = next(
     if {loop.vert.index, loop.link_loop_next.vert.index} == {0, 1}
 )
 self_endpoints = addon._uv_edge_endpoints(source_loop, bm_uv)
-assert close(self_endpoints[0][1], (2.0, 0.0))
-assert close(self_endpoints[1][1], (4.0, 0.0))
+assert dict(self_endpoints) == {hash(bm.verts[0]): (2.0, 0.0), hash(bm.verts[1]): (4.0, 0.0)}
 
 # Restore the split seam, then verify whole-island translation/rotation/scale.
 for face in bm.faces:

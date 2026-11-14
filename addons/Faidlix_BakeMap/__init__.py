@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 17),
+    "version": (2, 3, 18),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 17)
+ADDON_VERSION = (2, 3, 18)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -391,8 +391,8 @@ def _uv_distance_squared(first, second):
 def _uv_edge_endpoints(loop, uv_layer):
     """Return an edge representation ordered by the underlying mesh vertex IDs."""
     endpoints = [
-        (loop.vert.index, _uv_coord(loop[uv_layer].uv)),
-        (loop.link_loop_next.vert.index, _uv_coord(loop.link_loop_next[uv_layer].uv)),
+        (hash(loop.vert), _uv_coord(loop[uv_layer].uv)),
+        (hash(loop.link_loop_next.vert), _uv_coord(loop.link_loop_next[uv_layer].uv)),
     ]
     endpoints.sort(key=lambda item: item[0])
     return tuple(endpoints)
@@ -416,8 +416,6 @@ def _active_uv_bmesh(obj):
     bm.faces.ensure_lookup_table()
     bm.edges.ensure_lookup_table()
     bm.verts.ensure_lookup_table()
-    bm.verts.index_update()
-    bm.edges.index_update()
     return bm, uv_layer
 
 
@@ -427,11 +425,11 @@ def _uv_vertex_groups(bm, uv_layer):
         if face.hide:
             continue
         for loop in face.loops:
-            key = (loop.vert.index, _uv_key(loop[uv_layer].uv))
+            key = (hash(loop.vert), _uv_key(loop[uv_layer].uv))
             group = groups.setdefault(
                 key,
                 {
-                    'vert_index': loop.vert.index,
+                    'vert_index': hash(loop.vert),
                     'coord': _uv_coord(loop[uv_layer].uv),
                     'loops': [],
                     'selected': False,
@@ -461,7 +459,7 @@ def _uv_edge_groups(bm, uv_layer, mode='EDGE', sync=False):
         for loop in face.loops:
             endpoints = _uv_edge_endpoints(loop, uv_layer)
             key = (
-                loop.edge.index,
+                hash(loop.edge),
                 endpoints[0][0],
                 _uv_key(endpoints[0][1]),
                 endpoints[1][0],
@@ -470,7 +468,7 @@ def _uv_edge_groups(bm, uv_layer, mode='EDGE', sync=False):
             group = groups.setdefault(
                 key,
                 {
-                    'edge_index': loop.edge.index,
+                    'edge_index': hash(loop.edge),
                     'endpoints': endpoints,
                     'loops': [],
                     'selected': False,
@@ -655,6 +653,9 @@ def _draw_uv_counterparts():
     settings = getattr(context.scene, 'faidlix_bakemap', None)
     obj = _uv_material_map_object(context)
     if settings is None or not settings.show_uv_counterparts or obj is None:
+        return
+    # Native transforms own the edit mesh until the modal operation ends.
+    if any(op.bl_idname.startswith('TRANSFORM_OT_') for op in context.window.modal_operators):
         return
     tool_settings = context.scene.tool_settings
     mode = _uv_selection_mode(tool_settings)
@@ -2860,7 +2861,7 @@ class FAIDLIX_OT_uv_merge_self_to_nearest(Operator):
             if face.hide:
                 continue
             for loop in face.loops:
-                key = (loop.vert.index, _uv_key(loop[uv_layer].uv))
+                key = (hash(loop.vert), _uv_key(loop[uv_layer].uv))
                 assignment = assignments.get(key)
                 if assignment is not None:
                     target_coord = assignment[1]
