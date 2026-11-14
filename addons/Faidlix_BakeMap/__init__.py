@@ -2,7 +2,7 @@
 
 Enable the extension, configure ReferenceObject/TargetObject in the 3D View
 sidebar, then run New Bake Material, Re Bake Map, or Background Bake. In UV
-Edit Mode, use the Material Maps menu and UV Counterparts toggle in the UV
+Edit Mode, use U > Unwrap for ByIsland methods, or use the Material Maps menu and UV Counterparts toggle in the UV
 Editor header. Press M > To Nearest to merge selected UVs or whole islands to
 their nearest seam counterpart.
 """
@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 19),
+    "version": (2, 3, 20),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 19)
+ADDON_VERSION = (2, 3, 20)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -2981,6 +2981,97 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
         return {'FINISHED'}
 
 
+_UV_ISLAND_UNWRAP_METHODS = (
+    ('ANGLE_BASED', "Angle Based", ""),
+    ('CONFORMAL', "Conformal", ""),
+    ('MINIMUM_STRETCH', "Minimum Stretch", ""),
+)
+
+
+def _unwrap_existing_uv_islands(context, method):
+    settings = context.scene.tool_settings
+    sync = settings.use_uv_select_sync
+    mode = _uv_selection_mode(settings)
+    states = []
+    try:
+        for obj in context.objects_in_mode_unique_data:
+            bm, layer = _active_uv_bmesh(obj)
+            if bm is None:
+                continue
+            components, islands = _uv_face_components(bm, layer)
+
+            def is_selected(face):
+                if sync:
+                    if mode == 'FACE':
+                        return face.select
+                    return any(loop.edge.select if mode == 'EDGE' else loop.vert.select
+                               for loop in face.loops)
+                if not face.select:
+                    return False
+                if mode == 'FACE':
+                    return face.uv_select
+                return any(loop.uv_select_edge if mode == 'EDGE' else loop.uv_select_vert
+                           for loop in face.loops)
+
+            selected = {components[face] for face in components if is_selected(face)}
+            included = {face for index in selected for face in islands[index]}
+            # Preserve original state even if the native solver cancels.
+            faces = [(face, face.hide, face.select) for face in bm.faces]
+            edges = [(edge, edge.seam, edge.select) for edge in bm.edges]
+            verts = [(vert, vert.select) for vert in bm.verts]
+            states.append((obj, faces, edges, verts, bool(included)))
+            for edge, _, _ in edges:
+                loops = [loop for loop in edge.link_loops if loop.face in included]
+                if loops:
+                    edge.seam = len(loops) != 2 or not _uv_faces_share_representation(
+                        loops[0], loops[1], layer)
+            for face, _, _ in faces:
+                face.hide = face not in included
+                face.select = face in included
+            bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+        if not any(state[-1] for state in states):
+            return {'CANCELLED'}
+        # Use Blender's mesh-face unwrap across all isolated charts in one pass.
+        # An Image Editor context would additionally filter by UV corner flags.
+        with context.temp_override(area=None, region=None):
+            return bpy.ops.uv.unwrap('EXEC_DEFAULT', False, method=method)
+    finally:
+        for obj, faces, edges, verts, _ in states:
+            for face, hidden, selected in faces:
+                face.hide = hidden
+                face.select = selected
+            for edge, seam, selected in edges:
+                edge.seam = seam
+                edge.select = selected
+            for vert, selected in verts:
+                vert.select = selected
+            bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+        _invalidate_uv_overlay()
+
+
+class FAIDLIX_OT_uv_unwrap_by_island(Operator):
+    bl_idname = "faidlix.uv_unwrap_by_island"
+    bl_label = "Unwrap ByIsland"
+    bl_description = "Unwrap selected UV islands using their existing UV boundaries"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    method: EnumProperty(items=_UV_ISLAND_UNWRAP_METHODS)
+
+    @classmethod
+    def poll(cls, context):
+        return _is_uv_editor_space(context.space_data) and _uv_material_map_object(context) is not None
+
+    def execute(self, context):
+        return _unwrap_existing_uv_islands(context, self.method)
+
+
+def _draw_uv_unwrap_by_island(self, context):
+    if _is_uv_editor_space(context.space_data):
+        self.layout.separator()
+        for method, label, _ in _UV_ISLAND_UNWRAP_METHODS:
+            self.layout.operator("faidlix.uv_unwrap_by_island", text=f"Unwrap {label} ByIsland").method = method
+
+
 class FAIDLIX_MT_uv_merge_to_nearest(Menu):
     bl_idname = "FAIDLIX_MT_uv_merge_to_nearest"
     bl_label = "To Nearest"
@@ -3761,6 +3852,7 @@ class FAIDLIX_PT_bakemap(Panel):
 
 
 classes = (
+    FAIDLIX_OT_uv_unwrap_by_island,
     FaidlixReferenceItem,
     FaidlixMapOutputItem,
     FaidlixMaterialMappingItem,
@@ -3800,6 +3892,7 @@ def register():
         bpy.app.handlers.load_post.append(_background_load_post)
     bpy.types.IMAGE_HT_header.append(_draw_uv_material_maps)
     bpy.types.IMAGE_MT_uvs_merge.append(_draw_uv_merge_to_nearest)
+    bpy.types.IMAGE_MT_uvs_unwrap.append(_draw_uv_unwrap_by_island)
     for handlers in (bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load_post,
                      bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         handlers.append(_invalidate_uv_overlay)
@@ -3827,6 +3920,7 @@ def register():
 def unregister():
     global _UV_COUNTERPART_DRAW_HANDLE
     bpy.msgbus.clear_by_owner(_UV_MATERIAL_MAP_MSGBUS_OWNER)
+    bpy.types.IMAGE_MT_uvs_unwrap.remove(_draw_uv_unwrap_by_island)
     for handlers in (bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load_post,
                      bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         handlers.remove(_invalidate_uv_overlay)

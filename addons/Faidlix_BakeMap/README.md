@@ -1,4 +1,8 @@
-# Faidlix_BakeMap 2.3.19
+# Faidlix_BakeMap 2.3.20
+
+In the UV Editor, use the ByIsland entries in the U menu to unwrap each
+selected existing UV island with Angle Based, Conformal, or Minimum Stretch.
+Unselected islands and the mesh's seam marks are preserved.
 
 Canonical source and updates: https://github.com/Faidlix/BlenderAddons
 
