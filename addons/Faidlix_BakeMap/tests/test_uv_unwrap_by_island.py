@@ -40,6 +40,47 @@ area.spaces.active.mode = 'UV'
 region = next(region for region in area.regions if region.type == 'WINDOW')
 
 
+def check_closed_slit(method):
+    bpy.ops.object.select_all(action='DESELECT')
+    mesh = bpy.data.meshes.new("Selected slit")
+    mesh.from_pydata([(x, y, 0) for y in range(3) for x in range(3)], [],
+                     [(0, 1, 4, 3), (1, 2, 5, 4), (3, 4, 7, 6), (4, 5, 8, 7)])
+    obj = bpy.data.objects.new(mesh.name, mesh)
+    bpy.context.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    mesh.uv_layers.new()
+    bpy.context.tool_settings.use_uv_select_sync = True
+    bpy.context.tool_settings.mesh_select_mode = (False, False, True)
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bm = bmesh.from_edit_mesh(mesh)
+    layer = bm.loops.layers.uv.active
+    for face in bm.faces:
+        for loop in face.loops:
+            x, y, _ = loop.vert.co
+            loop[layer].uv = (x * 0.2, y * 0.2)
+            if loop.vert.index == 1 and face.index == 0:
+                loop[layer].uv.x -= 0.05
+    bmesh.update_edit_mesh(mesh)
+    slit = next(edge for edge in bm.edges if {v.index for v in edge.verts} == {1, 4})
+    first, second = slit.link_loops
+    joined = addon["_uv_faces_share_representation"]
+    assert not joined(first, second, layer)
+    assert len(addon["_uv_face_components"](bm, layer)[1]) == 1
+    with bpy.context.temp_override(area=area, region=region):
+        assert bpy.ops.faidlix.uv_unwrap_by_island(method=method, stitch_rounds=2) == {'FINISHED'}
+    assert joined(first, second, layer), method
+    assert not slit.seam
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.data.objects.remove(obj, do_unlink=True)
+    bpy.data.meshes.remove(mesh)
+
+
+for method, _, _ in addon["_UV_ISLAND_UNWRAP_METHODS"]:
+    check_closed_slit(method)
+
+
 class MenuRecorder:
     def __init__(self):
         self.labels = []

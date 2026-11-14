@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 29),
+    "version": (2, 3, 30),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 29)
+ADDON_VERSION = (2, 3, 30)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -3173,12 +3173,18 @@ def _uv_unwrap_seams(edges, included, components, layer, stitch_rounds=1):
             and components[loops[0].face] == components[loops[1].face]
         )
     }
+    # A face with a single original attachment keeps its opposite cut,
+    # even after the two neighboring cuts have been closed in earlier rounds.
+    protected = set()
+    for face in included:
+        attached = [loop for loop in face.loops if loop.edge in joined]
+        if len(face.loops) == 4 and len(attached) == 1:
+            protected.add(attached[0].link_loop_next.link_loop_next.edge)
     for _ in range(stitch_rounds):
         stitched = {
             edge for edge, loops in candidates.items()
-            if any(
-                sum(corner.edge in joined for corner in loop.face.loops) == 1
-                and (loop.link_loop_prev.edge in joined or loop.link_loop_next.edge in joined)
+            if edge not in protected and any(
+                loop.link_loop_prev.edge in joined or loop.link_loop_next.edge in joined
                 for loop in loops
             )
         }
