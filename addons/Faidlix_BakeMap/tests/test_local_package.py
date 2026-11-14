@@ -14,7 +14,7 @@ MODULE = "bl_ext.user_default.faidlix_bakemap"
 _default, enabled = addon_utils.check(MODULE)
 assert enabled, MODULE
 addon = importlib.import_module(MODULE)
-assert addon.ADDON_VERSION == (2, 3, 21)
+assert addon.ADDON_VERSION == (2, 3, 22)
 assert hasattr(bpy.types.Scene, "faidlix_bakemap")
 assert hasattr(bpy.types, "FAIDLIX_OT_uv_merge_self_to_nearest")
 assert hasattr(bpy.types, "FAIDLIX_OT_uv_merge_island_to_nearest")

@@ -156,6 +156,21 @@ assert close(coords[1], (2.0, 2.0))
 assert close(coords[2], (4.0, 0.0))
 assert {loop.vert.index: tuple(loop[bm_uv].uv) for loop in bm.faces[1].loops} == same_side_target
 
+for operator in (addon.FAIDLIX_OT_uv_merge_self_to_nearest,
+                 addon.FAIDLIX_OT_uv_merge_island_to_nearest):
+    bpy.context.scene.tool_settings.uv_select_mode = 'FACE'
+    for face in bm.faces:
+        face.select_set(True)
+        face.uv_select_set(face.index == 0)
+        for loop in face.loops:
+            loop[bm_uv].uv = (face_uvs[0] if face.index == 0 else same_side_target)[loop.vert.index]
+    bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+    assert operator.execute(FakeOperator(), FakeContext()) == {'FINISHED'}
+    coords = {loop.vert.index: tuple(loop[bm_uv].uv) for loop in bm.faces[0].loops}
+    assert close(coords[0], (2.0, 0.0)) and close(coords[1], (2.0, 2.0))
+    assert close(coords[2], (0.0, 1.0) if operator == addon.FAIDLIX_OT_uv_merge_self_to_nearest else (4.0, 0.0))
+    assert {loop.vert.index: tuple(loop[bm_uv].uv) for loop in bm.faces[1].loops} == same_side_target
+
 bpy.ops.object.mode_set(mode='OBJECT')
 bpy.data.objects.remove(obj, do_unlink=True)
 bpy.data.meshes.remove(mesh)

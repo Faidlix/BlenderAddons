@@ -15,7 +15,7 @@ spec = importlib.util.spec_from_file_location("faidlix_bakemap_source_test", sou
 addon = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(addon)
 
-assert addon.ADDON_VERSION == (2, 3, 21)
+assert addon.ADDON_VERSION == (2, 3, 22)
 assert 'UV' in bpy.types.SpaceImageEditor.bl_rna.properties['mode'].enum_items.keys()
 assert hasattr(addon.FAIDLIX_PT_bakemap, "draw_header_preset")
 assert addon._version_tuple("2.3") == (2, 3, 0)

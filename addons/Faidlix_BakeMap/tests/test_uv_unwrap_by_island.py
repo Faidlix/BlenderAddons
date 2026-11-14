@@ -78,6 +78,13 @@ for method, _, _ in addon["_UV_ISLAND_UNWRAP_METHODS"]:
         assert (before[1] == after[1]) == partial, (method, partial)
         for old, new in zip(before, after):
             assert all(abs(a - b) < 1e-6 for a, b in zip(bounds_center(old), bounds_center(new)))
+            from mathutils import Vector
+            a, b = [Vector(p) for p in old], [Vector(p) for p in new]
+            a = [v - sum(a, Vector((0, 0))) / len(a) for v in a]
+            b = [v - sum(b, Vector((0, 0))) / len(b) for v in b]
+            assert abs(sum(v.length_squared for v in a) - sum(v.length_squared for v in b)) < 1e-6
+            assert abs(sum(u.x * v.y - u.y * v.x for u, v in zip(a, b))) < 1e-6
+            assert sum(u.dot(v) for u, v in zip(a, b)) > 0
         bpy.ops.object.mode_set(mode='OBJECT')
         bpy.data.objects.remove(obj, do_unlink=True)
         bpy.data.meshes.remove(mesh)

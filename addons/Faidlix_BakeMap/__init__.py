@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 21),
+    "version": (2, 3, 22),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 21)
+ADDON_VERSION = (2, 3, 22)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -454,7 +454,7 @@ def _uv_edge_groups(bm, uv_layer, mode='EDGE', sync=False):
         if face.hide:
             continue
         face_selected = mode == 'FACE' and (
-            face.select if sync else all(corner.uv_select_vert for corner in face.loops)
+            face.select if sync else face.select and face.uv_select
         )
         for loop in face.loops:
             endpoints = _uv_edge_endpoints(loop, uv_layer)
@@ -2829,7 +2829,7 @@ def _uv_nearest_merge_poll(context):
         and context.area.type == 'IMAGE_EDITOR'
         and _is_uv_editor_space(context.space_data)
         and _uv_material_map_object(context)
-        and _uv_selection_mode(context.scene.tool_settings) in {'VERTEX', 'EDGE'}
+        and _uv_selection_mode(context.scene.tool_settings) in {'VERTEX', 'EDGE', 'FACE'}
     )
 
 
@@ -2852,7 +2852,22 @@ class FAIDLIX_OT_uv_merge_self_to_nearest(Operator):
             self.report({'WARNING'}, "Make the active object's mesh single-user before merging UVs")
             return {'CANCELLED'}
         mode = _uv_selection_mode(context.scene.tool_settings)
-        bm, uv_layer, pairs = _uv_counterpart_pairs(obj, mode)
+        bm, uv_layer, pairs = _uv_counterpart_pairs(obj, mode, context.scene.tool_settings.use_uv_select_sync)
+        source_faces = None
+        if mode == 'FACE' and pairs:
+            components, islands = _uv_face_components(bm, uv_layer)
+            moving = {components[source['loops'][0].face] for source, _ in pairs}
+            nearest = {}
+            for source, candidates in pairs:
+                island = components[source['loops'][0].face]
+                for target in candidates:
+                    if any(components[loop.face] in moving for loop in target['loops']):
+                        continue
+                    score = _uv_edge_score(source, target)
+                    if island not in nearest or score < nearest[island][0]:
+                        nearest[island] = (score, source, target)
+            pairs = [(source, [target]) for _, source, target in nearest.values()]
+            source_faces = {face for island in nearest for face in islands[island]}
         if not pairs:
             self.report({'WARNING'}, "No unselected UV seam counterpart was found")
             return {'CANCELLED'}
@@ -2873,7 +2888,7 @@ class FAIDLIX_OT_uv_merge_self_to_nearest(Operator):
                         assignments[key] = (score, target_endpoint[1])
         changed = 0
         for face in bm.faces:
-            if face.hide:
+            if face.hide or (source_faces is not None and face not in source_faces):
                 continue
             for loop in face.loops:
                 key = (hash(loop.vert), _uv_key(loop[uv_layer].uv))
@@ -2908,7 +2923,7 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
             self.report({'WARNING'}, "Make the active object's mesh single-user before merging UVs")
             return {'CANCELLED'}
         mode = _uv_selection_mode(context.scene.tool_settings)
-        bm, uv_layer, pairs = _uv_counterpart_pairs(obj, mode)
+        bm, uv_layer, pairs = _uv_counterpart_pairs(obj, mode, context.scene.tool_settings.use_uv_select_sync)
         if not pairs:
             self.report({'WARNING'}, "No unselected UV seam counterpart was found")
             return {'CANCELLED'}
@@ -2925,7 +2940,7 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
                 candidate for candidate in candidates
                 if any(components[loop.face] not in moving_components for loop in candidate['loops'])
             ]
-            if mode == 'EDGE':
+            if mode != 'VERTEX':
                 def has_length(edge):
                     start, end = edge['endpoints']
                     return _uv_distance_squared(start[1], end[1]) > _UV_EPSILON ** 2
@@ -2949,7 +2964,7 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
             return {'CANCELLED'}
         for component_id, (_score, source, target) in proposals.items():
             mirror = False
-            if mode == 'EDGE':
+            if mode != 'VERTEX':
                 target_loop = next(loop for loop in target['loops']
                                    if components[loop.face] not in moving_components)
                 start_vertex = source['endpoints'][0][0]
@@ -3018,7 +3033,7 @@ def _unwrap_existing_uv_islands(context, method):
             included = {face for index in selected for face in islands[index]}
             for index in selected:
                 corners = [loop[layer] for face in islands[index] for loop in face.loops]
-                anchors.append((corners, _uv_bounds_center(corners)))
+                anchors.append((corners, [corner.uv.copy() for corner in corners]))
             # Preserve original state even if the native solver cancels.
             faces = [(face, face.hide, face.select) for face in bm.faces]
             edges = [(edge, edge.seam, edge.select) for edge in bm.edges]
@@ -3041,10 +3056,7 @@ def _unwrap_existing_uv_islands(context, method):
             result = bpy.ops.uv.unwrap('EXEC_DEFAULT', False, method=method)
         if 'FINISHED' in result:
             for corners, original in anchors:
-                current = _uv_bounds_center(corners)
-                for corner in corners:
-                    corner.uv.x += original[0] - current[0]
-                    corner.uv.y += original[1] - current[1]
+                _restore_uv_island_transform(corners, original)
         return result
     finally:
         for obj, faces, edges, verts, _ in states:
@@ -3076,9 +3088,26 @@ class FAIDLIX_OT_uv_unwrap_by_island(Operator):
         return _unwrap_existing_uv_islands(context, self.method)
 
 
-def _uv_bounds_center(corners):
-    return tuple((min(corner.uv[axis] for corner in corners)
-                  + max(corner.uv[axis] for corner in corners)) * 0.5 for axis in range(2))
+def _restore_uv_island_transform(corners, original):
+    """Match RMS size and best-fit rotation, then restore the bounds center."""
+    current = [corner.uv.copy() for corner in corners]
+    old_mean = sum(original[1:], original[0].copy()) / len(original)
+    new_mean = sum(current[1:], current[0].copy()) / len(current)
+    old_offsets = [point - old_mean for point in original]
+    new_offsets = [point - new_mean for point in current]
+    old_size = sum(point.length_squared for point in old_offsets)
+    new_size = sum(point.length_squared for point in new_offsets)
+    dot = sum(a.dot(b) for a, b in zip(new_offsets, old_offsets))
+    cross = sum(a.x * b.y - a.y * b.x for a, b in zip(new_offsets, old_offsets))
+    angle = math.atan2(cross, dot)
+    scale = math.sqrt(old_size / new_size) if min(old_size, new_size) > 1e-24 else 1.0
+    c, s = math.cos(angle) * scale, math.sin(angle) * scale
+    aligned = [(c * p.x - s * p.y, s * p.x + c * p.y) for p in new_offsets]
+    offset = tuple((min(p[i] for p in original) + max(p[i] for p in original)
+                    - min(p[i] for p in aligned) - max(p[i] for p in aligned)) * 0.5
+                   for i in range(2))
+    for corner, (x, y) in zip(corners, aligned):
+        corner.uv = (x + offset[0], y + offset[1])
 
 
 _UV_UNWRAP_ORIGINAL_DRAW = None
