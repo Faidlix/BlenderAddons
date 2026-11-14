@@ -1,4 +1,4 @@
-# Faidlix_BakeMap 2.3.18
+# Faidlix_BakeMap 2.3.19
 
 Canonical source and updates: https://github.com/Faidlix/BlenderAddons
 
@@ -30,7 +30,8 @@ vertex or edge in blue without changing Blender's orange, editable selection.
 The native `M > To Nearest` submenu adds **Self To Nearest** for moving only
 the selected UV vertex/edge and **Island To Nearest** for moving its complete
 UV island. Island vertex alignment translates the island; island edge alignment
-translates, rotates, and uniformly scales it without mirroring. Multiple
+translates, rotates, and uniformly scales it. If both faces would lie on the
+same side, the source island reflects across the seam. Multiple
 selected islands are transformed independently in one undo step.
 
 Bake map choices, roughness output, image sizes, diffuse contributions, and

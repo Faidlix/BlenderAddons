@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 18),
+    "version": (2, 3, 19),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 18)
+ADDON_VERSION = (2, 3, 19)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -570,8 +570,19 @@ def _uv_face_components(bm, uv_layer):
     return components, component_faces
 
 
-def _uv_similarity_point(point, source_start, source_end, target_start, target_end):
-    """Map a point by translation, rotation, and uniform scale without reflection."""
+def _uv_face_side(edge_loop, uv_layer, start_vertex):
+    """Return the adjacent UV face's signed area relative to the ordered edge."""
+    origin = edge_loop[uv_layer].uv
+    area = 0.0
+    for corner in edge_loop.face.loops:
+        a = corner[uv_layer].uv - origin
+        b = corner.link_loop_next[uv_layer].uv - origin
+        area += a.x * b.y - a.y * b.x
+    return area if hash(edge_loop.vert) == start_vertex else -area
+
+
+def _uv_similarity_point(point, source_start, source_end, target_start, target_end, *, mirror=False):
+    """Align ordered endpoints, optionally reflecting across the aligned seam."""
     source_x = source_end[0] - source_start[0]
     source_y = source_end[1] - source_start[1]
     target_x = target_end[0] - target_start[0]
@@ -586,6 +597,10 @@ def _uv_similarity_point(point, source_start, source_end, target_start, target_e
     imaginary = ((source_x * target_y) - (source_y * target_x)) / source_length_squared
     relative_x = point[0] - source_start[0]
     relative_y = point[1] - source_start[1]
+    if mirror:
+        perpendicular = 2.0 * (source_x * relative_y - source_y * relative_x) / source_length_squared
+        relative_x += perpendicular * source_y
+        relative_y -= perpendicular * source_x
     return (
         target_start[0] + (real * relative_x) - (imaginary * relative_y),
         target_start[1] + (imaginary * relative_x) + (real * relative_y),
@@ -2933,6 +2948,14 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
             self.report({'WARNING'}, "No counterpart outside the selected UV island was found")
             return {'CANCELLED'}
         for component_id, (_score, source, target) in proposals.items():
+            mirror = False
+            if mode == 'EDGE':
+                target_loop = next(loop for loop in target['loops']
+                                   if components[loop.face] not in moving_components)
+                start_vertex = source['endpoints'][0][0]
+                source_side = _uv_face_side(source['loops'][0], uv_layer, start_vertex)
+                target_side = _uv_face_side(target_loop, uv_layer, start_vertex)
+                mirror = source_side * target_side > 0.0
             for face in component_faces[component_id]:
                 for loop in face.loops:
                     point = _uv_coord(loop[uv_layer].uv)
@@ -2948,6 +2971,7 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
                             source['endpoints'][1][1],
                             target['endpoints'][0][1],
                             target['endpoints'][1][1],
+                            mirror=mirror,
                         )
                     loop[uv_layer].uv = transformed
         bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)

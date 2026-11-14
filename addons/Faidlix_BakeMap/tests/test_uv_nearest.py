@@ -136,6 +136,26 @@ assert close(coords[0], (2.0, 0.0))
 assert close(coords[1], (4.0, 0.0))
 assert close(coords[2], (2.0, 2.0))
 
+# Make the target face lie on the same side and angle the target seam.
+# The entire source must flip across it while the target remains fixed.
+same_side_target = {0: (2.0, 0.0), 1: (2.0, 2.0), 3: (1.0, 2.0)}
+for face in bm.faces:
+    values = face_uvs[0] if face.index == 0 else same_side_target
+    for loop in face.loops:
+        loop[bm_uv].uv = values[loop.vert.index]
+        loop.uv_select_edge_set(
+            face.index == 0 and {loop.vert.index, loop.link_loop_next.vert.index} == {0, 1}
+        )
+bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+assert addon.FAIDLIX_OT_uv_merge_island_to_nearest.execute(FakeOperator(), FakeContext()) == {'FINISHED'}
+bm = bmesh.from_edit_mesh(mesh)
+bm_uv = bm.loops.layers.uv.active
+coords = {loop.vert.index: tuple(loop[bm_uv].uv) for loop in bm.faces[0].loops}
+assert close(coords[0], (2.0, 0.0))
+assert close(coords[1], (2.0, 2.0))
+assert close(coords[2], (4.0, 0.0))
+assert {loop.vert.index: tuple(loop[bm_uv].uv) for loop in bm.faces[1].loops} == same_side_target
+
 bpy.ops.object.mode_set(mode='OBJECT')
 bpy.data.objects.remove(obj, do_unlink=True)
 bpy.data.meshes.remove(mesh)
