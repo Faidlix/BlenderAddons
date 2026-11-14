@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 27),
+    "version": (2, 3, 28),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 27)
+ADDON_VERSION = (2, 3, 28)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -3017,6 +3017,7 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
             return {'CANCELLED'}
         components, component_faces = _uv_merge_components(
             bm, uv_layer, pairs, mode, context.scene.tool_settings.use_uv_select_sync)
+        original_components, _ = _uv_face_components(bm, uv_layer) if mode == 'FACE' else ({}, [])
         moving_components = {
             components[source['loops'][0].face] for source, _candidates in pairs
         }
@@ -3051,13 +3052,45 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
         if not proposals:
             self.report({'WARNING'}, "No counterpart outside the selected UV island was found")
             return {'CANCELLED'}
+        bank_updates = {}
         for component_id, (_score, source, target) in proposals.items():
             mirror = False
             corner_transform = None
+            adjacent = None
+            moving_faces = component_faces[component_id]
+            same_island = mode == 'FACE' and any(
+                original_components[loop.face] == original_components[source['loops'][0].face]
+                for loop in target['loops'] if components[loop.face] not in moving_components
+            )
             if mode == 'FACE':
                 adjacent = _adjacent_seam_pair(source, target, pairs, components, moving_components)
-                if adjacent:
+                if adjacent and not same_island:
                     corner_transform = _seam_corner_transform(source, target, adjacent)
+            banks = {}
+            if same_island:
+                def connect(first, second):
+                    for a in (first, first.link_loop_next):
+                        b = second if second.vert == a.vert else second.link_loop_next
+                        key = (b.vert, _uv_key(b[uv_layer].uv))
+                        banks[key] = a
+
+                for face in moving_faces:
+                    for loop in face.loops:
+                        for linked in loop.edge.link_loops:
+                            if (linked.face in components and components[linked.face] not in moving_components
+                                    and _uv_faces_share_representation(loop, linked, uv_layer)):
+                                connect(loop, linked)
+                for first, second in [(source, target)] + ([adjacent] if adjacent else []):
+                    for linked in second['loops']:
+                        if components[linked.face] not in moving_components:
+                            connect(first['loops'][0], linked)
+                for face in bm.faces:
+                    if face not in components or components[face] in moving_components:
+                        continue
+                    for loop in face.loops:
+                        anchor = banks.get((loop.vert, _uv_key(loop[uv_layer].uv)))
+                        if anchor is not None:
+                            bank_updates[loop] = anchor
             if mode != 'VERTEX':
                 target_loop = next(loop for loop in target['loops']
                                    if components[loop.face] not in moving_components)
@@ -3085,6 +3118,8 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
                         if corner_transform:
                             transformed = corner_transform(point, transformed)
                     loop[uv_layer].uv = transformed
+        for loop, anchor in bank_updates.items():
+            loop[uv_layer].uv = anchor[uv_layer].uv
         bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
         _invalidate_uv_overlay()
         context.area.tag_redraw()

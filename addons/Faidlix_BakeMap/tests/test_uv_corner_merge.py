@@ -65,9 +65,20 @@ for kind in ("self", "island"):
     fixed = {loop: tuple(loop[layer].uv) for face in bm.faces if face != patch for loop in face.loops}
     _, _, candidates = addon["_uv_counterpart_pairs"](obj, 'FACE', True)
     assert candidates
+    joined = [(loop, other) for loop in patch.loops for other in loop.edge.link_loops
+              if other.face != patch and addon["_uv_faces_share_representation"](loop, other, layer)]
+    before = [loop[layer].uv.copy() for loop in patch.loops]
     cls = addon[f"FAIDLIX_OT_uv_merge_{kind}_to_nearest"]
     assert cls.execute(operator, context) == {'FINISHED'}
-    assert all(tuple(loop[layer].uv) == point for loop, point in fixed.items())
+    if kind == "self":
+        assert all(tuple(loop[layer].uv) == point for loop, point in fixed.items())
+    else:
+        assert all(addon["_uv_faces_share_representation"](a, b, layer) for a, b in joined)
+        after = [loop[layer].uv.copy() for loop in patch.loops]
+        scale = (after[0] - after[1]).length / (before[0] - before[1]).length
+        for i in range(len(before)):
+            for j in range(i):
+                assert abs((after[i] - after[j]).length - scale * (before[i] - before[j]).length) < 1e-5
     assert any(addon["_uv_faces_share_representation"](source['loops'][0], target['loops'][0], layer)
                for source, targets in candidates for target in targets)
     print("SAME ISLAND PASS", kind)
