@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 30),
+    "version": (2, 3, 31),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 30)
+ADDON_VERSION = (2, 3, 31)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -3236,8 +3236,16 @@ def _unwrap_existing_uv_islands(context, method, stitch_rounds):
             edges = [(edge, edge.seam, edge.select) for edge in bm.edges]
             verts = [(vert, vert.select) for vert in bm.verts]
             states.append((obj, faces, edges, verts, bool(included)))
-            for edge, seam in _uv_unwrap_seams(bm.edges, included, components, layer, stitch_rounds):
-                edge.seam = seam
+            if method == 'CONFORMAL':
+                # Keep native Conformal's seam constraints inside each island.
+                # Separate input islands even when no mesh seam marks their boundary.
+                for edge, seam, _ in edges:
+                    adjacent = {components[loop.face] for loop in edge.link_loops
+                                if loop.face in included}
+                    edge.seam = seam or len(adjacent) > 1
+            else:
+                for edge, seam in _uv_unwrap_seams(bm.edges, included, components, layer, stitch_rounds):
+                    edge.seam = seam
             for face, _, _ in faces:
                 face.hide = face not in included
                 face.select = face in included
@@ -3285,7 +3293,8 @@ class FAIDLIX_OT_uv_unwrap_by_island(Operator):
         return _is_uv_editor_space(context.space_data) and _uv_material_map_object(context) is not None
 
     def draw(self, _context):
-        self.layout.prop(self, "stitch_rounds")
+        if self.method != 'CONFORMAL':
+            self.layout.prop(self, "stitch_rounds")
 
     def execute(self, context):
         return _unwrap_existing_uv_islands(context, self.method, self.stitch_rounds)

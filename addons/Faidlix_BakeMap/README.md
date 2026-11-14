@@ -1,4 +1,4 @@
-# Faidlix_BakeMap 2.3.30
+# Faidlix_BakeMap 2.3.31
 
 In the UV Editor, use the ByIsland entries in the U menu to unwrap each
 selected existing UV island with Angle Based, Conformal, or Minimum Stretch.

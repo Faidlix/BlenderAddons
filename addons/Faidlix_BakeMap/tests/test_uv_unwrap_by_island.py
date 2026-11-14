@@ -68,9 +68,23 @@ def check_closed_slit(method):
     joined = addon["_uv_faces_share_representation"]
     assert not joined(first, second, layer)
     assert len(addon["_uv_face_components"](bm, layer)[1]) == 1
+    corners = [loop[layer] for face in bm.faces for loop in face.loops]
+    original = [corner.uv.copy() for corner in corners]
     with bpy.context.temp_override(area=area, region=region):
+        if method == 'CONFORMAL':
+            assert bpy.ops.uv.unwrap(method=method) == {'FINISHED'}
+            native = [corner.uv.copy() for corner in corners]
+            for corner, point in zip(corners, original):
+                corner.uv = point
+            bmesh.update_edit_mesh(mesh)
         assert bpy.ops.faidlix.uv_unwrap_by_island(method=method, stitch_rounds=2) == {'FINISHED'}
     assert joined(first, second, layer), method
+    if method == 'CONFORMAL':
+        actual = [corner.uv.copy() for corner in corners]
+        native_distances = [(a - b).length for i, a in enumerate(native) for b in native[:i]]
+        actual_distances = [(a - b).length for i, a in enumerate(actual) for b in actual[:i]]
+        scale = max(actual_distances) / max(native_distances)
+        assert all(abs(a - scale * b) < 1e-5 for a, b in zip(actual_distances, native_distances))
     assert not slit.seam
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.data.objects.remove(obj, do_unlink=True)
