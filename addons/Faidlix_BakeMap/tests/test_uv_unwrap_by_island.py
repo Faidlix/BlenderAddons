@@ -47,7 +47,7 @@ class MenuRecorder:
 
     def operator(self, identifier, *, text=None):
         if identifier == 'faidlix.uv_unwrap_by_island':
-            assert self.operator_context == 'INVOKE_DEFAULT'
+            assert self.operator_context == 'EXEC_DEFAULT'
         self.labels.append(text)
         return SimpleNamespace()
 

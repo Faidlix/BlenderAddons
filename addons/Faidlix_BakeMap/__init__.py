@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 25),
+    "version": (2, 3, 26),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 25)
+ADDON_VERSION = (2, 3, 26)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -3195,9 +3195,6 @@ class FAIDLIX_OT_uv_unwrap_by_island(Operator):
     def draw(self, _context):
         self.layout.prop(self, "stitch_rounds")
 
-    def invoke(self, context, _event):
-        return context.window_manager.invoke_props_dialog(self)
-
     def execute(self, context):
         return _unwrap_existing_uv_islands(context, self.method, self.stitch_rounds)
 
@@ -3248,12 +3245,9 @@ class _UVUnwrapMenuLayout:
             label = kwargs.get('text')
             for method, name, _ in _UV_ISLAND_UNWRAP_METHODS:
                 if label == f"Unwrap {name}":
-                    previous = self.layout.operator_context
-                    try:
-                        self.layout.operator_context = 'INVOKE_DEFAULT'
-                        self.layout.operator("faidlix.uv_unwrap_by_island", text=f"{label} ByIsland").method = method
-                    finally:
-                        self.layout.operator_context = previous
+                    row = self.layout.operator("faidlix.uv_unwrap_by_island", text=f"{label} ByIsland")
+                    row.method = method
+                    row.stitch_rounds = 1
                     break
         return properties
 
