@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 23),
+    "version": (2, 3, 24),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 23)
+ADDON_VERSION = (2, 3, 24)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -3068,6 +3068,33 @@ _UV_ISLAND_UNWRAP_METHODS = (
 )
 
 
+def _uv_unwrap_seams(edges, included, components, layer):
+    """Find neighboring cuts from the original island connectivity in one pass."""
+    joined = set()
+    cuts = {}
+    for edge in edges:
+        loops = [loop for loop in edge.link_loops if loop.face in included]
+        if not loops:
+            continue
+        if len(loops) == 2 and _uv_faces_share_representation(*loops, layer):
+            joined.add(edge)
+        else:
+            cuts[edge] = loops
+    for edge, loops in cuts.items():
+        stitch = (
+            edge.is_manifold and len(loops) == 2
+            and components[loops[0].face] == components[loops[1].face]
+            and any(
+                sum(corner.edge in joined for corner in loop.face.loops) == 1
+                and (loop.link_loop_prev.edge in joined or loop.link_loop_next.edge in joined)
+                for loop in loops
+            )
+        )
+        yield edge, not stitch
+    for edge in joined:
+        yield edge, False
+
+
 def _unwrap_existing_uv_islands(context, method):
     settings = context.scene.tool_settings
     sync = settings.use_uv_select_sync
@@ -3104,11 +3131,8 @@ def _unwrap_existing_uv_islands(context, method):
             edges = [(edge, edge.seam, edge.select) for edge in bm.edges]
             verts = [(vert, vert.select) for vert in bm.verts]
             states.append((obj, faces, edges, verts, bool(included)))
-            for edge, _, _ in edges:
-                loops = [loop for loop in edge.link_loops if loop.face in included]
-                if loops:
-                    edge.seam = len(loops) != 2 or not _uv_faces_share_representation(
-                        loops[0], loops[1], layer)
+            for edge, seam in _uv_unwrap_seams(bm.edges, included, components, layer):
+                edge.seam = seam
             for face, _, _ in faces:
                 face.hide = face not in included
                 face.select = face in included

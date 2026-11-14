@@ -7,8 +7,29 @@ from types import SimpleNamespace
 import bmesh
 import bpy
 
+
+def check_neighbor_seam_rule(addon):
+    """A cube face has one joined edge, two neighboring cuts and an opposite cut."""
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=2.0)
+    face = next(iter(bm.faces))
+    layer = bm.loops.layers.uv.new()
+    corners = list(face.loops)
+    for polygon in bm.faces:
+        for loop in polygon.loops:
+            x, y, z = loop.vert.co
+            loop[layer].uv = (x + 0.3 * z, y + 0.7 * z)
+    for corner in corners[2:]:
+        corner[layer].uv.x += 0.5
+    components, islands = addon["_uv_face_components"](bm, layer)
+    assert len(islands) == 1
+    seams = dict(addon["_uv_unwrap_seams"](bm.edges, set(bm.faces), components, layer))
+    assert [seams[loop.edge] for loop in corners] == [False, False, True, False]
+    bm.free()
+
 addon = runpy.run_path(str(Path(__file__).resolve().parents[1] / "__init__.py"))
 addon["register"]()
+check_neighbor_seam_rule(addon)
 area = next(area for area in bpy.context.screen.areas if area.type == 'VIEW_3D')
 area.type = 'IMAGE_EDITOR'
 area.spaces.active.mode = 'UV'
