@@ -71,7 +71,7 @@ for kind in ("self", "island"):
     cls = addon[f"FAIDLIX_OT_uv_merge_{kind}_to_nearest"]
     assert cls.execute(operator, context) == {'FINISHED'}
     if kind == "self":
-        assert all(tuple(loop[layer].uv) == point for loop, point in fixed.items())
+        assert all(addon["_uv_faces_share_representation"](a, b, layer) for a, b in joined)
     else:
         assert all(addon["_uv_faces_share_representation"](a, b, layer) for a, b in joined)
         after = [loop[layer].uv.copy() for loop in patch.loops]

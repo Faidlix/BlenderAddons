@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 28),
+    "version": (2, 3, 29),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 28)
+ADDON_VERSION = (2, 3, 29)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -2974,7 +2974,7 @@ class FAIDLIX_OT_uv_merge_self_to_nearest(Operator):
                     previous = assignments.get(key)
                     if previous is None or score < previous[0]:
                         assignments[key] = (score, target_endpoint[1])
-        changed = 0
+        updates = {}
         for face in bm.faces:
             if face.hide or (source_faces is not None and face not in source_faces):
                 continue
@@ -2982,14 +2982,34 @@ class FAIDLIX_OT_uv_merge_self_to_nearest(Operator):
                 key = (hash(loop.vert), _uv_key(loop[uv_layer].uv))
                 assignment = assignments.get(key)
                 if assignment is not None:
-                    target_coord = assignment[1]
-                    loop[uv_layer].uv = target_coord
-                    changed += 1
+                    updates[loop] = assignment[1]
+        if mode == 'FACE':
+            fixed = {corner for _, targets in pairs for target in targets
+                     for edge_loop in target['loops']
+                     for corner in (edge_loop, edge_loop.link_loop_next)}
+            pending = list(updates)
+            while pending:
+                corner = pending.pop()
+                destination = updates[corner]
+                for edge_loop in (corner, corner.link_loop_prev):
+                    for linked in edge_loop.edge.link_loops:
+                        if linked.face.hide or not _uv_faces_share_representation(edge_loop, linked, uv_layer):
+                            continue
+                        other = linked if linked.vert == corner.vert else linked.link_loop_next
+                        if ((other in fixed and _uv_key(other[uv_layer].uv) != _uv_key(destination))
+                                or (other in updates and updates[other] != destination)):
+                            self.report({'WARNING'}, "Conflicting UV stitch anchors")
+                            return {'CANCELLED'}
+                        if other not in updates:
+                            updates[other] = destination
+                            pending.append(other)
+        for loop, destination in updates.items():
+            loop[uv_layer].uv = destination
         bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
         _invalidate_uv_overlay()
         context.area.tag_redraw()
         self.report({'INFO'}, f"Merged {len(assignments)} selected UV point(s) to nearest counterparts")
-        return {'FINISHED'} if changed else {'CANCELLED'}
+        return {'FINISHED'} if updates else {'CANCELLED'}
 
 
 class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
