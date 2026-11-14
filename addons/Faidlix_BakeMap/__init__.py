@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 26),
+    "version": (2, 3, 27),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -48,7 +48,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 26)
+ADDON_VERSION = (2, 3, 27)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -448,14 +448,16 @@ def _uv_selection_mode(tool_settings):
     return tool_settings.uv_select_mode
 
 
+def _uv_face_selected(face, sync):
+    return face.select if sync else face.select and face.uv_select
+
+
 def _uv_edge_groups(bm, uv_layer, mode='EDGE', sync=False):
     groups = {}
     for face in bm.faces:
         if face.hide:
             continue
-        face_selected = mode == 'FACE' and (
-            face.select if sync else face.select and face.uv_select
-        )
+        face_selected = mode == 'FACE' and _uv_face_selected(face, sync)
         for loop in face.loops:
             endpoints = _uv_edge_endpoints(loop, uv_layer)
             key = (
@@ -474,7 +476,10 @@ def _uv_edge_groups(bm, uv_layer, mode='EDGE', sync=False):
                     'selected': False,
                 },
             )
-            group['loops'].append(loop)
+            if face_selected:
+                group['loops'].insert(0, loop)
+            else:
+                group['loops'].append(loop)
             if mode == 'FACE':
                 group['selected'] += int(face_selected)
             else:
@@ -542,9 +547,10 @@ def _uv_faces_share_representation(first_loop, second_loop, uv_layer):
     )
 
 
-def _uv_face_components(bm, uv_layer):
+def _uv_face_components(bm, uv_layer, restrict_to=None):
     """Map every visible face to its UV island without crossing UV seams."""
-    visible = {face for face in bm.faces if not face.hide}
+    visible = {face for face in bm.faces if not face.hide and
+               (restrict_to is None or face in restrict_to)}
     components = {}
     component_faces = []
     for start in visible:
@@ -2823,6 +2829,29 @@ class FAIDLIX_MT_uv_material_maps(Menu):
             operator.image_name = image.name
 
 
+def _uv_merge_components(bm, layer, pairs, mode, sync):
+    components, islands = _uv_face_components(bm, layer)
+    if mode != 'FACE':
+        return components, islands
+    # A slit may reconnect elsewhere in the same island. Isolate the selected
+    # patch in that case so the opposing bank stays fixed during stitching.
+    split = set()
+    for source, candidates in pairs:
+        index = components[source['loops'][0].face]
+        if any(components[loop.face] == index for target in candidates for loop in target['loops']):
+            split.add(index)
+    for index in sorted(split):
+        faces = islands[index]
+        selected = {face for face in faces if _uv_face_selected(face, sync)}
+        _, patches = _uv_face_components(bm, layer, selected)
+        islands[index] = faces - selected
+        for patch in patches:
+            for face in patch:
+                components[face] = len(islands)
+            islands.append(patch)
+    return components, islands
+
+
 def _adjacent_seam_pair(source, target, pairs, components, moving):
     """Find the closest compatible second edge at the same UV corner."""
     def endpoints(edge):
@@ -2906,7 +2935,8 @@ class FAIDLIX_OT_uv_merge_self_to_nearest(Operator):
         bm, uv_layer, pairs = _uv_counterpart_pairs(obj, mode, context.scene.tool_settings.use_uv_select_sync)
         source_faces = None
         if mode == 'FACE' and pairs:
-            components, islands = _uv_face_components(bm, uv_layer)
+            components, islands = _uv_merge_components(
+                bm, uv_layer, pairs, mode, context.scene.tool_settings.use_uv_select_sync)
             moving = {components[source['loops'][0].face] for source, _ in pairs}
             nearest = {}
             for source, candidates in pairs:
@@ -2985,9 +3015,10 @@ class FAIDLIX_OT_uv_merge_island_to_nearest(Operator):
         if not pairs:
             self.report({'WARNING'}, "No unselected UV seam counterpart was found")
             return {'CANCELLED'}
-        components, component_faces = _uv_face_components(bm, uv_layer)
+        components, component_faces = _uv_merge_components(
+            bm, uv_layer, pairs, mode, context.scene.tool_settings.use_uv_select_sync)
         moving_components = {
-            components[loop.face] for source, _candidates in pairs for loop in source['loops']
+            components[source['loops'][0].face] for source, _candidates in pairs
         }
         proposals = {}
         for source, candidates in pairs:

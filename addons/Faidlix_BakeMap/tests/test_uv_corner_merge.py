@@ -43,3 +43,31 @@ for kind in ("self", "island"):
             expected[3] = (0, 1) if kind == "self" else (3, 3)
         assert coords == expected, (kind, coords, expected)
     print("TWO EDGE PASS", kind)
+
+bpy.ops.object.mode_set(mode='OBJECT')
+bpy.ops.object.select_all(action='DESELECT')
+bpy.ops.mesh.primitive_cube_add()
+obj = bpy.context.object
+context.edit_object = context.active_object = obj
+bpy.ops.object.mode_set(mode='EDIT')
+bm = bmesh.from_edit_mesh(obj.data)
+layer = bm.loops.layers.uv.active
+patch = next(iter(bm.faces))
+for kind in ("self", "island"):
+    for face in bm.faces:
+        face.select_set(face == patch)
+        for loop in face.loops:
+            x, y, z = loop.vert.co
+            loop[layer].uv = (x + 0.3 * z, y + 0.7 * z)
+    patch.loops[0][layer].uv.x += 0.5
+    bmesh.update_edit_mesh(obj.data)
+    assert len(addon["_uv_face_components"](bm, layer)[1]) == 1
+    fixed = {loop: tuple(loop[layer].uv) for face in bm.faces if face != patch for loop in face.loops}
+    _, _, candidates = addon["_uv_counterpart_pairs"](obj, 'FACE', True)
+    assert candidates
+    cls = addon[f"FAIDLIX_OT_uv_merge_{kind}_to_nearest"]
+    assert cls.execute(operator, context) == {'FINISHED'}
+    assert all(tuple(loop[layer].uv) == point for loop, point in fixed.items())
+    assert any(addon["_uv_faces_share_representation"](source['loops'][0], target['loops'][0], layer)
+               for source, targets in candidates for target in targets)
+    print("SAME ISLAND PASS", kind)
