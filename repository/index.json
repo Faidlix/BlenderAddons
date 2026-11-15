@@ -39,7 +39,7 @@
       "id": "faidlix_bakemap",
       "name": "Faidlix BakeMap",
       "tagline": "Bake material information from a reference mesh to a target mesh",
-      "version": "2.3.33",
+      "version": "2.3.34",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
@@ -50,9 +50,9 @@
       "permissions": {
         "network": "Check and install Faidlix BakeMap updates from GitHub"
       },
-      "archive_url": "./faidlix_bakemap-2.3.33.zip",
-      "archive_size": 47385,
-      "archive_hash": "sha256:e4f88c567f2001bd4da6b6c9f8f1482218e040f67371535a5f9c394e7bb21961"
+      "archive_url": "./faidlix_bakemap-2.3.34.zip",
+      "archive_size": 47539,
+      "archive_hash": "sha256:b5be20be69ec422a32675078fb0a1112a060685a3e24a33f782afb81150adbcb"
     },
     {
       "schema_version": "1.0.0",

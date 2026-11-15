@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 33),
+    "version": (2, 3, 34),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -50,7 +50,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 33)
+ADDON_VERSION = (2, 3, 34)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -895,6 +895,12 @@ def _create_bake_material(reference, target, source_material=None, workflow='PAR
     desired_name = _bake_material_name(target, source)
     if source:
         material = source.copy()
+        if material.use_nodes:
+            # Inherited bake nodes still point at the source's images.
+            # Start a fresh output set so rebaking cannot overwrite the source.
+            for node in list(material.node_tree.nodes):
+                if node.type == 'TEX_IMAGE' and str(node.get('faidlix_tag', '')).startswith(f"{ADDON_TAG}:"):
+                    material.node_tree.nodes.remove(node)
         _claim_datablock_name(
             bpy.data.materials,
             material,
@@ -3600,6 +3606,9 @@ class FAIDLIX_OT_bake(Operator):
                         if slot.material
                         and slot.material.get('faidlix_bake_material')
                         and slot.material.get('faidlix_workflow', 'PARTIAL') == workflow
+                        and slot.material.get('faidlix_target_object') == target.name
+                        and len(target.material_slots) == 1
+                        and slot.material.users == 1
                     ),
                     None,
                 )

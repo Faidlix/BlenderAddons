@@ -18,7 +18,7 @@ repo = next(
     if repo.remote_url.split('?', 1)[0].rstrip('/') == REPOSITORY_URL
 )
 MODULE = f"bl_ext.{repo.module}.faidlix_bakemap"
-EXPECTED_VERSION = (2, 3, 33)
+EXPECTED_VERSION = (2, 3, 34)
 started_at = time.monotonic()
 version_before = None
 
