@@ -1,3 +1,6 @@
+# Central-repository installed-package smoke test for all Faidlix extensions.
+# Run with Blender after enabling the packages from the shared GitHub repository.
+# It verifies package identities, versions, and each online-update entry point.
 import addon_utils
 import bpy
 
@@ -44,7 +47,7 @@ assert bone_remap.ui.ADDON_VERSION == (0, 6, 8)
 assert bone_remap.updater.GITHUB_REPOSITORY_URL == URL
 assert outliner.ADDON_VERSION == (0, 2, 17)
 assert outliner.GITHUB_REPOSITORY_URL == URL
-assert weight.ADDON_VERSION == (1, 3, 2)
+assert weight.ADDON_VERSION == (1, 3, 3)
 assert weight.GITHUB_REPOSITORY_URL == URL
 assert manager.ADDON_VERSION == (1, 1, 3)
 assert manager.REPOSITORY_URL == URL

@@ -1,7 +1,11 @@
-# Faidlix_Weight 1.3.2
+# Faidlix_Weight 1.3.3
 
 Blender 5.2 add-on for copying selected Weight Paint vertex weights across the
 object's local X axis.
+
+In Object Mode, `Ctrl+P` keeps Blender's native **Set Parent To** choices and
+adds the active parent object's name to the popup title, for example
+`Set Parent To Body`.
 
 ## Usage
 

@@ -1,3 +1,6 @@
+# Installed-package regression test for the GitHub Faidlix_Weight extension.
+# Run from the repository root with Blender after enabling the central package.
+# The script uses temporary scene data and checks the online-update entry point.
 import importlib
 
 import addon_utils
@@ -122,6 +125,23 @@ addon = importlib.import_module(ADDON_MODULE)
 assert addon._CONTEXT_MENU is bpy.types.VIEW3D_PT_paint_weight_context_menu
 assert bpy.context.scene.faidlix_weight_smart_match is True
 
+parent = bpy.data.objects.new("Parent Target", None)
+child = bpy.data.objects.new("Parent Child", None)
+bpy.context.collection.objects.link(parent)
+bpy.context.collection.objects.link(child)
+parent.select_set(True)
+child.select_set(True)
+bpy.context.view_layer.objects.active = parent
+assert addon._parent_menu_title(bpy.context) == "Set Parent To Parent Target"
+assert addon.FAIDLIXWEIGHT_OT_parent_set_menu.poll(bpy.context)
+assert len(addon._PARENT_KEYMAP_ITEMS) == 1
+parent_keymap, parent_keymap_item = addon._PARENT_KEYMAP_ITEMS[0]
+assert parent_keymap.name == "Object Mode"
+assert parent_keymap_item.idname == "faidlix_weight.parent_set_menu"
+assert parent_keymap_item.type == 'P'
+assert bool(parent_keymap_item.ctrl)
+reset_scene()
+
 name_cases = {
     "RightHand": "LeftHand",
     "righthand": "lefthand",
@@ -136,7 +156,7 @@ for source, expected in name_cases.items():
     actual = addon.mirror_group_name(source)
     assert actual == expected, (source, actual, expected)
 
-assert addon.ADDON_VERSION == (1, 3, 2)
+assert addon.ADDON_VERSION == (1, 3, 3)
 assert addon.GITHUB_REPOSITORY_URL == REPOSITORY_URL
 assert hasattr(bpy.ops.faidlix_weight, "online_update")
 
@@ -276,4 +296,5 @@ print("SMART_ONE_TO_ONE_ASSIGNMENT=True")
 print("SMART_CONFLICT_SKIPS_UNMATCHED=True")
 print("CENTER_SKIP=True")
 print("CONTEXT_MENU=VIEW3D_PT_paint_weight_context_menu")
+print("PARENT_MENU_TITLE=Set Parent To Parent Target")
 print("ONLINE_UPDATE_CHECK=True")

@@ -1,10 +1,13 @@
+# Faidlix_Weight adds mirrored weight tools and a named Ctrl+P parent menu.
+# Enable the extension, then use Weight Paint right-click or Ctrl+P in Object Mode.
+# Registration hooks the Weight Paint menu and an Object Mode shortcut only.
 bl_info = {
     "name": "Faidlix_Weight",
     "author": "Faidlix",
-    "version": (1, 3, 2),
+    "version": (1, 3, 3),
     "blender": (5, 2, 0),
-    "location": "3D Viewport > Weight Paint > Right-click",
-    "description": "Mirror or flip selected vertex weights across the local X axis",
+    "location": "Weight Paint right-click; Object Mode Ctrl+P",
+    "description": "Mirror weights and show the active parent name in the Ctrl+P title",
     "category": "Rigging",
 }
 
@@ -14,7 +17,7 @@ import re
 
 import bpy
 from bpy.props import BoolProperty
-from bpy.types import AddonPreferences, Operator
+from bpy.types import AddonPreferences, Menu, Operator
 from mathutils import Vector
 from mathutils.kdtree import KDTree
 
@@ -22,7 +25,8 @@ from mathutils.kdtree import KDTree
 _LONG_SIDE_RE = re.compile(r"left|right", re.IGNORECASE)
 _SHORT_SIDE_RE = re.compile(r"(?P<separator>[._\-\s])(?P<side>[lr])(?=$|[._\-\s]|\d)", re.IGNORECASE)
 _CONTEXT_MENU = None
-ADDON_VERSION = (1, 3, 2)
+_PARENT_KEYMAP_ITEMS = []
+ADDON_VERSION = (1, 3, 3)
 PACKAGE_ID = "faidlix_weight"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -85,6 +89,13 @@ def _cached_repository_index(repo):
             return json.load(handle)
     except (OSError, ValueError):
         return None
+
+
+def _parent_menu_title(context):
+    parent = context.active_object
+    if parent is None:
+        return "Set Parent To"
+    return f"Set Parent To {parent.name}"
 
 
 def _matching_case(text, template):
@@ -468,6 +479,34 @@ class FAIDLIXWEIGHT_OT_toggle_flip(Operator):
         return {'FINISHED'}
 
 
+class FAIDLIXWEIGHT_MT_parent_set(Menu):
+    bl_idname = "FAIDLIXWEIGHT_MT_parent_set"
+    bl_label = "Set Parent To"
+
+    def draw(self, _context):
+        # Use Blender's own enum so every native parent type and behavior stays
+        # identical to the original Ctrl+P popup.
+        self.layout.operator_enum("object.parent_set", "type")
+
+
+class FAIDLIXWEIGHT_OT_parent_set_menu(Operator):
+    bl_idname = "faidlix_weight.parent_set_menu"
+    bl_label = "Set Parent To Active Object"
+    bl_description = "Open Blender's parent menu with the active object name in its title"
+    bl_options = {'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'OBJECT' and bpy.ops.object.parent_set.poll()
+
+    def invoke(self, context, _event):
+        FAIDLIXWEIGHT_MT_parent_set.bl_label = _parent_menu_title(context)
+        return bpy.ops.wm.call_menu(
+            'INVOKE_DEFAULT',
+            name=FAIDLIXWEIGHT_MT_parent_set.bl_idname,
+        )
+
+
 class FAIDLIXWEIGHT_OT_online_update(Operator):
     bl_idname = "faidlix_weight.online_update"
     bl_label = "Online Update"
@@ -694,12 +733,38 @@ def _draw_weight_context_menu(self, context):
 
 
 CLASSES = (
+    FAIDLIXWEIGHT_MT_parent_set,
+    FAIDLIXWEIGHT_OT_parent_set_menu,
     FAIDLIXWEIGHT_OT_online_update,
     FAIDLIXWEIGHT_Preferences,
     FAIDLIXWEIGHT_OT_toggle_flip,
     FAIDLIXWEIGHT_OT_toggle_smart_match,
     FAIDLIXWEIGHT_OT_mirror_selected,
 )
+
+
+def _register_parent_keymap():
+    keyconfig = bpy.context.window_manager.keyconfigs.addon
+    if keyconfig is None:
+        return
+    keymap = keyconfig.keymaps.new(name="Object Mode", space_type='EMPTY')
+    keymap_item = keymap.keymap_items.new(
+        FAIDLIXWEIGHT_OT_parent_set_menu.bl_idname,
+        type='P',
+        value='PRESS',
+        ctrl=True,
+        head=True,
+    )
+    _PARENT_KEYMAP_ITEMS.append((keymap, keymap_item))
+
+
+def _unregister_parent_keymap():
+    while _PARENT_KEYMAP_ITEMS:
+        keymap, keymap_item = _PARENT_KEYMAP_ITEMS.pop()
+        try:
+            keymap.keymap_items.remove(keymap_item)
+        except (ReferenceError, RuntimeError):
+            pass
 
 
 def _find_context_menu():
@@ -732,10 +797,12 @@ def register():
             bpy.utils.unregister_class(cls)
         raise RuntimeError("Weight Paint context menu is unavailable")
     _CONTEXT_MENU.append(_draw_weight_context_menu)
+    _register_parent_keymap()
 
 
 def unregister():
     global _CONTEXT_MENU
+    _unregister_parent_keymap()
     if _CONTEXT_MENU is not None:
         try:
             _CONTEXT_MENU.remove(_draw_weight_context_menu)
