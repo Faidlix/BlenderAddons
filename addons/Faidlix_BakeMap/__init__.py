@@ -10,7 +10,7 @@ their nearest seam counterpart.
 bl_info = {
     "name": "Faidlix_BakeMap",
     "author": "Faidlix",
-    "version": (2, 3, 32),
+    "version": (2, 3, 33),
     "blender": (5, 2, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Bake maps from a ReferenceObject to a TargetObject",
@@ -31,7 +31,9 @@ from array import array
 
 import bmesh
 import bpy
+from mathutils import Vector
 from mathutils.bvhtree import BVHTree
+from mathutils.geometry import tessellate_polygon
 from bpy.props import (
     BoolProperty,
     CollectionProperty,
@@ -48,7 +50,7 @@ from bpy_extras import view3d_utils
 
 
 ADDON_TAG = "Faidlix_BakeMap"
-ADDON_VERSION = (2, 3, 32)
+ADDON_VERSION = (2, 3, 33)
 PACKAGE_ID = "faidlix_bakemap"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -661,6 +663,67 @@ def _uv_overlay_coordinates(obj, mode, sync):
     return positions
 
 
+def _uv_triangles_overlap(a, b):
+    # Separating-axis test. A zero-width intersection is only edge/point contact.
+    for triangle in (a, b):
+        for i, start in enumerate(triangle):
+            end = triangle[(i + 1) % 3]
+            nx, ny = start[1] - end[1], end[0] - start[0]
+            pa = [nx * x + ny * y for x, y in a]
+            pb = [nx * x + ny * y for x, y in b]
+            if min(max(pa), max(pb)) - max(min(pa), min(pb)) <= 1e-9 * math.hypot(nx, ny):
+                return False
+    return True
+
+
+def _uv_status_coordinates(obj, sync):
+    bm = bmesh.from_edit_mesh(obj.data)
+    layer = bm.loops.layers.uv.active
+    if layer is None:
+        return (), ()
+    key = (obj.as_pointer(), obj.data.as_pointer(), layer.name, 'STATUS', sync,
+           len(bm.verts), len(bm.edges), len(bm.faces))
+    now = time.monotonic()
+    cached = _UV_OVERLAY_CACHE.get(key)
+    if cached and now - cached[0] < 0.35:
+        return cached[1]
+    pins = set()
+    polygons = []
+    for face in bm.faces:
+        if face.hide or (not sync and not face.select):
+            continue
+        corners = [loop[layer] for loop in face.loops]
+        coords = [tuple(corner.uv) for corner in corners]
+        pins.update(point for corner, point in zip(corners, coords) if corner.pin_uv)
+        triangles = []
+        for tri in tessellate_polygon([[Vector((x, y, 0)) for x, y in coords]]):
+            a, b, c = (coords[index] for index in tri)
+            if abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) > 1e-18:
+                triangles.append((a, b, c))
+        if triangles:
+            xs, ys = zip(*coords)
+            polygons.append((min(xs), max(xs), min(ys), max(ys), triangles))
+    polygons.sort(key=lambda item: item[0])
+    active = []
+    overlapping = set()
+    for i, (left, right, bottom, top, triangles) in enumerate(polygons):
+        active = [j for j in active if polygons[j][1] > left]
+        for j in active:
+            _, _, low, high, others = polygons[j]
+            if i in overlapping and j in overlapping:
+                continue
+            if min(top, high) > max(bottom, low) and any(
+                    _uv_triangles_overlap(a, b) for a in triangles for b in others):
+                overlapping.update((i, j))
+        active.append(i)
+    result = (tuple(pins), tuple(point for i in overlapping
+                                 for tri in polygons[i][4] for point in tri))
+    if len(_UV_OVERLAY_CACHE) >= 16:
+        _UV_OVERLAY_CACHE.clear()
+    _UV_OVERLAY_CACHE[key] = (now, result)
+    return result
+
+
 def _draw_uv_counterparts():
     """Draw seam counterparts in blue while leaving Blender's orange selection untouched."""
     context = bpy.context
@@ -673,32 +736,35 @@ def _draw_uv_counterparts():
         return
     settings = getattr(context.scene, 'faidlix_bakemap', None)
     obj = _uv_material_map_object(context)
-    if settings is None or not settings.show_uv_counterparts or obj is None:
+    if settings is None or obj is None or not context.space_data.overlay.show_overlays:
         return
     # Native transforms own the edit mesh until the modal operation ends.
     if any(op.bl_idname.startswith('TRANSFORM_OT_') for op in context.window.modal_operators):
         return
     tool_settings = context.scene.tool_settings
     mode = _uv_selection_mode(tool_settings)
-    if mode not in {'VERTEX', 'EDGE', 'FACE'}:
+    sync = tool_settings.use_uv_select_sync
+    pins, overlaps = _uv_status_coordinates(obj, sync)
+    coords = _uv_overlay_coordinates(obj, mode, sync) if settings.show_uv_counterparts else ()
+    if not (coords or pins or overlaps):
         return
-    coords = _uv_overlay_coordinates(obj, mode, tool_settings.use_uv_select_sync)
-    if not coords:
-        return
-    positions = [_uv_to_region(context, point) for point in coords]
     import gpu
     from gpu_extras.batch import batch_for_shader
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     try:
         gpu.state.blend_set('ALPHA')
         shader.bind()
-        shader.uniform_float('color', (0.08, 0.45, 1.0, 1.0))
-        if mode == 'VERTEX':
-            gpu.state.point_size_set(8.0)
-            batch_for_shader(shader, 'POINTS', {'pos': positions}).draw(shader)
-        else:
-            gpu.state.line_width_set(3.0)
-            batch_for_shader(shader, 'LINES', {'pos': positions}).draw(shader)
+        gpu.state.point_size_set(8.0)
+        gpu.state.line_width_set(3.0)
+        for points, primitive, color in (
+            (overlaps, 'TRIS', (0.1, 1.0, 0.2, 0.24)),
+            (coords, 'POINTS' if mode == 'VERTEX' else 'LINES', (0.08, 0.45, 1.0, 1.0)),
+            (pins, 'POINTS', (1.0, 0.06, 0.06, 0.55)),
+        ):
+            if points:
+                shader.uniform_float('color', color)
+                positions = [_uv_to_region(context, point) for point in points]
+                batch_for_shader(shader, primitive, {'pos': positions}).draw(shader)
     finally:
         gpu.state.line_width_set(1.0)
         gpu.state.point_size_set(1.0)
