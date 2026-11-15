@@ -4,13 +4,14 @@
 bl_info = {
     "name": "Faidlix_Weight",
     "author": "Faidlix",
-    "version": (1, 3, 4),
+    "version": (1, 3, 5),
     "blender": (5, 2, 0),
     "location": "Weight Paint right-click; Object Mode Ctrl+P",
     "description": "Mirror weights and show the active parent name in the Ctrl+P title",
     "category": "Rigging",
 }
 
+import importlib
 import json
 import os
 import re
@@ -28,7 +29,7 @@ _CONTEXT_MENU = None
 _PARENT_KEYMAP_ITEMS = []
 _NATIVE_PARENT_KEYMAP_ITEMS = []
 _PARENT_KEYMAP_RETRY_COUNT = 0
-ADDON_VERSION = (1, 3, 4)
+ADDON_VERSION = (1, 3, 5)
 PACKAGE_ID = "faidlix_weight"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -91,6 +92,32 @@ def _cached_repository_index(repo):
             return json.load(handle)
     except (OSError, ValueError):
         return None
+
+
+def _hot_update_package(repo_index, expected_version, module_name):
+    install_result = bpy.ops.extensions.package_install(
+        repo_index=repo_index,
+        pkg_id=PACKAGE_ID,
+        enable_on_install=True,
+    )
+    if install_result != {'FINISHED'}:
+        return False, f"install returned {sorted(install_result)}"
+
+    importlib.invalidate_caches()
+    updated_module = importlib.import_module(module_name)
+    installed_version = tuple(updated_module.ADDON_VERSION)
+    if installed_version < tuple(expected_version):
+        return False, (
+            "installed version "
+            + '.'.join(str(part) for part in installed_version)
+            + " is older than the downloaded version"
+        )
+
+    bpy.ops.wm.save_userpref()
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            area.tag_redraw()
+    return True, installed_version
 
 
 def _parent_menu_title(context):
@@ -512,7 +539,7 @@ class FAIDLIXWEIGHT_OT_parent_set_menu(Operator):
 class FAIDLIXWEIGHT_OT_online_update(Operator):
     bl_idname = "faidlix_weight.online_update"
     bl_label = "Online Update"
-    bl_description = "Check GitHub and download a newer Faidlix_Weight package"
+    bl_description = "Update from GitHub and reload the add-on without restarting Blender"
     bl_options = {'INTERNAL'}
 
     force: BoolProperty(default=False, options={'HIDDEN'})
@@ -546,22 +573,23 @@ class FAIDLIXWEIGHT_OT_online_update(Operator):
             return {'FINISHED'}
 
         version = '.'.join(str(part) for part in latest)
+        module_name = __package__
 
         def install_after_operator_returns():
             try:
-                install_result = bpy.ops.extensions.package_install(
-                    repo_index=repo_index,
-                    pkg_id=PACKAGE_ID,
-                    enable_on_install=True,
+                success, detail = _hot_update_package(
+                    repo_index,
+                    latest,
+                    module_name,
                 )
-                if install_result == {'FINISHED'}:
-                    bpy.ops.wm.save_userpref()
+                if success:
+                    installed = '.'.join(str(part) for part in detail)
                     print(
-                        f"Faidlix_Weight {version} downloaded from "
-                        "Faidlix Blender Add-ons"
+                        "FAIDLIX_WEIGHT_HOT_UPDATE=PASS "
+                        f"version={installed} restart_required=False"
                     )
                 else:
-                    print("Faidlix_Weight online update did not finish")
+                    print(f"Faidlix_Weight online update failed: {detail}")
             except Exception as exc:
                 print(f"Faidlix_Weight online update failed: {exc}")
             return None
@@ -570,7 +598,7 @@ class FAIDLIXWEIGHT_OT_online_update(Operator):
             install_after_operator_returns,
             first_interval=0.1,
         )
-        self.report({'INFO'}, f"Preparing Faidlix_Weight {version} update")
+        self.report({'INFO'}, f"Updating Faidlix_Weight to {version} without restart")
         return {'FINISHED'}
 
 

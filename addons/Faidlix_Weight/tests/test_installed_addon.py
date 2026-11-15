@@ -158,9 +158,10 @@ for source, expected in name_cases.items():
     actual = addon.mirror_group_name(source)
     assert actual == expected, (source, actual, expected)
 
-assert addon.ADDON_VERSION == (1, 3, 4)
+assert addon.ADDON_VERSION == (1, 3, 5)
 assert addon.GITHUB_REPOSITORY_URL == REPOSITORY_URL
 assert hasattr(bpy.ops.faidlix_weight, "online_update")
+assert callable(addon._hot_update_package)
 
 assignment = addon._assign_unique_targets({
     10: [(0.10, 0.10, 100), (0.20, 0.20, 101)],

@@ -18,7 +18,7 @@ Blender Repository URL：
 - [Faidlix Manager 1.1.7](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_manager-1.1.7.zip)：選配的共通功能與固定於側邊欄頂端的「全部更新」控制列。
 - [Faidlix_Outliner 0.2.17](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_outliner-0.2.17.zip)：階層選取與批次顯示控制。
 - [Faidlix Paint 0.4.8](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_paint-0.4.8.zip)：整層、遮罩與 UV 島填色。
-- [Faidlix_Weight 1.3.4](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_weight-1.3.4.zip)：選取點權重鏡射、左右名稱對應與 Ctrl+P Parent 目標名稱顯示。
+- [Faidlix_Weight 1.3.5](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_weight-1.3.5.zip)：選取點權重鏡射、Ctrl+P Parent 目標名稱與無需重啟 Blender 的線上更新。
 
 - [Action Editor 1.8.7](https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/faidlix_batch_clean_key-1.8.7.zip)：依選定骨骼，跨 Action 批次刪除、清理與縮減 Key。
 

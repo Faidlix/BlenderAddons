@@ -160,7 +160,7 @@ for source, expected in name_cases.items():
     actual = addon.mirror_group_name(source)
     assert actual == expected, (source, actual, expected)
 
-assert addon.ADDON_VERSION == (1, 3, 4)
+assert addon.ADDON_VERSION == (1, 3, 5)
 assert addon.GITHUB_REPOSITORY_URL == (
     "https://raw.githubusercontent.com/"
     "Faidlix/BlenderAddons/main/repository/index.json"
@@ -169,15 +169,16 @@ assert addon._latest_version_from_index({
     "data": [
         {"id": "other", "version": "9.0.0"},
         {"id": "faidlix_weight", "version": "1.1.0"},
-        {"id": "faidlix_weight", "version": "1.3.4"},
+        {"id": "faidlix_weight", "version": "1.3.5"},
     ]
-}) == (1, 3, 4)
+}) == (1, 3, 5)
 assert addon._normalized_repository_url(addon.GITHUB_REPOSITORY_URL) == (
     addon._normalized_repository_url(
         addon.GITHUB_REPOSITORY_URL + "?cache=1791649385#download"
     )
 )
 assert hasattr(bpy.ops.faidlix_weight, "online_update")
+assert callable(addon._hot_update_package)
 
 # Global one-to-one assignment must move a flexible source to its second
 # candidate so a constrained source can keep the only target it can use.

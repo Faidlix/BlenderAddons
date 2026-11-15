@@ -1,4 +1,4 @@
-# Faidlix_Weight 1.3.4
+# Faidlix_Weight 1.3.5
 
 Blender 5.2 add-on for copying selected Weight Paint vertex weights across the
 object's local X axis.
@@ -49,7 +49,9 @@ weights are written.
 Use **Online Update** in the Weight Paint right-click menu or
 **Check and Install Online Update** in the add-on preferences. The add-on syncs
 the shared Faidlix Blender Add-ons repository, compares the published version, and
-downloads a newer package only when one is available.
+downloads a newer package only when one is available. Blender temporarily
+disables the running extension during replacement, then immediately reloads and
+re-enables the new version; restarting or closing Blender is not required.
 
 Repository URL:
 
