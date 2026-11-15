@@ -140,6 +140,8 @@ assert parent_keymap.name == "Object Mode"
 assert parent_keymap_item.idname == "faidlix_weight.parent_set_menu"
 assert parent_keymap_item.type == 'P'
 assert bool(parent_keymap_item.ctrl)
+native_parent_items = addon._native_parent_shortcuts()
+assert all(not item.active for item in native_parent_items)
 reset_scene()
 
 name_cases = {
@@ -156,7 +158,7 @@ for source, expected in name_cases.items():
     actual = addon.mirror_group_name(source)
     assert actual == expected, (source, actual, expected)
 
-assert addon.ADDON_VERSION == (1, 3, 3)
+assert addon.ADDON_VERSION == (1, 3, 4)
 assert addon.GITHUB_REPOSITORY_URL == REPOSITORY_URL
 assert hasattr(bpy.ops.faidlix_weight, "online_update")
 
@@ -297,4 +299,5 @@ print("SMART_CONFLICT_SKIPS_UNMATCHED=True")
 print("CENTER_SKIP=True")
 print("CONTEXT_MENU=VIEW3D_PT_paint_weight_context_menu")
 print("PARENT_MENU_TITLE=Set Parent To Parent Target")
+print(f"NATIVE_PARENT_SHORTCUT_DISABLED={len(native_parent_items)}")
 print("ONLINE_UPDATE_CHECK=True")

@@ -105,6 +105,20 @@ def weights(obj, vertex_index):
 
 
 reset_scene()
+native_keyconfig = bpy.context.window_manager.keyconfigs.default
+native_keymap = native_keyconfig.keymaps.get("Object Mode")
+if native_keymap is None:
+    native_keymap = native_keyconfig.keymaps.new(
+        name="Object Mode",
+        space_type='EMPTY',
+    )
+native_parent_item = native_keymap.keymap_items.new(
+    "object.parent_set",
+    type='P',
+    value='PRESS',
+    ctrl=True,
+)
+assert native_parent_item.active
 result_enable = bpy.ops.preferences.addon_enable(module=ADDON_MODULE)
 assert result_enable == {'FINISHED'}
 addon = sys.modules[ADDON_MODULE]
@@ -126,6 +140,8 @@ assert parent_keymap.name == "Object Mode"
 assert parent_keymap_item.idname == "faidlix_weight.parent_set_menu"
 assert parent_keymap_item.type == 'P'
 assert bool(parent_keymap_item.ctrl)
+assert not native_parent_item.active
+assert native_parent_item in addon._NATIVE_PARENT_KEYMAP_ITEMS
 addon.FAIDLIXWEIGHT_MT_parent_set.bl_label = addon._parent_menu_title(bpy.context)
 assert addon.FAIDLIXWEIGHT_MT_parent_set.bl_label == "Set Parent To Parent Target"
 reset_scene()
@@ -144,7 +160,7 @@ for source, expected in name_cases.items():
     actual = addon.mirror_group_name(source)
     assert actual == expected, (source, actual, expected)
 
-assert addon.ADDON_VERSION == (1, 3, 3)
+assert addon.ADDON_VERSION == (1, 3, 4)
 assert addon.GITHUB_REPOSITORY_URL == (
     "https://raw.githubusercontent.com/"
     "Faidlix/BlenderAddons/main/repository/index.json"
@@ -153,9 +169,9 @@ assert addon._latest_version_from_index({
     "data": [
         {"id": "other", "version": "9.0.0"},
         {"id": "faidlix_weight", "version": "1.1.0"},
-        {"id": "faidlix_weight", "version": "1.3.3"},
+        {"id": "faidlix_weight", "version": "1.3.4"},
     ]
-}) == (1, 3, 3)
+}) == (1, 3, 4)
 assert addon._normalized_repository_url(addon.GITHUB_REPOSITORY_URL) == (
     addon._normalized_repository_url(
         addon.GITHUB_REPOSITORY_URL + "?cache=1791649385#download"
@@ -293,6 +309,9 @@ bpy.ops.preferences.addon_disable(module=ADDON_MODULE)
 assert not hasattr(bpy.types.Scene, "faidlix_weight_flip")
 assert not hasattr(bpy.types.Scene, "faidlix_weight_smart_match")
 assert not addon._PARENT_KEYMAP_ITEMS
+assert not addon._NATIVE_PARENT_KEYMAP_ITEMS
+assert native_parent_item.active
+native_keymap.keymap_items.remove(native_parent_item)
 
 print("FAIDLIX_WEIGHT_TEST=PASS")
 print("NAME_CASES=8")
@@ -306,3 +325,4 @@ print("SMART_CONFLICT_SKIPS_UNMATCHED=True")
 print("CENTER_SKIP=True")
 print("CONTEXT_MENU=VIEW3D_PT_paint_weight_context_menu")
 print("PARENT_MENU_TITLE=Set Parent To Parent Target")
+print("NATIVE_PARENT_SHORTCUT_RESTORE=True")

@@ -4,7 +4,7 @@
 bl_info = {
     "name": "Faidlix_Weight",
     "author": "Faidlix",
-    "version": (1, 3, 3),
+    "version": (1, 3, 4),
     "blender": (5, 2, 0),
     "location": "Weight Paint right-click; Object Mode Ctrl+P",
     "description": "Mirror weights and show the active parent name in the Ctrl+P title",
@@ -26,7 +26,9 @@ _LONG_SIDE_RE = re.compile(r"left|right", re.IGNORECASE)
 _SHORT_SIDE_RE = re.compile(r"(?P<separator>[._\-\s])(?P<side>[lr])(?=$|[._\-\s]|\d)", re.IGNORECASE)
 _CONTEXT_MENU = None
 _PARENT_KEYMAP_ITEMS = []
-ADDON_VERSION = (1, 3, 3)
+_NATIVE_PARENT_KEYMAP_ITEMS = []
+_PARENT_KEYMAP_RETRY_COUNT = 0
+ADDON_VERSION = (1, 3, 4)
 PACKAGE_ID = "faidlix_weight"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -758,6 +760,75 @@ def _register_parent_keymap():
     _PARENT_KEYMAP_ITEMS.append((keymap, keymap_item))
 
 
+def _is_native_parent_shortcut(keymap_item):
+    return (
+        keymap_item.idname == "object.parent_set"
+        and keymap_item.type == 'P'
+        and keymap_item.value == 'PRESS'
+        and bool(keymap_item.ctrl)
+        and not keymap_item.shift
+        and not keymap_item.alt
+        and not keymap_item.oskey
+        and keymap_item.key_modifier == 'NONE'
+    )
+
+
+def _native_parent_shortcuts():
+    keyconfig = bpy.context.window_manager.keyconfigs.default
+    if keyconfig is None:
+        return []
+    shortcuts = []
+    for keymap in keyconfig.keymaps:
+        if keymap.name != "Object Mode":
+            continue
+        shortcuts.extend(
+            item
+            for item in keymap.keymap_items
+            if _is_native_parent_shortcut(item)
+        )
+    return shortcuts
+
+
+def _disable_native_parent_keymap():
+    global _PARENT_KEYMAP_RETRY_COUNT
+    shortcuts = _native_parent_shortcuts()
+    if not shortcuts:
+        _PARENT_KEYMAP_RETRY_COUNT += 1
+        return 0.1 if _PARENT_KEYMAP_RETRY_COUNT < 50 else None
+
+    recorded = {item.as_pointer() for item in _NATIVE_PARENT_KEYMAP_ITEMS}
+    for keymap_item in shortcuts:
+        if keymap_item.active and keymap_item.as_pointer() not in recorded:
+            _NATIVE_PARENT_KEYMAP_ITEMS.append(keymap_item)
+            keymap_item.active = False
+    _PARENT_KEYMAP_RETRY_COUNT = 0
+    return None
+
+
+def _register_native_parent_override():
+    delay = _disable_native_parent_keymap()
+    if delay is not None and not bpy.app.timers.is_registered(
+        _disable_native_parent_keymap
+    ):
+        bpy.app.timers.register(
+            _disable_native_parent_keymap,
+            first_interval=delay,
+        )
+
+
+def _unregister_native_parent_override():
+    global _PARENT_KEYMAP_RETRY_COUNT
+    if bpy.app.timers.is_registered(_disable_native_parent_keymap):
+        bpy.app.timers.unregister(_disable_native_parent_keymap)
+    while _NATIVE_PARENT_KEYMAP_ITEMS:
+        keymap_item = _NATIVE_PARENT_KEYMAP_ITEMS.pop()
+        try:
+            keymap_item.active = True
+        except ReferenceError:
+            pass
+    _PARENT_KEYMAP_RETRY_COUNT = 0
+
+
 def _unregister_parent_keymap():
     while _PARENT_KEYMAP_ITEMS:
         keymap, keymap_item = _PARENT_KEYMAP_ITEMS.pop()
@@ -798,10 +869,12 @@ def register():
         raise RuntimeError("Weight Paint context menu is unavailable")
     _CONTEXT_MENU.append(_draw_weight_context_menu)
     _register_parent_keymap()
+    _register_native_parent_override()
 
 
 def unregister():
     global _CONTEXT_MENU
+    _unregister_native_parent_override()
     _unregister_parent_keymap()
     if _CONTEXT_MENU is not None:
         try:
