@@ -1,4 +1,4 @@
-# Faidlix_Weight 1.3.5
+# Faidlix_Weight 1.3.6
 
 Blender 5.2 add-on for copying selected Weight Paint vertex weights across the
 object's local X axis.

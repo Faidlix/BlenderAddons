@@ -4,7 +4,7 @@
 bl_info = {
     "name": "Faidlix_Weight",
     "author": "Faidlix",
-    "version": (1, 3, 5),
+    "version": (1, 3, 6),
     "blender": (5, 2, 0),
     "location": "Weight Paint right-click; Object Mode Ctrl+P",
     "description": "Mirror weights and show the active parent name in the Ctrl+P title",
@@ -18,7 +18,7 @@ import re
 
 import bpy
 from bpy.props import BoolProperty
-from bpy.types import AddonPreferences, Menu, Operator
+from bpy.types import AddonPreferences, Operator
 from mathutils import Vector
 from mathutils.kdtree import KDTree
 
@@ -29,7 +29,7 @@ _CONTEXT_MENU = None
 _PARENT_KEYMAP_ITEMS = []
 _NATIVE_PARENT_KEYMAP_ITEMS = []
 _PARENT_KEYMAP_RETRY_COUNT = 0
-ADDON_VERSION = (1, 3, 5)
+ADDON_VERSION = (1, 3, 6)
 PACKAGE_ID = "faidlix_weight"
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/"
@@ -508,14 +508,10 @@ class FAIDLIXWEIGHT_OT_toggle_flip(Operator):
         return {'FINISHED'}
 
 
-class FAIDLIXWEIGHT_MT_parent_set(Menu):
-    bl_idname = "FAIDLIXWEIGHT_MT_parent_set"
-    bl_label = "Set Parent To"
-
-    def draw(self, _context):
-        # Use Blender's own enum so every native parent type and behavior stays
-        # identical to the original Ctrl+P popup.
-        self.layout.operator_enum("object.parent_set", "type")
+def _draw_parent_popup(self, _context):
+    # Use Blender's own enum so every native parent type and behavior stays
+    # identical to the original Ctrl+P popup.
+    self.layout.operator_enum("object.parent_set", "type")
 
 
 class FAIDLIXWEIGHT_OT_parent_set_menu(Operator):
@@ -529,11 +525,12 @@ class FAIDLIXWEIGHT_OT_parent_set_menu(Operator):
         return context.mode == 'OBJECT' and bpy.ops.object.parent_set.poll()
 
     def invoke(self, context, _event):
-        FAIDLIXWEIGHT_MT_parent_set.bl_label = _parent_menu_title(context)
-        return bpy.ops.wm.call_menu(
-            'INVOKE_DEFAULT',
-            name=FAIDLIXWEIGHT_MT_parent_set.bl_idname,
+        context.window_manager.popup_menu(
+            _draw_parent_popup,
+            title=_parent_menu_title(context),
+            icon='NONE',
         )
+        return {'FINISHED'}
 
 
 class FAIDLIXWEIGHT_OT_online_update(Operator):
@@ -763,7 +760,6 @@ def _draw_weight_context_menu(self, context):
 
 
 CLASSES = (
-    FAIDLIXWEIGHT_MT_parent_set,
     FAIDLIXWEIGHT_OT_parent_set_menu,
     FAIDLIXWEIGHT_OT_online_update,
     FAIDLIXWEIGHT_Preferences,
