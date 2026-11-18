@@ -1,3 +1,4 @@
+# Faidlix sidebar panels and list rows, registered when the add-on is enabled.
 import bpy
 from bpy.types import Menu, Panel, UIList
 
@@ -7,11 +8,17 @@ from .model import (
     rebuild_animation_rows,
     reuse_mapping_items,
 )
-from .operators import _IK_EDIT_STATE, _mapping_axes_match, _object_actions
+from .operators import (
+    RIG_COPY_ROTATION,
+    _IK_EDIT_STATE,
+    _mapping_axes_match,
+    _object_actions,
+    _rig_ik_group,
+)
 from .retarget import existing_ik_for_row, mapping_source, source_has_ik
 
 
-ADDON_VERSION = (0, 6, 19)
+ADDON_VERSION = (0, 6, 20)
 
 
 def _source_file_index(settings, source_file):
@@ -413,7 +420,8 @@ def _draw_axis_correction(layout, file_index, source_file):
 def _draw_ik_settings(layout, file_index, source_file):
     active = source_file.mappings[source_file.active_mapping_index]
     editor = layout.box()
-    editor.label(text=f"IK 設定：{active.source_bone} → {active.target_bone}", icon="CONSTRAINT_BONE")
+    title = active.target_bone if file_index == -1 else f"{active.source_bone} → {active.target_bone}"
+    editor.label(text=f"IK 設定：{title}", icon="CONSTRAINT_BONE")
     if source_file.ik_existing_view:
         target = bpy.data.objects.get(bpy.context.scene.fbr_settings.target_armature)
         backup = _IK_EDIT_STATE.get(source_file.uid, {}).get("existing")
@@ -499,6 +507,74 @@ def _draw_ik_settings(layout, file_index, source_file):
     okay.action = "OK"
 
 
+class FBR_UL_rig_bones(UIList):
+    bl_idname = "FBR_UL_rig_bones"
+
+    def draw_item(self, context, layout, _data, item, _icon, _active_data, _active_propname, _index=0):
+        settings = context.scene.fbr_settings
+        target = bpy.data.objects.get(settings.target_armature)
+        row = layout.row(align=True)
+        visibility = item if hasattr(item, "hide") else item.bone
+        row.prop(visibility, "hide", text="", icon="HIDE_ON" if visibility.hide else "HIDE_OFF", emboss=False)
+        name = row.row(align=True)
+        name.alignment = "LEFT"
+        select = name.operator("fbr.rig_bone", text=item.name, emboss=False)
+        select.bone_name = item.name
+        select.action = "SELECT"
+        actions = row.row(align=True)
+        actions.alignment = "RIGHT"
+        ik = actions.operator("fbr.ik_settings", text="設定 IK")
+        ik.file_index = -1
+        ik.bone_name = item.name
+        ik.action = "START"
+        for action, text in (("TWIST", "設定 Twist"), ("ROTATION", "Copy Rotation")):
+            operator = actions.operator("fbr.rig_bone", text=text)
+            operator.bone_name = item.name
+            operator.action = action
+        row.enabled = bool(target and target.data.is_editable)
+
+
+def _draw_rig_controls(layout, settings, target, rig_group, locked):
+    box = layout.box()
+    box.prop(
+        settings, "rig_controls_expanded", text="骨架控制",
+        icon="TRIA_DOWN" if settings.rig_controls_expanded else "TRIA_RIGHT", emboss=False,
+    )
+    if not settings.rig_controls_expanded or not target or target.type != "ARMATURE":
+        return
+    body = box.column()
+    body.enabled = not locked
+    data, property_name = (
+        (target.data, "edit_bones") if target.mode == "EDIT" else (target.pose, "bones")
+    )
+    body.template_list(
+        "FBR_UL_rig_bones", target.name, data, property_name, settings, "rig_bone_index", rows=7,
+    )
+    if rig_group and rig_group.ik_editing:
+        _draw_ik_settings(box, -1, rig_group)
+        return
+    bone = target.pose.bones.get(settings.rig_rotation_bone)
+    constraint = bone.constraints.get(RIG_COPY_ROTATION) if bone else None
+    if not constraint or constraint.type != "COPY_ROTATION":
+        return
+    editor = body.box()
+    editor.label(text=f"Copy Rotation · {bone.name}", icon="CONSTRAINT_BONE")
+    target_row = editor.row(align=True)
+    target_row.prop_search(constraint, "subtarget", target.data, "bones", text="Target Bone")
+    clear = target_row.operator("fbr.rig_bone", text="", icon="X")
+    clear.bone_name = bone.name
+    clear.action = "CLEAR_TARGET"
+    for label, prefix in (("Axis", "use"), ("Invert", "invert")):
+        row = editor.row(align=True)
+        row.label(text=label)
+        for axis in "xyz":
+            row.prop(constraint, f"{prefix}_{axis}", text=axis.upper(), toggle=True)
+    editor.prop(constraint, "mix_mode", text="Mix")
+    editor.prop(constraint, "target_space", text="Target")
+    editor.prop(constraint, "owner_space", text="Owner")
+    editor.prop(constraint, "influence", text="Influence", slider=True)
+
+
 class FBR_UL_mappings(UIList):
     bl_idname = "FBR_UL_mappings"
 
@@ -571,6 +647,9 @@ class FBR_PT_main(Panel):
     def draw(self, context):
         layout = self.layout
         settings = context.scene.fbr_settings
+        target = bpy.data.objects.get(settings.target_armature)
+        rig_group = _rig_ik_group(settings, target)
+        rig_editing = bool(rig_group and rig_group.ik_editing)
         editing_index = next(
             (
                 index
@@ -579,7 +658,7 @@ class FBR_PT_main(Panel):
             ),
             -1,
         )
-        locked = editing_index >= 0 or settings.retarget_running
+        locked = editing_index >= 0 or rig_editing or settings.retarget_running
 
         top = layout.row(align=False)
         top.enabled = not locked
@@ -600,7 +679,7 @@ class FBR_PT_main(Panel):
         target_choice = target_row.row(align=True)
         target_choice.ui_units_x = 11.0
         target_choice.prop(settings, "target_armature", text="")
-        target = bpy.data.objects.get(settings.target_armature)
+        _draw_rig_controls(layout, settings, target, rig_group, locked)
 
         source_box = layout.box()
         source_box.enabled = not locked
@@ -645,8 +724,12 @@ class FBR_PT_main(Panel):
             )
 
         mapping_box = layout.box()
-        mapping_box.label(text="骨骼對應", icon="CONSTRAINT_BONE")
-        for file_index, source in enumerate(settings.files):
+        mapping_box.enabled = not rig_editing
+        mapping_box.prop(
+            settings, "mappings_expanded", text="骨骼對應",
+            icon="TRIA_DOWN" if settings.mappings_expanded else "TRIA_RIGHT", emboss=False,
+        )
+        for file_index, source in enumerate(settings.files if settings.mappings_expanded else ()):
             if not source.mapping_is_independent:
                 continue
             group = mapping_box.box()
@@ -952,6 +1035,7 @@ class FBR_PT_main(Panel):
 
 
 CLASSES = (
+    FBR_UL_rig_bones,
     FBR_UL_animation_rows,
     FBR_UL_mappings,
     FBR_MT_reuse_mapping,

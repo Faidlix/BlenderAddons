@@ -1,3 +1,4 @@
+# Online Update operator. Run it from the sidebar to install the GitHub extension package.
 import importlib
 import json
 import os
@@ -10,7 +11,7 @@ from bpy.types import Operator
 
 
 PACKAGE_ID = "faidlix_bone_remap"
-ADDON_VERSION = (0, 6, 19)
+ADDON_VERSION = (0, 6, 20)
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json"
 )

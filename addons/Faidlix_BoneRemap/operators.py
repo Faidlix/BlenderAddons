@@ -1,3 +1,5 @@
+# Blender operators for rig controls, animation import and retargeting.
+# Registered by the add-on and invoked from the Faidlix sidebar.
 import hashlib
 import math
 import os
@@ -327,7 +329,8 @@ def _update_axis_preview(context, changed_mapping=None):
                 ),
                 None,
             )
-            if pair and pair_name != changed_mapping.source_bone:
+            if (pair and pair_name != changed_mapping.source_bone
+                    and (not source_file.rig_control_object or pair.ik_enabled)):
                 _AXIS_UPDATE_GUARD = True
                 try:
                     pair.pair_rotation_offset = tuple(
@@ -476,6 +479,30 @@ def _ik_owner(context, mapping):
     return None, ""
 
 
+def _rig_ik_group(settings, target, create=False):
+    if not target:
+        return None
+    group = next((item for item in settings.rig_controls if item.rig_control_object == target), None)
+    if group is None and create:
+        group = settings.rig_controls.add()
+        group.rig_control_object = target
+        group.uid = uuid.uuid4().hex
+    return group
+
+
+def _ik_settings_group(settings, index):
+    if index == -1:
+        return _rig_ik_group(settings, _target_object(settings))
+    return settings.files[index] if 0 <= index < len(settings.files) else None
+
+
+def _ik_groups(settings):
+    yield from settings.files
+    group = _ik_settings_group(settings, -1)
+    if group:
+        yield group
+
+
 def _ik_solver_bone_name(owner_obj, endpoint_name):
     endpoint = owner_obj.data.bones.get(endpoint_name)
     if endpoint and endpoint.parent and endpoint.parent.parent:
@@ -572,7 +599,7 @@ def _rename_generated_ik_control(context, owner_obj, mapping, endpoint_name, pro
     if desired == old_name or desired in owner_obj.data.bones:
         return
     bone.name = desired
-    for source_file in context.scene.fbr_settings.files:
+    for source_file in _ik_groups(context.scene.fbr_settings):
         for item in source_file.mappings:
             if getattr(item, prop) == old_name:
                 setattr(item, prop, desired)
@@ -584,7 +611,7 @@ def _sync_ik_control_parent(context, owner_obj, endpoint_name, control_name):
     if not endpoint or control_name not in owner_obj.data.bones:
         return
     controls_by_endpoint = {}
-    for source_file in context.scene.fbr_settings.files:
+    for source_file in _ik_groups(context.scene.fbr_settings):
         for item in source_file.mappings:
             if not item.ik_enabled or not item.ik_control_bone:
                 continue
@@ -875,7 +902,7 @@ def _sync_ik_mapping(context, mapping):
     if not mapping.ik_enabled or constraint is None:
         return
     _sync_ik_control_parent(context, owner_obj, endpoint_name, mapping.ik_control_bone)
-    for source_file in context.scene.fbr_settings.files:
+    for source_file in _ik_groups(context.scene.fbr_settings):
         for child_mapping in source_file.mappings:
             if child_mapping.as_pointer() == mapping.as_pointer() or not child_mapping.ik_enabled:
                 continue
@@ -894,7 +921,7 @@ def _sync_ik_mapping(context, mapping):
             item.as_pointer() != mapping.as_pointer()
             and item.ik_enabled and item.ik_use_pole
             and item.ik_pole_bone == old_pole
-            for source_file in context.scene.fbr_settings.files
+            for source_file in _ik_groups(context.scene.fbr_settings)
             for item in source_file.mappings
         )
         if not shared and old_pole in owner_obj.data.bones:
@@ -1063,7 +1090,7 @@ def _update_ik_preview(context, changed_mapping=None, move_pole=False):
         if move_pole:
             _move_ik_pole_to_length(context, changed_mapping)
         settings = context.scene.fbr_settings
-        for source_file in settings.files:
+        for source_file in _ik_groups(settings):
             if not any(
                 item.as_pointer() == changed_mapping.as_pointer()
                 for item in source_file.mappings
@@ -2826,10 +2853,10 @@ class FBR_OT_set_ik_shape(Operator):
     )
 
     def execute(self, context):
-        files = context.scene.fbr_settings.files
-        if not (0 <= self.file_index < len(files)):
+        source = _ik_settings_group(context.scene.fbr_settings, self.file_index)
+        if source is None:
             return {"CANCELLED"}
-        mappings = files[self.file_index].mappings
+        mappings = source.mappings
         if not (0 <= self.mapping_index < len(mappings)):
             return {"CANCELLED"}
         mappings[self.mapping_index].ik_shape = self.shape
@@ -2843,6 +2870,7 @@ class FBR_OT_ik_settings(Operator):
 
     file_index: IntProperty()
     mapping_index: IntProperty(default=-1)
+    bone_name: StringProperty()
     action: EnumProperty(
         items=(
             ("START", "設定 IK", "進入 IK 設定模式"),
@@ -2898,11 +2926,28 @@ class FBR_OT_ik_settings(Operator):
         mapping.ik_enabled = source.ik_backup_enabled
 
     def execute(self, context):
-        files = context.scene.fbr_settings.files
-        if not 0 <= self.file_index < len(files):
+        settings = context.scene.fbr_settings
+        source = _ik_settings_group(settings, self.file_index)
+        mapping_index = self.mapping_index
+        if self.file_index == -1 and self.action == "START":
+            target = _target_object(settings)
+            if not target or self.bone_name not in target.pose.bones or not target.data.is_editable:
+                return {"CANCELLED"}
+            source = _rig_ik_group(settings, target, create=True)
+            known = {item.target_bone for item in source.mappings}
+            for bone in target.data.bones:
+                if bone.name in known or (bone.get("_fbr_ik_control") and bone.name != self.bone_name):
+                    continue
+                item = source.mappings.add()
+                item.source_bone = bone.name
+                item.target_bone = bone.name
+            mapping_index = next(
+                index for index, item in enumerate(source.mappings) if item.target_bone == self.bone_name
+            )
+        if source is None:
             return {"CANCELLED"}
-        source = files[self.file_index]
-        mapping_index = self.mapping_index if self.mapping_index >= 0 else source.active_mapping_index
+        if mapping_index < 0:
+            mapping_index = source.active_mapping_index
         if not 0 <= mapping_index < len(source.mappings):
             return {"CANCELLED"}
         mapping = source.mappings[mapping_index]
@@ -2929,9 +2974,15 @@ class FBR_OT_ik_settings(Operator):
         )
         if pair_name == mapping.source_bone:
             pair = None
+        if self.file_index == -1 and pair and not pair.ik_enabled:
+            try:
+                if _existing_ik_for_mapping(source.rig_control_object, pair):
+                    pair = None
+            except RuntimeError:
+                pair = None
         if self.action == "START":
             _remember_ik_selection(context, source.uid)
-            for candidate in files:
+            for candidate in settings.files:
                 _end_axis_preview(context, candidate)
                 candidate.axis_editing = False
                 candidate.ik_editing = False
@@ -3008,7 +3059,7 @@ class FBR_OT_ik_settings(Operator):
                     if constraint:
                         for prop, value in values.items():
                             setattr(constraint, prop, value)
-            else:
+            elif self.file_index != -1:
                 _delete_ik_mapping(context, mapping)
                 if pair:
                     _delete_ik_mapping(context, pair)
@@ -3019,6 +3070,11 @@ class FBR_OT_ik_settings(Operator):
                 backup = backups.get(item.as_pointer())
                 if not backup:
                     continue
+                if self.file_index == -1 and not source.ik_existing_view:
+                    if not backup["ik_enabled"]:
+                        if item.ik_enabled:
+                            _delete_ik_mapping(context, item)
+                        continue
                 for prop, value in backup.items():
                     setattr(item, prop, value)
                 if item.ik_enabled:
@@ -3052,10 +3108,9 @@ class FBR_OT_delete_ik(Operator):
         return context.window_manager.invoke_confirm(self, _event)
 
     def execute(self, context):
-        files = context.scene.fbr_settings.files
-        if not 0 <= self.file_index < len(files):
+        source = _ik_settings_group(context.scene.fbr_settings, self.file_index)
+        if source is None:
             return {"CANCELLED"}
-        source = files[self.file_index]
         index = self.mapping_index if self.mapping_index >= 0 else source.active_mapping_index
         if not 0 <= index < len(source.mappings):
             return {"CANCELLED"}
@@ -3095,6 +3150,92 @@ class FBR_OT_delete_ik(Operator):
         source.ik_editing = False
         source.ik_existing_view = False
         _restore_ik_selection(context, source.uid)
+        _tag_view3d_redraw(context)
+        return {"FINISHED"}
+
+
+RIG_COPY_ROTATION = "FBR Copy Rotation"
+
+
+class FBR_OT_rig_bone(Operator):
+    bl_idname = "fbr.rig_bone"
+    bl_label = "骨架控制"
+    bl_options = {"INTERNAL", "UNDO"}
+
+    bone_name: StringProperty()
+    action: EnumProperty(items=(
+        ("SELECT", "選取骨頭", ""),
+        ("TWIST", "設定 Twist", ""),
+        ("ROTATION", "Copy Rotation", ""),
+        ("CLEAR_TARGET", "清除目標骨頭", ""),
+    ))
+
+    def execute(self, context):
+        settings = context.scene.fbr_settings
+        target = _target_object(settings)
+        if not target or not target.data.is_editable:
+            return {"CANCELLED"}
+        if self.action != "SELECT" and self.bone_name not in target.data.bones:
+            return {"CANCELLED"}
+
+        if self.action == "SELECT":
+            if context.object == target and target.mode == "EDIT":
+                bones = target.data.edit_bones
+                bone = bones.get(self.bone_name)
+                if not bone:
+                    return {"CANCELLED"}
+                for item in bones:
+                    item.select = item.select_head = item.select_tail = item == bone
+                bones.active = bone
+            else:
+                if context.object != target or target.mode != "POSE":
+                    _set_active_object_mode(context, target, "POSE")
+                bones = target.pose.bones
+                bone = bones.get(self.bone_name)
+                if not bone:
+                    return {"CANCELLED"}
+                for item in bones:
+                    selection = item if hasattr(item, "select") else item.bone
+                    selection.select = item == bone
+                target.data.bones.active = bone.bone
+            settings.rig_bone_index = max(0, bones.find(self.bone_name))
+        elif self.action == "TWIST":
+            _set_active_object_mode(context, target, "EDIT")
+            bones = target.data.edit_bones
+            original = bones[self.bone_name]
+            name = f"{original.name}_Twist"
+            twist = bones.get(name)
+            if twist is None or twist.parent != original:
+                twist = bones.new(name)
+                twist.head = original.head
+                twist.tail = original.tail
+                twist.roll = original.roll
+                twist.parent = original
+                twist.use_connect = False
+                twist.use_deform = original.use_deform
+            twist_name = twist.name
+            bpy.ops.object.mode_set(mode="POSE")
+            return bpy.ops.fbr.rig_bone(bone_name=twist_name, action="SELECT")
+        else:
+            bone = target.pose.bones[self.bone_name]
+            constraint = bone.constraints.get(RIG_COPY_ROTATION)
+            if self.action == "CLEAR_TARGET":
+                if constraint is None or constraint.type != "COPY_ROTATION":
+                    return {"CANCELLED"}
+                constraint.subtarget = ""
+            else:
+                if constraint is None or constraint.type != "COPY_ROTATION":
+                    constraint = bone.constraints.new("COPY_ROTATION")
+                    constraint.name = RIG_COPY_ROTATION
+                    constraint.target = target
+                    constraint.subtarget = bone.parent.name if bone.parent else ""
+                    constraint.use_x = True
+                    constraint.use_y = constraint.use_z = False
+                    constraint.invert_x = constraint.invert_y = constraint.invert_z = False
+                    constraint.mix_mode = "REPLACE"
+                    constraint.target_space = constraint.owner_space = "LOCAL"
+                    constraint.influence = 1.0
+                settings.rig_rotation_bone = bone.name
         _tag_view3d_redraw(context)
         return {"FINISHED"}
 
@@ -3750,6 +3891,7 @@ CLASSES = (
     FBR_OT_preview_target_action,
     FBR_OT_set_ik_shape,
     FBR_OT_ik_settings,
+    FBR_OT_rig_bone,
     FBR_OT_delete_ik,
     FBR_OT_axis_correction,
     FBR_OT_axis_solo,

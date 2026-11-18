@@ -1,3 +1,4 @@
+# Blender add-on entry point. Enable Faidlix Bone Remap to register its sidebar.
 import bpy
 from bpy.app.handlers import persistent
 from bpy.props import PointerProperty
@@ -8,7 +9,7 @@ from . import model, operators, ui, updater
 bl_info = {
     "name": "Faidlix Bone Remap",
     "author": "Faidlix",
-    "version": (0, 6, 19),
+    "version": (0, 6, 20),
     "blender": (4, 5, 0),
     "location": "3D Viewport > Sidebar > Faidlix",
     "description": "Batch import and retarget armature actions",

@@ -59,7 +59,7 @@
       "id": "faidlix_bone_remap",
       "name": "Faidlix Bone Remap",
       "tagline": "Batch import and retarget armature actions",
-      "version": "0.6.19",
+      "version": "0.6.20",
       "type": "add-on",
       "maintainer": "Faidlix",
       "license": [
@@ -71,9 +71,9 @@
         "files": "Import FBX, GLB, GLTF and BLEND animation files",
         "network": "Check and install updates from the GitHub extension repository"
       },
-      "archive_url": "./faidlix_bone_remap-0.6.19.zip",
-      "archive_size": 57204,
-      "archive_hash": "sha256:60d1033952673359aeb079138e37d3bab1520f6e22b7f569a0389df2dc57a1f5"
+      "archive_url": "./faidlix_bone_remap-0.6.20.zip",
+      "archive_size": 59378,
+      "archive_hash": "sha256:3384cb1aeb8e5b4794eecc0665ed1569f0eece50966458b7b16c4c539ba7a6d9"
     },
     {
       "schema_version": "1.0.0",

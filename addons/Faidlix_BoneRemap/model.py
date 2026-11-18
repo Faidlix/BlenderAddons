@@ -1,3 +1,4 @@
+# Blender add-on property definitions, registered by the package on enable.
 import hashlib
 import math
 import re
@@ -10,6 +11,7 @@ from bpy.props import (
     FloatProperty,
     FloatVectorProperty,
     IntProperty,
+    PointerProperty,
     StringProperty,
 )
 from bpy.types import PropertyGroup
@@ -453,6 +455,7 @@ class FBR_SourceFile(PropertyGroup):
     )
     alignment_scale: FloatProperty(default=1.0, min=1.0e-8, options={"HIDDEN"})
     preview_clip: EnumProperty(items=preview_clip_items, update=update_preview_clip)
+    rig_control_object: PointerProperty(type=bpy.types.Object)
     ik_editing: BoolProperty(default=False, options={"SKIP_SAVE"})
     ik_existing_view: BoolProperty(default=False, options={"SKIP_SAVE"})
     ik_backup_enabled: BoolProperty(options={"SKIP_SAVE"})
@@ -522,6 +525,11 @@ class FBR_Settings(PropertyGroup):
     animation_rows: CollectionProperty(type=FBR_AnimationRow)
     active_animation_row_index: IntProperty(default=0)
     files_expanded: BoolProperty(default=True)
+    mappings_expanded: BoolProperty(default=True)
+    rig_controls_expanded: BoolProperty(default=False)
+    rig_controls: CollectionProperty(type=FBR_SourceFile)
+    rig_bone_index: IntProperty(default=0, options={"SKIP_SAVE"})
+    rig_rotation_bone: StringProperty(options={"SKIP_SAVE"})
     reused_expanded: BoolProperty(default=False)
     animation_info_factor: FloatProperty(
         name="名稱／時間寬度",
