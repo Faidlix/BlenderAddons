@@ -1,5 +1,8 @@
 # Faidlix sidebar panels and list rows, registered when the add-on is enabled.
 import bpy
+import json
+import re
+from functools import lru_cache
 from bpy.types import Menu, Panel, UIList
 
 from .model import (
@@ -9,16 +12,18 @@ from .model import (
     reuse_mapping_items,
 )
 from .operators import (
-    RIG_COPY_ROTATION,
     _IK_EDIT_STATE,
     _mapping_axes_match,
     _object_actions,
     _rig_ik_group,
+    rig_ik_bindings,
+    rig_rotation_constraint,
+    rig_rotation_editor,
 )
 from .retarget import existing_ik_for_row, mapping_source, source_has_ik
 
 
-ADDON_VERSION = (0, 6, 20)
+ADDON_VERSION = (0, 6, 21)
 
 
 def _source_file_index(settings, source_file):
@@ -429,9 +434,12 @@ def _draw_ik_settings(layout, file_index, source_file):
         constraint = owner.constraints.get(backup[1]) if owner else None
         if constraint:
             editor.label(text=f"現有 IK：{owner.name} / {constraint.name}")
-            editor.prop_search(constraint, "subtarget", target.data, "bones", text="控制骨")
+            editor.prop(constraint, "target", text="控制骨架")
+            if constraint.target and constraint.target.type == "ARMATURE":
+                editor.prop_search(constraint, "subtarget", constraint.target.data, "bones", text="控制骨")
             editor.prop(constraint, "pole_target", text="Pole 骨架")
-            editor.prop_search(constraint, "pole_subtarget", target.data, "bones", text="Pole")
+            if constraint.pole_target and constraint.pole_target.type == "ARMATURE":
+                editor.prop_search(constraint, "pole_subtarget", constraint.pole_target.data, "bones", text="Pole")
             solver = editor.row(align=True)
             solver.prop(constraint, "chain_count", text="關聯骨頭數")
             solver.prop(constraint, "iterations", text="迭代次數")
@@ -507,31 +515,154 @@ def _draw_ik_settings(layout, file_index, source_file):
     okay.action = "OK"
 
 
+def rig_list_bones(target):
+    return target.data.edit_bones if target.mode == "EDIT" else target.pose.bones
+
+
+@lru_cache(maxsize=8)
+def _rig_tree(signature):
+    names = dict(signature)
+    representative = {}
+    for name in names:
+        other = flip_bone_name(name)
+        representative[name] = min(name, other, key=str.casefold) if other in names else name
+    parents = {}
+    series = {}
+    for name in names:
+        if representative[name] != name:
+            continue
+        relative = names[name]
+        while relative:
+            token = relative.casefold()
+            if (("hand" in token or "foot" in token)
+                    and not any(part in token for part in ("thumb", "finger", "pinky", "index", "middle", "ring", "toe"))):
+                parents[name] = representative[relative]
+                break
+            relative = names[relative]
+        match = re.fullmatch(r"(.*?)(\d{2,})([^\d]*)", name)
+        if match:
+            stem, number, suffix = match.groups()
+            series.setdefault((parents.get(name), stem, suffix), []).append((int(number), name))
+    for members in series.values():
+        if len(members) > 1:
+            members.sort()
+            group = members[0][1]
+            for _, child in members[1:]:
+                parents[child] = group
+    children = {}
+    for child, parent in parents.items():
+        children.setdefault(parent, []).append(child)
+    ordered = []
+
+    def visit(name):
+        ordered.append(name)
+        for child in children.get(name, ()):
+            visit(child)
+
+    for name in names:
+        if representative[name] == name and name not in parents:
+            visit(name)
+    ordered.extend(name for name in names if representative[name] != name)
+    return representative, parents, children, ordered
+
+
+def _rig_structure(bones):
+    return _rig_tree(tuple((bone.name, bone.parent.name if bone.parent else "") for bone in bones))
+
+
+def _folded(settings):
+    return {tuple(key) for key in json.loads(settings.rig_folded_groups)}
+
+
+def toggle_rig_group(settings, target, name):
+    folded = _folded(settings)
+    folded.symmetric_difference_update({(target.name, name)})
+    settings.rig_folded_groups = json.dumps(sorted(folded))
+
+
+def sync_rig_bone_selection(settings, target):
+    active = target.data.edit_bones.active if target.mode == "EDIT" else target.data.bones.active
+    name = active.name if active else ""
+    if (settings.rig_last_object, settings.rig_last_bone) == (target.name, name):
+        return False
+    settings.rig_last_object, settings.rig_last_bone = target.name, name
+    if not name:
+        return False
+    bones = rig_list_bones(target)
+    representative, parents, _, _ = _rig_structure(bones)
+    row = representative.get(name, name)
+    settings.rig_bone_index = max(0, bones.find(row))
+    folded = _folded(settings)
+    original = folded.copy()
+    while row in parents:
+        row = parents[row]
+        folded.discard((target.name, row))
+    if original != folded:
+        settings.rig_folded_groups = json.dumps(sorted(folded))
+    return True
+
+
 class FBR_UL_rig_bones(UIList):
     bl_idname = "FBR_UL_rig_bones"
+
+    def filter_items(self, context, data, property_name):
+        target = bpy.data.objects.get(context.scene.fbr_settings.target_armature)
+        bones = getattr(data, property_name)
+        representative, parents, _, ordered = _rig_structure(bones)
+        self._rig_bindings = rig_ik_bindings(target)
+        folded = _folded(context.scene.fbr_settings)
+        ranks = {name: index for index, name in enumerate(ordered)}
+        flags = []
+        for bone in bones:
+            visible = representative[bone.name] == bone.name
+            parent = parents.get(bone.name)
+            while visible and parent:
+                visible = (target.name, parent) not in folded
+                parent = parents.get(parent)
+            flags.append(self.bitflag_filter_item if visible else 0)
+        return flags, [ranks[bone.name] for bone in bones]
 
     def draw_item(self, context, layout, _data, item, _icon, _active_data, _active_propname, _index=0):
         settings = context.scene.fbr_settings
         target = bpy.data.objects.get(settings.target_armature)
-        row = layout.row(align=True)
-        visibility = item if hasattr(item, "hide") else item.bone
-        row.prop(visibility, "hide", text="", icon="HIDE_ON" if visibility.hide else "HIDE_OFF", emboss=False)
-        name = row.row(align=True)
+        bones = rig_list_bones(target)
+        _, parents, children, _ = _rig_structure(bones)
+        other = bones.get(flip_bone_name(item.name))
+        pair = (item, other) if other and other != item else (item,)
+        columns = layout.row(align=True).split(factor=settings.rig_name_factor, align=True)
+        name = columns.row(align=True)
         name.alignment = "LEFT"
-        select = name.operator("fbr.rig_bone", text=item.name, emboss=False)
-        select.bone_name = item.name
-        select.action = "SELECT"
-        actions = row.row(align=True)
-        actions.alignment = "RIGHT"
-        ik = actions.operator("fbr.ik_settings", text="設定 IK")
+        if item.name in children:
+            icon = "TRIA_RIGHT" if (target.name, item.name) in _folded(settings) else "TRIA_DOWN"
+            toggle = name.operator("fbr.rig_bone", text="", icon=icon, emboss=False)
+            toggle.action, toggle.bone_name = "FOLD", item.name
+        elif item.name in parents:
+            name.label(text="", icon="BLANK1")
+        for index, bone in enumerate(pair):
+            visibility = bone if hasattr(bone, "hide") else bone.bone
+            eye = name.operator("fbr.rig_bone", text="", icon="HIDE_ON" if visibility.hide else "HIDE_OFF", emboss=False)
+            eye.bone_name, eye.action = bone.name, "VISIBILITY"
+            select = name.operator("fbr.rig_bone", text=bone.name, emboss=False)
+            select.bone_name, select.action = bone.name, "SELECT"
+            if index + 1 < len(pair):
+                name.label(text="/")
+        chosen = next((bone for bone in pair if bone.name == settings.rig_last_bone), item)
+        bindings = getattr(self, "_rig_bindings", None)
+        binding = (bindings if bindings is not None else rig_ik_bindings(target)).get(chosen.name)
+        linked = binding and binding[0].name != chosen.name
+        ik_text = "受 IK 連動" if linked else "IK 已存在" if binding else "設定 IK"
+        actions = columns.row(align=True).split(factor=0.31, align=True)
+        ik = actions.operator("fbr.ik_settings", text=ik_text, depress=bool(binding and not binding[2].mute and binding[2].influence))
         ik.file_index = -1
-        ik.bone_name = item.name
+        ik.bone_name = chosen.name
         ik.action = "START"
+        buttons = actions.split(factor=0.44, align=True)
+        rotation = rig_rotation_constraint(target.pose.bones.get(chosen.name))
         for action, text in (("TWIST", "設定 Twist"), ("ROTATION", "Copy Rotation")):
-            operator = actions.operator("fbr.rig_bone", text=text)
-            operator.bone_name = item.name
+            operator = buttons.operator("fbr.rig_bone", text=text, depress=bool(action == "ROTATION" and rotation and not rotation.mute and rotation.influence))
+            operator.bone_name = chosen.name
             operator.action = action
-        row.enabled = bool(target and target.data.is_editable)
+        columns.enabled = target.data.is_editable
 
 
 def _draw_rig_controls(layout, settings, target, rig_group, locked):
@@ -547,23 +678,28 @@ def _draw_rig_controls(layout, settings, target, rig_group, locked):
     data, property_name = (
         (target.data, "edit_bones") if target.mode == "EDIT" else (target.pose, "bones")
     )
+    header = body.row(align=True).split(factor=settings.rig_name_factor, align=True)
+    name_header = header.row(align=True)
+    name_header.label(text="骨頭名稱")
+    handle = name_header.row(align=True)
+    handle.alignment = "RIGHT"
+    _drag_handle(handle, settings, "rig_name_factor")
+    header.label(text="")
     body.template_list(
         "FBR_UL_rig_bones", target.name, data, property_name, settings, "rig_bone_index", rows=7,
     )
     if rig_group and rig_group.ik_editing:
         _draw_ik_settings(box, -1, rig_group)
         return
-    bone = target.pose.bones.get(settings.rig_rotation_bone)
-    constraint = bone.constraints.get(RIG_COPY_ROTATION) if bone else None
+    bone, constraint = rig_rotation_editor(settings, target)
     if not constraint or constraint.type != "COPY_ROTATION":
         return
     editor = body.box()
     editor.label(text=f"Copy Rotation · {bone.name}", icon="CONSTRAINT_BONE")
     target_row = editor.row(align=True)
-    target_row.prop_search(constraint, "subtarget", target.data, "bones", text="Target Bone")
-    clear = target_row.operator("fbr.rig_bone", text="", icon="X")
-    clear.bone_name = bone.name
-    clear.action = "CLEAR_TARGET"
+    target_row.prop(constraint, "target", text="Target Object")
+    if constraint.target and constraint.target.type == "ARMATURE":
+        editor.prop_search(constraint, "subtarget", constraint.target.data, "bones", text="Target Bone")
     for label, prefix in (("Axis", "use"), ("Invert", "invert")):
         row = editor.row(align=True)
         row.label(text=label)
@@ -573,6 +709,9 @@ def _draw_rig_controls(layout, settings, target, rig_group, locked):
     editor.prop(constraint, "target_space", text="Target")
     editor.prop(constraint, "owner_space", text="Owner")
     editor.prop(constraint, "influence", text="Influence", slider=True)
+    buttons = editor.row(align=True)
+    for action, label in (("CONFIRM", "確認"), ("CANCEL", "取消"), ("DELETE", "刪除")):
+        buttons.operator("fbr.rig_bone", text=label).action = action
 
 
 class FBR_UL_mappings(UIList):

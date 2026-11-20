@@ -55,6 +55,18 @@ assert rotation.subtarget == ""
 rotation.subtarget = "Thigh"
 assert bpy.ops.fbr.rig_bone(bone_name="Shin_Twist", action="ROTATION") == {"FINISHED"}
 assert rotation.subtarget == "Thigh" and len(rig.pose.bones["Shin_Twist"].constraints) == 1
+assert bpy.ops.fbr.rig_bone(action="CONFIRM") == {"FINISHED"}
+rotation.name = "Existing rotation"
+assert bpy.ops.fbr.rig_bone(bone_name="Shin_Twist", action="ROTATION") == {"FINISHED"}
+rotation.influence = 0.3
+assert bpy.ops.fbr.rig_bone(action="CANCEL") == {"FINISHED"}
+assert rotation.influence == 1.0
+assert bpy.ops.fbr.rig_bone(bone_name="Shin_Twist", action="ROTATION") == {"FINISHED"}
+assert bpy.ops.fbr.rig_bone(action="DELETE") == {"FINISHED"}
+assert not rig.pose.bones["Shin_Twist"].constraints
+assert bpy.ops.fbr.rig_bone(bone_name="Shin_Twist", action="ROTATION") == {"FINISHED"}
+assert bpy.ops.fbr.rig_bone(action="CANCEL") == {"FINISHED"}
+assert not rig.pose.bones["Shin_Twist"].constraints
 
 assert bpy.ops.fbr.ik_settings(file_index=-1, bone_name="Foot", action="START") == {"FINISHED"}
 group = settings.rig_controls[0]
@@ -65,7 +77,28 @@ assert bpy.ops.fbr.set_ik_shape(file_index=-1, mapping_index=group.active_mappin
 assert mapping.ik_shape == "CIRCLE"
 assert bpy.ops.fbr.ik_settings(file_index=-1, action="OK") == {"FINISHED"}
 assert not group.ik_editing and not settings.files
+assert addon.operators.rig_ik_bindings(rig)["Thigh"][0].name == "Foot"
+assert bpy.ops.fbr.ik_settings(file_index=-1, bone_name="Thigh", action="START") == {"FINISHED"}
+assert group.mappings[group.active_mapping_index].target_bone == "Foot"
+assert bpy.ops.fbr.ik_settings(file_index=-1, action="CANCEL") == {"FINISHED"}
 assert bpy.ops.fbr.ik_settings(file_index=-1, bone_name="Foot", action="START") == {"FINISHED"}
 assert bpy.ops.fbr.delete_ik(file_index=-1) == {"FINISHED"}
 assert not any(bone.get("_fbr_ik_control") for bone in rig.data.bones)
+
+signature = (
+    ("Hand.L", ""), ("Hand.R", ""),
+    ("Index01.L", "Hand.L"), ("Index02.L", "Index01.L"),
+    ("Index01.R", "Hand.R"), ("Index02.R", "Index01.R"),
+)
+representative, parents, children, ordered = addon.ui._rig_tree(signature)
+assert representative["Index02.R"] == "Index02.L"
+assert parents["Index02.L"] == "Index01.L" and children["Hand.L"] == ["Index01.L"]
+assert ordered[:3] == ["Hand.L", "Index01.L", "Index02.L"]
+bpy.ops.object.mode_set(mode="POSE")
+rig.data.bones.active = rig.data.bones["Foot"]
+addon.ui.sync_rig_bone_selection(settings, rig)
+assert rig.pose.bones[settings.rig_bone_index].name == "Foot"
+assert bpy.ops.fbr.rig_bone(bone_name="Foot", action="VISIBILITY") == {"FINISHED"}
+visibility = rig.pose.bones["Foot"]
+assert (visibility if hasattr(visibility, "hide") else visibility.bone).hide
 print("FBR_RIG_CONTROLS_OK")

@@ -503,6 +503,37 @@ def _ik_groups(settings):
         yield group
 
 
+def rig_ik_bindings(target):
+    """Resolve IK endpoints and upstream solver members for the rig list."""
+    bindings = {}
+    for owner in target.pose.bones:
+        for constraint in owner.constraints:
+            if constraint.type != "IK":
+                continue
+            control = target.pose.bones.get(constraint.subtarget) if constraint.target == target else None
+            endpoint = owner
+            if constraint.use_tail and control:
+                candidates = [
+                    child for child in owner.children
+                    if control.name == _ik_control_name("FBR_IK", child.name)
+                    or (child.bone.head_local - control.bone.head_local).length < 1e-5
+                ]
+                if candidates:
+                    endpoint = candidates[0]
+            pole = target.pose.bones.get(constraint.pole_subtarget) if constraint.pole_target == target else None
+            binding = (endpoint, owner, constraint, control, pole)
+            member = owner
+            count = 0
+            while member and (not constraint.chain_count or count < constraint.chain_count):
+                bindings.setdefault(member.name, binding)
+                member = member.parent
+                count += 1
+            previous = bindings.get(endpoint.name)
+            if not previous or previous[0] != endpoint or (previous[2].mute and not constraint.mute):
+                bindings[endpoint.name] = binding
+    return bindings
+
+
 def _ik_solver_bone_name(owner_obj, endpoint_name):
     endpoint = owner_obj.data.bones.get(endpoint_name)
     if endpoint and endpoint.parent and endpoint.parent.parent:
@@ -2305,6 +2336,7 @@ class FBR_OT_drag_column(Operator):
             "animation_action_factor", "animation_info_factor",
             "animation_mirror_fraction", "mapping_source_factor",
             "mapping_target_factor", "mapping_axis_factor",
+            "rig_name_factor",
         }:
             return {"CANCELLED"}
         self._start_x = event.mouse_x
@@ -2327,6 +2359,7 @@ class FBR_OT_drag_column(Operator):
                 "mapping_source_factor": (0.12, settings.mapping_target_factor - 0.12),
                 "mapping_target_factor": (settings.mapping_source_factor + 0.12, settings.mapping_axis_factor - 0.08),
                 "mapping_axis_factor": (settings.mapping_target_factor + 0.08, 0.88),
+                "rig_name_factor": (0.20, 0.68),
             }[self.property_name]
             value = self._start_value + (event.mouse_x - self._start_x) * 0.0006
             setattr(settings, self.property_name, max(minimum, min(maximum, value)))
@@ -2929,20 +2962,25 @@ class FBR_OT_ik_settings(Operator):
         settings = context.scene.fbr_settings
         source = _ik_settings_group(settings, self.file_index)
         mapping_index = self.mapping_index
+        rig_binding = None
         if self.file_index == -1 and self.action == "START":
             target = _target_object(settings)
             if not target or self.bone_name not in target.pose.bones or not target.data.is_editable:
                 return {"CANCELLED"}
             source = _rig_ik_group(settings, target, create=True)
+            if source.ik_editing:
+                return {"CANCELLED"}
+            rig_binding = rig_ik_bindings(target).get(self.bone_name)
+            endpoint_name = rig_binding[0].name if rig_binding else self.bone_name
             known = {item.target_bone for item in source.mappings}
             for bone in target.data.bones:
-                if bone.name in known or (bone.get("_fbr_ik_control") and bone.name != self.bone_name):
+                if bone.name in known or (bone.get("_fbr_ik_control") and bone.name != endpoint_name):
                     continue
                 item = source.mappings.add()
                 item.source_bone = bone.name
                 item.target_bone = bone.name
             mapping_index = next(
-                index for index, item in enumerate(source.mappings) if item.target_bone == self.bone_name
+                index for index, item in enumerate(source.mappings) if item.target_bone == endpoint_name
             )
         if source is None:
             return {"CANCELLED"}
@@ -2951,7 +2989,7 @@ class FBR_OT_ik_settings(Operator):
         if not 0 <= mapping_index < len(source.mappings):
             return {"CANCELLED"}
         mapping = source.mappings[mapping_index]
-        if self.action == "START" and not mapping.ik_enabled:
+        if self.action == "START" and self.file_index != -1 and not mapping.ik_enabled:
             target = _target_object(context.scene.fbr_settings)
             if target and mapping.target_bone:
                 try:
@@ -3008,7 +3046,9 @@ class FBR_OT_ik_settings(Operator):
             source.ik_existing_view = False
             owner_obj, endpoint_name = _ik_owner(context, mapping)
             existing = None
-            if owner_obj and endpoint_name and not mapping.ik_enabled:
+            if rig_binding and (not mapping.ik_enabled or not rig_binding[2].name.startswith(IK_CONSTRAINT_NAME)):
+                existing = rig_binding[1:]
+            elif self.file_index != -1 and owner_obj and endpoint_name and not mapping.ik_enabled:
                 try:
                     existing = _existing_ik_for_mapping(owner_obj, mapping)
                 except RuntimeError as exc:
@@ -3022,7 +3062,7 @@ class FBR_OT_ik_settings(Operator):
                 _IK_EDIT_STATE[source.uid]["existing"] = (
                     owner.name, constraint.name,
                     {prop: getattr(constraint, prop) for prop in (
-                        "subtarget", "pole_target", "pole_subtarget", "chain_count",
+                        "target", "subtarget", "pole_target", "pole_subtarget", "chain_count",
                         "iterations", "influence", "pole_angle", "use_tail",
                         "use_rotation", "use_stretch",
                     )},
@@ -3155,6 +3195,28 @@ class FBR_OT_delete_ik(Operator):
 
 
 RIG_COPY_ROTATION = "FBR Copy Rotation"
+_RIG_ROTATION_EDITS = {}
+_ROTATION_PROPERTIES = (
+    "target", "subtarget", "use_x", "use_y", "use_z", "invert_x", "invert_y",
+    "invert_z", "mix_mode", "target_space", "owner_space", "influence",
+)
+
+
+def rig_rotation_constraint(pose_bone):
+    if not pose_bone:
+        return None
+    preferred = pose_bone.constraints.get(RIG_COPY_ROTATION)
+    if preferred and preferred.type == "COPY_ROTATION":
+        return preferred
+    return next((constraint for constraint in pose_bone.constraints if constraint.type == "COPY_ROTATION"), None)
+
+
+def rig_rotation_editor(settings, target):
+    state = _RIG_ROTATION_EDITS.get((settings.as_pointer(), target.as_pointer()))
+    if not state or state[0] != target.as_pointer():
+        return None, None
+    bone = target.pose.bones.get(state[1])
+    return bone, bone.constraints.get(state[2]) if bone else None
 
 
 class FBR_OT_rig_bone(Operator):
@@ -3163,19 +3225,63 @@ class FBR_OT_rig_bone(Operator):
     bl_options = {"INTERNAL", "UNDO"}
 
     bone_name: StringProperty()
+    constraint_name: StringProperty()
     action: EnumProperty(items=(
         ("SELECT", "選取骨頭", ""),
         ("TWIST", "設定 Twist", ""),
         ("ROTATION", "Copy Rotation", ""),
         ("CLEAR_TARGET", "清除目標骨頭", ""),
+        ("VISIBILITY", "切換骨頭顯示", ""),
+        ("FOLD", "摺疊骨頭群組", ""),
+        ("CONFIRM", "確認", ""),
+        ("CANCEL", "取消", ""),
+        ("DELETE", "刪除", ""),
     ))
+
+    @classmethod
+    def description(cls, _context, properties):
+        if properties.action in {"SELECT", "TWIST", "ROTATION", "VISIBILITY"}:
+            return properties.bone_name
+        return ""
+
+    def invoke(self, context, event):
+        if self.action == "DELETE":
+            return context.window_manager.invoke_confirm(self, event)
+        if self.action == "ROTATION" and not self.constraint_name:
+            settings = context.scene.fbr_settings
+            target = _target_object(settings)
+            bone = target.pose.bones.get(self.bone_name) if target else None
+            names = [item.name for item in bone.constraints if item.type == "COPY_ROTATION"] if bone else []
+            if len(names) > 1 and not rig_rotation_editor(settings, target)[1]:
+                bone_name = bone.name
+
+                def draw_choices(menu, _context):
+                    for name in names:
+                        button = menu.layout.operator("fbr.rig_bone", text=name)
+                        button.action, button.bone_name, button.constraint_name = "ROTATION", bone_name, name
+
+                context.window_manager.popup_menu(draw_choices, title="Copy Rotation")
+                return {"FINISHED"}
+        return self.execute(context)
 
     def execute(self, context):
         settings = context.scene.fbr_settings
         target = _target_object(settings)
         if not target or not target.data.is_editable:
             return {"CANCELLED"}
-        if self.action != "SELECT" and self.bone_name not in target.data.bones:
+        if self.action == "FOLD":
+            from .ui import toggle_rig_group
+            toggle_rig_group(settings, target, self.bone_name)
+            return {"FINISHED"}
+        if self.action == "VISIBILITY":
+            bones = target.data.edit_bones if target.mode == "EDIT" else target.pose.bones
+            bone = bones.get(self.bone_name)
+            if not bone:
+                return {"CANCELLED"}
+            visibility = bone if hasattr(bone, "hide") else bone.bone
+            visibility.hide = not visibility.hide
+            return {"FINISHED"}
+        if self.action not in {"SELECT", "CONFIRM", "CANCEL", "DELETE"} and self.bone_name not in target.data.bones:
             return {"CANCELLED"}
 
         if self.action == "SELECT":
@@ -3198,7 +3304,8 @@ class FBR_OT_rig_bone(Operator):
                     selection = item if hasattr(item, "select") else item.bone
                     selection.select = item == bone
                 target.data.bones.active = bone.bone
-            settings.rig_bone_index = max(0, bones.find(self.bone_name))
+            from .ui import sync_rig_bone_selection
+            sync_rig_bone_selection(settings, target)
         elif self.action == "TWIST":
             _set_active_object_mode(context, target, "EDIT")
             bones = target.data.edit_bones
@@ -3217,14 +3324,37 @@ class FBR_OT_rig_bone(Operator):
             bpy.ops.object.mode_set(mode="POSE")
             return bpy.ops.fbr.rig_bone(bone_name=twist_name, action="SELECT")
         else:
-            bone = target.pose.bones[self.bone_name]
-            constraint = bone.constraints.get(RIG_COPY_ROTATION)
-            if self.action == "CLEAR_TARGET":
-                if constraint is None or constraint.type != "COPY_ROTATION":
+            key = (settings.as_pointer(), target.as_pointer())
+            if self.action != "ROTATION":
+                bone, constraint = rig_rotation_editor(settings, target)
+                if not constraint:
+                    _RIG_ROTATION_EDITS.pop(key, None)
                     return {"CANCELLED"}
-                constraint.subtarget = ""
+                if self.action == "CLEAR_TARGET":
+                    constraint.subtarget = ""
+                else:
+                    state = _RIG_ROTATION_EDITS.pop(key)
+                    if self.action == "DELETE" or (self.action == "CANCEL" and state[3] is None):
+                        bone.constraints.remove(constraint)
+                    elif self.action == "CANCEL":
+                        for prop, value in state[3].items():
+                            setattr(constraint, prop, value)
+                    settings.rig_rotation_bone = ""
             else:
-                if constraint is None or constraint.type != "COPY_ROTATION":
+                bone = target.pose.bones[self.bone_name]
+                constraint = bone.constraints.get(self.constraint_name) if self.constraint_name else rig_rotation_constraint(bone)
+                if constraint and constraint.type != "COPY_ROTATION":
+                    return {"CANCELLED"}
+                current_bone, current = rig_rotation_editor(settings, target)
+                if current:
+                    if current_bone == bone and current == constraint:
+                        return {"FINISHED"}
+                    self.report({"WARNING"}, "請先確認或取消目前的 Copy Rotation 編輯")
+                    return {"CANCELLED"}
+                backup = None
+                if constraint:
+                    backup = {prop: getattr(constraint, prop) for prop in _ROTATION_PROPERTIES}
+                else:
                     constraint = bone.constraints.new("COPY_ROTATION")
                     constraint.name = RIG_COPY_ROTATION
                     constraint.target = target
@@ -3236,6 +3366,7 @@ class FBR_OT_rig_bone(Operator):
                     constraint.target_space = constraint.owner_space = "LOCAL"
                     constraint.influence = 1.0
                 settings.rig_rotation_bone = bone.name
+                _RIG_ROTATION_EDITS[key] = (target.as_pointer(), bone.name, constraint.name, backup)
         _tag_view3d_redraw(context)
         return {"FINISHED"}
 

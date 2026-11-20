@@ -529,6 +529,10 @@ class FBR_Settings(PropertyGroup):
     rig_controls_expanded: BoolProperty(default=False)
     rig_controls: CollectionProperty(type=FBR_SourceFile)
     rig_bone_index: IntProperty(default=0, options={"SKIP_SAVE"})
+    rig_last_bone: StringProperty(options={"SKIP_SAVE"})
+    rig_last_object: StringProperty(options={"SKIP_SAVE"})
+    rig_folded_groups: StringProperty(default="[]")
+    rig_name_factor: FloatProperty(default=0.42, min=0.20, max=0.68)
     rig_rotation_bone: StringProperty(options={"SKIP_SAVE"})
     reused_expanded: BoolProperty(default=False)
     animation_info_factor: FloatProperty(
