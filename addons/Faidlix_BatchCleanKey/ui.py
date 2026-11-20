@@ -1,6 +1,7 @@
 """Action Editor UI. Enable the extension; use the Faidlix sidebar or Pose menu.
 Flip opens two immediate copy-only choices, dismissed after selection.
-Selected scene rigs populate the existing picker and Action list; picker changes enter Pose Mode.
+Enable Action 清單 in the 3D View sidebar to follow rig selection and manage Actions.
+Use 全部刪除 beside the list title to remove its editable Actions in one undo step.
 """
 import time
 import bpy
@@ -8,7 +9,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from . import core, automatic, mirror, looping
 
-ADDON_VERSION = '1.8.7'
+ADDON_VERSION = '1.8.8'
 _sync_signature = None
 _observed_active = None
 _refreshing = False
@@ -36,7 +37,9 @@ def activate_pose_rig(context,obj):
 
 
 def browser_changed(state, context):
-    if _refreshing or state.running or not 0 <= state.browser_index < len(state.browser):
+    if (_refreshing or not context.scene.faidlix_action_browser_enabled
+            or state.running or state.pending
+            or not 0 <= state.browser_index < len(state.browser)):
         return
     action = state.browser[state.browser_index].action
     obj = rig(context)
@@ -72,7 +75,7 @@ def target_changed(state,context):
     global _observed_active
     if not state.running and not state.pending:
         obj=state.target_armature
-        if obj and not bpy.app.background:
+        if obj and context.scene.faidlix_action_browser_enabled and not bpy.app.background:
             try:
                 if context.area and context.area.type=='VIEW_3D':
                     activate_pose_rig(context,obj)
@@ -95,7 +98,8 @@ def sync_selected_rig(context):
     """Follow active-object changes, retaining the last rig while a mesh is active."""
     global _observed_active
     state=context.window_manager.faidlix_batch_clean_key
-    if state.running or state.pending: return
+    if not context.scene.faidlix_action_browser_enabled or state.running or state.pending:
+        return
     active=context.view_layer.objects.active if context.view_layer else None
     pointer=active.as_pointer() if active else 0
     if pointer==_observed_active: return
@@ -105,6 +109,15 @@ def sync_selected_rig(context):
             state.target_armature=active
         else:
             target_changed(state,context)
+
+
+def browser_enabled_changed(scene, context):
+    global _observed_active
+    _observed_active = None
+    if scene.faidlix_action_browser_enabled:
+        sync_selected_rig(context)
+        refresh(context)
+    redraw(context)
 
 
 def rig_action(action,obj):
@@ -831,6 +844,52 @@ class BCK_OT_Delete(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class BCK_OT_DeleteAll(bpy.types.Operator):
+    bl_idname = 'faidlix_batch_clean_key.delete_all_actions'
+    bl_label = '全部刪除'
+    bl_description = '刪除目前骨架清單內的可編輯 Action，包含共用的 Action。可一次復原'
+    bl_options = {'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        state = context.window_manager.faidlix_batch_clean_key
+        return (context.scene.faidlix_action_browser_enabled and not state.running
+                and not state.pending and rig(context) is not None)
+
+    def scope(self, context):
+        obj = rig(context)
+        actions = [item.action for item in refresh(context).browser
+                   if item.action and item.action.is_editable]
+        return obj, actions
+
+    def invoke(self, context, event):
+        obj, actions = self.scope(context)
+        if not actions:
+            self.report({'INFO'}, '清單沒有可刪除的 Action')
+            return {'CANCELLED'}
+        self.confirmed_scope = (obj.session_uid, {action.session_uid for action in actions})
+        self.confirmation = f'刪除「{obj.name}」清單中的 {len(actions)} 個 Action？'
+        return context.window_manager.invoke_props_dialog(self, width=400, confirm_text='全部刪除')
+
+    def draw(self, context):
+        self.layout.label(text=self.confirmation)
+        self.layout.label(text='共用的 Action 也會解除連結，可用 Ctrl+Z 復原。')
+
+    def execute(self, context):
+        obj, actions = self.scope(context)
+        if not actions:
+            return {'CANCELLED'}
+        current_scope = (obj.session_uid, {action.session_uid for action in actions})
+        if getattr(self, 'confirmed_scope', current_scope) != current_scope:
+            self.report({'WARNING'}, 'Action 清單已變更，請重新確認刪除範圍')
+            return {'CANCELLED'}
+        bpy.data.batch_remove(ids=actions)
+        refresh(context, reset=True)
+        redraw(context)
+        self.report({'INFO'}, f'已刪除 {len(actions)} 個 Action，可用 Ctrl+Z 復原')
+        return {'FINISHED'}
+
+
 class BCK_OT_Duplicate(bpy.types.Operator):
     bl_idname = 'faidlix_batch_clean_key.duplicate'
     bl_label = '複製 Action'
@@ -955,12 +1014,24 @@ class _Panel:
         col.enabled = not state.running and not state.pending
         col.prop(state,'target_armature',text='目前骨架')
         if self.bl_space_type == 'VIEW_3D':
+            enabled = context.scene.faidlix_action_browser_enabled
             row = col.row(align=True)
-            row.enabled = bool(rig(context))
+            row.enabled = enabled and bool(rig(context))
             row.operator('faidlix_batch_clean_key.new', icon='ADD')
             row.operator('faidlix_batch_clean_key.combine', text='組合 Action', icon='NLA')
-            if fold(col, state, 'show_browser', f'Action 清單（{len(state.browser)}）'):
-                col.template_list('BCK_UL_Browser', '', state, 'browser', state, 'browser_index', rows=8, maxrows=8)
+            header = col.row(align=True)
+            header.prop(context.scene, 'faidlix_action_browser_enabled', text='', toggle=True,
+                        icon='CHECKBOX_HLT' if enabled else 'CHECKBOX_DEHLT')
+            header.prop(state, 'show_browser', text=f'Action 清單（{len(state.browser)}）',
+                        emboss=False, icon='TRIA_DOWN' if state.show_browser else 'TRIA_RIGHT')
+            delete = header.row(align=True)
+            delete.enabled = enabled and any(item.action and item.action.is_editable for item in state.browser)
+            delete.operator_context = 'INVOKE_DEFAULT'
+            delete.operator(BCK_OT_DeleteAll.bl_idname, icon='TRASH')
+            if state.show_browser:
+                browser = col.column()
+                browser.enabled = enabled
+                browser.template_list('BCK_UL_Browser', '', state, 'browser', state, 'browser_index', rows=8, maxrows=8)
         obj=rig(context)
         col.label(text=f'目前選取骨骼：{sum(b.select for b in obj.pose.bones) if obj else 0}')
         col.operator('faidlix_batch_clean_key.batch', text='批次處理 Action Keys', icon='ACTION')
@@ -1002,7 +1073,7 @@ class BCK_PT_Graph(_Panel, bpy.types.Panel):
 
 CLASSES = (BCK_PG_Action, BCK_PG_Bone, BCK_PG_State, BCK_OT_Select, BCK_OT_SelectAll, BCK_OT_BonesAll,
            BCK_UL_Bones, BCK_UL_Actions, BCK_UL_Browser, BCK_OT_Batch, BCK_OT_Run,
-           BCK_OT_Switch, BCK_OT_New, BCK_OT_Delete, BCK_OT_Duplicate, BCK_OT_Flip,
+           BCK_OT_Switch, BCK_OT_New, BCK_OT_Delete, BCK_OT_DeleteAll, BCK_OT_Duplicate, BCK_OT_Flip,
            BCK_OT_Ranges, BCK_OT_Rotation, BCK_OT_Loop, BCK_OT_Cancel, BCK_PT_View3D, BCK_PT_DopeSheet, BCK_PT_Graph)
 
 
@@ -1012,6 +1083,9 @@ def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.WindowManager.faidlix_batch_clean_key = PointerProperty(type=BCK_PG_State)
+    bpy.types.Scene.faidlix_action_browser_enabled = BoolProperty(
+        name='啟用 Action 清單', default=False, update=browser_enabled_changed,
+        description='啟用 Action 清單操作、自動追蹤骨架與進入 Pose Mode')
     bpy.app.timers.register(sync_timer, first_interval=0.1, persistent=True)
 
 
@@ -1019,5 +1093,6 @@ def unregister():
     if bpy.app.timers.is_registered(sync_timer):
         bpy.app.timers.unregister(sync_timer)
     del bpy.types.WindowManager.faidlix_batch_clean_key
+    del bpy.types.Scene.faidlix_action_browser_enabled
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)
