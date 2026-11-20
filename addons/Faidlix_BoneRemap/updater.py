@@ -11,7 +11,7 @@ from bpy.types import Operator
 
 
 PACKAGE_ID = "faidlix_bone_remap"
-ADDON_VERSION = (0, 6, 21)
+ADDON_VERSION = (0, 6, 22)
 GITHUB_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/Faidlix/BlenderAddons/main/repository/index.json"
 )

@@ -62,7 +62,7 @@ def _restore_ik_selection(context, source_uid):
     if state is None:
         return
     active_pointer, original_mode, selected_pointers = state
-    objects = {obj.as_pointer(): obj for obj in context.view_layer.objects}
+    objects = {obj.as_pointer(): obj for obj in context.view_layer.objects if obj}
     active = objects.get(active_pointer)
     current = context.view_layer.objects.active
     if current and current.mode != "OBJECT":
@@ -1109,10 +1109,152 @@ def _move_ik_pole_to_length(context, mapping):
         pole.matrix = matrix
 
 
+_IK_APPEARANCE = (
+    "ik_shape", "ik_shape_scale", "ik_shape_wire_width", "ik_shape_color",
+    "ik_pole_length", "ik_pole_size_ratio", "ik_use_pole",
+)
+
+
+def existing_ik_editor(target, source):
+    backup = _IK_EDIT_STATE.get(source.uid, {}).get("existing")
+    owner = target.pose.bones.get(backup[0]) if target and backup else None
+    return owner, owner.constraints.get(backup[1]) if owner else None
+
+
+def _controller_snapshot(bone):
+    props = ("custom_shape", "custom_shape_scale_xyz", "custom_shape_wire_width",
+             "use_custom_shape_bone_size")
+    values = {prop: getattr(bone, prop) for prop in props}
+    values["custom_shape_scale_xyz"] = tuple(values["custom_shape_scale_xyz"])
+    colors = [
+        (item.color.palette, *(tuple(getattr(item.color.custom, prop))
+                              for prop in ("normal", "select", "active")))
+        for item in (bone.bone, bone)
+    ]
+    return values, colors, bone.matrix_basis.copy()
+
+
+def _open_existing_ik_controls(context, target, source, mapping):
+    global _IK_UPDATE_GUARD
+    owner, constraint = existing_ik_editor(target, source)
+    if not constraint or constraint.target != target:
+        return False
+    control = target.pose.bones.get(constraint.subtarget)
+    if not control or (constraint.pole_target and constraint.pole_target != target):
+        return False
+    pole = target.pose.bones.get(constraint.pole_subtarget) if constraint.pole_target else None
+    if pole == control or (constraint.pole_target and not pole):
+        return False
+    state = _IK_EDIT_STATE[source.uid]
+    if "appearance" in state:
+        return True
+    scale = control.custom_shape_scale_xyz.x
+    color = control.color if control.color.palette == "CUSTOM" else control.bone.color
+    shape = control.custom_shape
+    recognized_shape = next((kind for kind in ("BOX", "SPHERE", "CIRCLE", "SQUARE")
+                             if shape and shape.get("_fbr_ik_shape")
+                             and shape.name == f"FBR_IK_SHAPE_{kind}"), None)
+    delta = pole.head - owner.head if pole else None
+    distance = delta.length if delta is not None else 0.0
+    pole_unit = max(owner.bone.length, 1e-6)
+    _IK_UPDATE_GUARD = True
+    try:
+        mapping.ik_shape = recognized_shape or "BOX"
+        mapping.ik_shape_scale = abs(scale)
+        mapping.ik_shape_wire_width = control.custom_shape_wire_width
+        if color.palette == "CUSTOM":
+            mapping.ik_shape_color = color.custom.normal
+        mapping.ik_use_pole = bool(pole)
+        if pole:
+            mapping.ik_pole_length = distance / pole_unit
+            mapping.ik_pole_size_ratio = abs(pole.custom_shape_scale_xyz.x) / max(abs(scale), 1e-6)
+    finally:
+        _IK_UPDATE_GUARD = False
+    state["appearance"] = {
+        "mapping": mapping.as_pointer(), "target": target, "control": control.name,
+        "pole": pole.name if pole else "", "shape": recognized_shape,
+        "original": {bone.name: _controller_snapshot(bone) for bone in (control, pole) if bone},
+        "show_colors": target.data.show_bone_colors,
+        "direction": delta.normalized() if distance > 1e-6 else target.matrix_world.to_3x3().inverted_safe() @ Vector((0, -1, 0)),
+        "pole_origin": owner.head.copy(), "pole_unit": pole_unit,
+        "previous": _ik_appearance_values(mapping), "pole_moved": False,
+    }
+    _tag_view3d_redraw(context)
+    return True
+
+
+def _ik_appearance_values(mapping):
+    return {prop: tuple(mapping.ik_shape_color) if prop == "ik_shape_color" else getattr(mapping, prop)
+            for prop in _IK_APPEARANCE}
+
+
+def _apply_existing_ik_controls(context, source, mapping, state, force_shape=False):
+    target = state["target"]
+    _owner, constraint = existing_ik_editor(target, source)
+    if not constraint:
+        return
+    values = _ik_appearance_values(mapping)
+    changed = {prop for prop in values if values[prop] != state["previous"][prop]}
+    for name, is_pole in ((state["control"], False), (state["pole"], True)):
+        bone = target.pose.bones.get(name)
+        if not bone:
+            continue
+        if force_shape or "ik_shape" in changed:
+            bone.custom_shape = _ik_shape_object(mapping.ik_shape)
+            state["shape"] = mapping.ik_shape
+        if "ik_shape_scale" in changed or (is_pole and "ik_pole_size_ratio" in changed):
+            scale = mapping.ik_shape_scale * (mapping.ik_pole_size_ratio if is_pole else 1.0)
+            bone.custom_shape_scale_xyz = (scale,) * 3
+        if "ik_shape_wire_width" in changed:
+            bone.custom_shape_wire_width = mapping.ik_shape_wire_width
+        if "ik_shape_color" in changed:
+            target.data.show_bone_colors = True
+            for item in (bone.bone, bone):
+                item.color.palette = "CUSTOM"
+                item.color.custom.normal = mapping.ik_shape_color
+                item.color.custom.select = tuple(min(1, v * 1.15 + 0.08) for v in mapping.ik_shape_color)
+                item.color.custom.active = tuple(min(1, v * 1.30 + 0.12) for v in mapping.ik_shape_color)
+        if is_pole and "ik_use_pole" in changed:
+            constraint.pole_target = target if mapping.ik_use_pole else None
+            constraint.pole_subtarget = name if mapping.ik_use_pole else ""
+        if is_pole and "ik_pole_length" in changed:
+            matrix = bone.matrix.copy()
+            matrix.translation = state["pole_origin"] + state["direction"] * state["pole_unit"] * mapping.ik_pole_length
+            bone.matrix = matrix
+            state["pole_moved"] = True
+    state["previous"] = values
+    context.view_layer.update()
+    _tag_view3d_redraw(context)
+
+
+def _restore_existing_ik_controls(state):
+    target = state["target"]
+    target.data.show_bone_colors = state["show_colors"]
+    for name, (values, colors, basis) in state["original"].items():
+        bone = target.pose.bones.get(name)
+        if not bone:
+            continue
+        for prop, value in values.items():
+            setattr(bone, prop, value)
+        for item, (palette, normal, selected, active) in zip((bone.bone, bone), colors):
+            item.color.palette = palette
+            item.color.custom.normal = normal
+            item.color.custom.select = selected
+            item.color.custom.active = active
+        if name == state["pole"] and state["pole_moved"]:
+            bone.matrix_basis = basis
+
+
 def _update_ik_preview(context, changed_mapping=None, move_pole=False):
     global _IK_UPDATE_GUARD
     if _IK_UPDATE_GUARD or changed_mapping is None:
         return
+    settings = context.scene.fbr_settings
+    for source in _ik_groups(settings):
+        appearance = _IK_EDIT_STATE.get(source.uid, {}).get("appearance")
+        if appearance and appearance["mapping"] == changed_mapping.as_pointer():
+            _apply_existing_ik_controls(context, source, changed_mapping, appearance)
+            return
     if not changed_mapping.ik_enabled:
         return
     _IK_UPDATE_GUARD = True
@@ -2892,7 +3034,12 @@ class FBR_OT_set_ik_shape(Operator):
         mappings = source.mappings
         if not (0 <= self.mapping_index < len(mappings)):
             return {"CANCELLED"}
-        mappings[self.mapping_index].ik_shape = self.shape
+        mapping = mappings[self.mapping_index]
+        appearance = _IK_EDIT_STATE.get(source.uid, {}).get("appearance")
+        if appearance and mapping.ik_shape == self.shape and appearance["shape"] != self.shape:
+            _apply_existing_ik_controls(context, source, mapping, appearance, force_shape=True)
+        else:
+            mapping.ik_shape = self.shape
         return {"FINISHED"}
 
 
@@ -2907,6 +3054,7 @@ class FBR_OT_ik_settings(Operator):
     action: EnumProperty(
         items=(
             ("START", "設定 IK", "進入 IK 設定模式"),
+            ("CONTROLS", "切換至控制器設定", "使用現有約束、控制骨與 Pole 編輯外觀"),
             ("RESET", "刪除 IK", "刪除 IK Constraint 與控制骨"),
             ("CANCEL", "取消", "恢復進入設定前的狀態"),
             ("OK", "確認", "保留目前 IK 設定"),
@@ -2989,6 +3137,12 @@ class FBR_OT_ik_settings(Operator):
         if not 0 <= mapping_index < len(source.mappings):
             return {"CANCELLED"}
         mapping = source.mappings[mapping_index]
+        if self.action == "CONTROLS":
+            target = _target_object(settings)
+            if not source.ik_existing_view or not _open_existing_ik_controls(context, target, source, mapping):
+                self.report({"WARNING"}, "控制骨與已指定的 Pole 必須有效且位於同一骨架")
+                return {"CANCELLED"}
+            return {"FINISHED"}
         if self.action == "START" and self.file_index != -1 and not mapping.ik_enabled:
             target = _target_object(context.scene.fbr_settings)
             if target and mapping.target_bone:
@@ -3046,7 +3200,7 @@ class FBR_OT_ik_settings(Operator):
             source.ik_existing_view = False
             owner_obj, endpoint_name = _ik_owner(context, mapping)
             existing = None
-            if rig_binding and (not mapping.ik_enabled or not rig_binding[2].name.startswith(IK_CONSTRAINT_NAME)):
+            if rig_binding:
                 existing = rig_binding[1:]
             elif self.file_index != -1 and owner_obj and endpoint_name and not mapping.ik_enabled:
                 try:
@@ -3090,7 +3244,8 @@ class FBR_OT_ik_settings(Operator):
                 _delete_ik_mapping(context, pair)
         elif self.action == "CANCEL":
             if source.ik_existing_view:
-                backup = _IK_EDIT_STATE.get(source.uid, {}).get("existing")
+                state = _IK_EDIT_STATE.get(source.uid, {})
+                backup = state.get("existing")
                 if backup:
                     owner_name, constraint_name, values = backup
                     target = _target_object(context.scene.fbr_settings)
@@ -3099,6 +3254,18 @@ class FBR_OT_ik_settings(Operator):
                     if constraint:
                         for prop, value in values.items():
                             setattr(constraint, prop, value)
+                appearance = state.get("appearance")
+                if appearance:
+                    _restore_existing_ik_controls(appearance)
+                    _cleanup_unused_ik_shapes()
+                _IK_EDIT_STATE.pop(source.uid, None)
+                source.ik_editing = False
+                source.ik_existing_view = False
+                context.view_layer.update()
+                _restore_ik_selection(context, source.uid)
+                context.view_layer.update()
+                _tag_view3d_redraw(context)
+                return {"FINISHED"}
             elif self.file_index != -1:
                 _delete_ik_mapping(context, mapping)
                 if pair:
@@ -3123,9 +3290,9 @@ class FBR_OT_ik_settings(Operator):
             source.ik_existing_view = False
             _restore_ik_selection(context, source.uid)
         elif self.action == "OK":
-            if mapping.ik_enabled:
+            if mapping.ik_enabled and not source.ik_existing_view:
                 _sync_ik_mapping(context, mapping)
-            if pair and pair.ik_enabled:
+            if pair and pair.ik_enabled and not source.ik_existing_view:
                 _sync_ik_mapping(context, pair)
             _IK_EDIT_STATE.pop(source.uid, None)
             source.ik_editing = False
@@ -3156,14 +3323,16 @@ class FBR_OT_delete_ik(Operator):
             return {"CANCELLED"}
         mapping = source.mappings[index]
         if source.ik_existing_view:
+            state = _IK_EDIT_STATE.get(source.uid, {})
+            appearance = state.pop("appearance", None)
             target = _target_object(context.scene.fbr_settings)
-            backup = _IK_EDIT_STATE.get(source.uid, {}).get("existing")
+            backup = state.get("existing")
             owner = target.pose.bones.get(backup[0]) if target and backup else None
             constraint = owner.constraints.get(backup[1]) if owner else None
             if constraint:
                 if constraint.name.startswith(IK_CONSTRAINT_NAME):
                     control = target.pose.bones.get(constraint.subtarget)
-                    pole = target.pose.bones.get(constraint.pole_subtarget)
+                    pole = target.pose.bones.get(appearance["pole"] if appearance else constraint.pole_subtarget)
                     mapping.ik_enabled = True
                     mapping.ik_control_bone = control.name if control else ""
                     mapping.ik_pole_bone = pole.name if pole else ""

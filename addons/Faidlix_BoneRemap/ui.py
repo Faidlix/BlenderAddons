@@ -17,13 +17,14 @@ from .operators import (
     _object_actions,
     _rig_ik_group,
     rig_ik_bindings,
+    existing_ik_editor,
     rig_rotation_constraint,
     rig_rotation_editor,
 )
 from .retarget import existing_ik_for_row, mapping_source, source_has_ik
 
 
-ADDON_VERSION = (0, 6, 21)
+ADDON_VERSION = (0, 6, 22)
 
 
 def _source_file_index(settings, source_file):
@@ -427,13 +428,18 @@ def _draw_ik_settings(layout, file_index, source_file):
     editor = layout.box()
     title = active.target_bone if file_index == -1 else f"{active.source_bone} → {active.target_bone}"
     editor.label(text=f"IK 設定：{title}", icon="CONSTRAINT_BONE")
+    appearance_state = _IK_EDIT_STATE.get(source_file.uid, {}).get("appearance")
+    constraint = None
     if source_file.ik_existing_view:
         target = bpy.data.objects.get(bpy.context.scene.fbr_settings.target_armature)
-        backup = _IK_EDIT_STATE.get(source_file.uid, {}).get("existing")
-        owner = target.pose.bones.get(backup[0]) if target and backup else None
-        constraint = owner.constraints.get(backup[1]) if owner else None
+        owner, constraint = existing_ik_editor(target, source_file)
+    if source_file.ik_existing_view and (not appearance_state or not constraint):
         if constraint:
             editor.label(text=f"現有 IK：{owner.name} / {constraint.name}")
+            switch = editor.operator("fbr.ik_settings", text="切換至控制器設定", icon="BONE_DATA")
+            switch.file_index = file_index
+            switch.mapping_index = source_file.active_mapping_index
+            switch.action = "CONTROLS"
             editor.prop(constraint, "target", text="控制骨架")
             if constraint.target and constraint.target.type == "ARMATURE":
                 editor.prop_search(constraint, "subtarget", constraint.target.data, "bones", text="控制骨")
@@ -468,14 +474,15 @@ def _draw_ik_settings(layout, file_index, source_file):
             close.mapping_index = source_file.active_mapping_index
             close.action = "OK"
         return
-    if active.ik_enabled:
+    if active.ik_enabled or appearance_state:
+        displayed_shape = appearance_state["shape"] if appearance_state else active.ik_shape
         for choices in (("BOX", "SPHERE"), ("CIRCLE", "SQUARE")):
             shape_row = editor.row(align=True)
             for shape_id in choices:
                 label = {"BOX": "方盒線框", "SPHERE": "球形", "CIRCLE": "圓圈", "SQUARE": "方形"}[shape_id]
                 button = shape_row.operator(
                     "fbr.set_ik_shape", text=label,
-                    depress=active.ik_shape == shape_id,
+                    depress=displayed_shape == shape_id,
                 )
                 button.file_index = file_index
                 button.mapping_index = source_file.active_mapping_index
@@ -486,14 +493,16 @@ def _draw_ik_settings(layout, file_index, source_file):
         appearance = editor.row(align=True)
         appearance.prop(active, "ik_shape_color", text="顏色")
         solver = editor.row(align=True)
-        solver.prop(active, "ik_chain_count")
-        solver.prop(active, "ik_iterations")
-        solver.prop(active, "ik_influence")
+        solver.prop(constraint or active, "chain_count" if constraint else "ik_chain_count", text="關聯骨頭數")
+        solver.prop(constraint or active, "iterations" if constraint else "ik_iterations", text="迭代次數")
+        solver.prop(constraint or active, "influence" if constraint else "ik_influence", text="影響")
         options = editor.row(align=True)
-        options.prop(active, "ik_use_tail", toggle=True)
-        options.prop(active, "ik_use_pole", toggle=True)
-        options.prop(active, "ik_use_rotation", toggle=True)
-        options.prop(active, "ik_use_stretch", toggle=True)
+        options.prop(constraint or active, "use_tail" if constraint else "ik_use_tail", text="使用骨尾", toggle=True)
+        pole_toggle = options.row(align=True)
+        pole_toggle.enabled = not appearance_state or bool(appearance_state["pole"])
+        pole_toggle.prop(active, "ik_use_pole", toggle=True)
+        options.prop(constraint or active, "use_rotation" if constraint else "ik_use_rotation", text="使用旋轉", toggle=True)
+        options.prop(constraint or active, "use_stretch" if constraint else "ik_use_stretch", text="允許拉伸", toggle=True)
         if active.ik_use_pole:
             pole = editor.row(align=True)
             pole.prop(active, "ik_pole_length")
@@ -652,7 +661,7 @@ class FBR_UL_rig_bones(UIList):
         linked = binding and binding[0].name != chosen.name
         ik_text = "受 IK 連動" if linked else "IK 已存在" if binding else "設定 IK"
         actions = columns.row(align=True).split(factor=0.31, align=True)
-        ik = actions.operator("fbr.ik_settings", text=ik_text, depress=bool(binding and not binding[2].mute and binding[2].influence))
+        ik = actions.operator("fbr.ik_settings", text=ik_text, depress=bool(binding))
         ik.file_index = -1
         ik.bone_name = chosen.name
         ik.action = "START"

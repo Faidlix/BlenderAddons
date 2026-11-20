@@ -78,9 +78,38 @@ assert mapping.ik_shape == "CIRCLE"
 assert bpy.ops.fbr.ik_settings(file_index=-1, action="OK") == {"FINISHED"}
 assert not group.ik_editing and not settings.files
 assert addon.operators.rig_ik_bindings(rig)["Thigh"][0].name == "Foot"
+owner = rig.pose.bones["Shin"]
+ik = next(item for item in owner.constraints if item.type == "IK")
+original_name = ik.name
+ik.name = "Existing IK"
+ik.pole_angle = 0.37
 assert bpy.ops.fbr.ik_settings(file_index=-1, bone_name="Thigh", action="START") == {"FINISHED"}
 assert group.mappings[group.active_mapping_index].target_bone == "Foot"
+assert group.ik_existing_view
+assert addon.operators.existing_ik_editor(rig, group) == (owner, ik)
+control = rig.pose.bones[ik.subtarget]
+pole = rig.pose.bones[ik.pole_subtarget]
+original_target = ik.subtarget
+original_pole = ik.pole_subtarget
+original_shape = control.custom_shape
+original_scale = tuple(control.custom_shape_scale_xyz)
+bpy.context.view_layer.update()
+pose_before = owner.matrix.copy()
+assert bpy.ops.fbr.ik_settings(file_index=-1, action="CONTROLS") == {"FINISHED"}
+assert owner.matrix == pose_before and abs(ik.pole_angle - 0.37) < 1e-6
+assert bpy.ops.fbr.set_ik_shape(file_index=-1, mapping_index=group.active_mapping_index, shape="SQUARE") == {"FINISHED"}
+assert control.custom_shape != original_shape
+mapping.ik_shape_scale = 0.2
+mapping.ik_shape_color = (0.3, 0.5, 0.7)
+mapping.ik_pole_length *= 0.8
+mapping.ik_use_pole = False
+assert ik.pole_target is None and pole.name in rig.pose.bones
+mapping.ik_use_pole = True
+assert ik.pole_target == rig and ik.pole_subtarget == original_pole
 assert bpy.ops.fbr.ik_settings(file_index=-1, action="CANCEL") == {"FINISHED"}
+assert ik.subtarget == original_target and ik.pole_subtarget == original_pole
+assert control.custom_shape == original_shape and tuple(control.custom_shape_scale_xyz) == original_scale
+ik.name = original_name
 assert bpy.ops.fbr.ik_settings(file_index=-1, bone_name="Foot", action="START") == {"FINISHED"}
 assert bpy.ops.fbr.delete_ik(file_index=-1) == {"FINISHED"}
 assert not any(bone.get("_fbr_ik_control") for bone in rig.data.bones)
